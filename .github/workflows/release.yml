@@ -179,6 +179,7 @@ jobs:
       - name: Publish CLI to npm
         run: |
           pnpm install --frozen-lockfile
+          pnpm --filter @chvor/shared build
           cd packages/cli
           pnpm build
           npm publish --access public
