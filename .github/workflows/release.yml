@@ -84,13 +84,22 @@ jobs:
           pnpm install --prod --frozen-lockfile --ignore-scripts
           cd -
 
+          # Cross-platform sha256
+          hash_file() {
+            if command -v sha256sum &> /dev/null; then
+              sha256sum "$1" > "$1.sha256"
+            else
+              shasum -a 256 "$1" > "$1.sha256"
+            fi
+          }
+
           # Create archive
           if [ "${{ matrix.target_os }}" = "win" ]; then
             cd staging && 7z a -tzip "../${NAME}.zip" "${NAME}" && cd ..
-            sha256sum "${NAME}.zip" > "${NAME}.zip.sha256"
+            hash_file "${NAME}.zip"
           else
             tar -czf "${NAME}.tar.gz" -C staging "${NAME}"
-            sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+            hash_file "${NAME}.tar.gz"
           fi
 
       - name: Upload artifact
