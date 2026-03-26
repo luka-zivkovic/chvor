@@ -15,6 +15,7 @@ env:
 jobs:
   build-tarball:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - runner: ubuntu-latest
@@ -141,6 +142,7 @@ jobs:
 
   release:
     needs: [build-tarball]
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
