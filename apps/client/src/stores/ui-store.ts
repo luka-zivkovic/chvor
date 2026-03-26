@@ -1,0 +1,49 @@
+import { create } from "zustand";
+
+export type PanelId = "brain" | "persona" | "memory" | "knowledge" | "schedules" | "webhooks" | "settings" | "skills" | "skill-detail" | "tools" | "tool-detail" | "integration-detail" | "conversations" | "activity" | "emotion-history";
+export type BrainTab = "overview" | "models" | "persona" | "memory";
+export type LayoutMode = "default" | "canvas-expanded" | "canvas";
+
+interface UIState {
+  activePanel: PanelId | null;
+  brainTab: BrainTab;
+  layoutMode: LayoutMode;
+  chatCollapsed: boolean;
+  /** Node ID for detail panels (skill-detail, integration-detail) */
+  detailNodeId: string | null;
+  openPanel: (panel: PanelId) => void;
+  closePanel: () => void;
+  togglePanel: (panel: PanelId) => void;
+  openNodeDetail: (panel: PanelId, nodeId: string) => void;
+  setBrainTab: (tab: BrainTab) => void;
+  setLayoutMode: (mode: LayoutMode) => void;
+  toggleCanvasExpand: () => void;
+  toggleChat: () => void;
+  openCanvas: () => void;
+  exitCanvas: () => void;
+}
+
+export const useUIStore = create<UIState>((set, get) => ({
+  activePanel: null,
+  brainTab: "overview",
+  layoutMode: "default",
+  chatCollapsed: false,
+  detailNodeId: null,
+  openPanel: (panel) => set({ activePanel: panel, detailNodeId: null }),
+  closePanel: () => set({ activePanel: null, detailNodeId: null }),
+  togglePanel: (panel) =>
+    set({ activePanel: get().activePanel === panel ? null : panel, detailNodeId: null }),
+  openNodeDetail: (panel, nodeId) => set({ activePanel: panel, detailNodeId: nodeId }),
+  setBrainTab: (tab) => set({ brainTab: tab }),
+  setLayoutMode: (mode) => set({ layoutMode: mode }),
+  toggleCanvasExpand: () => {
+    const expanding = get().layoutMode !== "canvas-expanded";
+    set({
+      layoutMode: expanding ? "canvas-expanded" : "default",
+      activePanel: expanding ? null : get().activePanel,
+    });
+  },
+  toggleChat: () => set({ chatCollapsed: !get().chatCollapsed }),
+  openCanvas: () => set({ layoutMode: "canvas", activePanel: null }),
+  exitCanvas: () => set({ layoutMode: "default" }),
+}));

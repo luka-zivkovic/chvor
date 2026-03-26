@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.turbo/
+*.tsbuildinfo
+.vite/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+data/.encryption-key
+apps/server/data/.encryption-key
+*.tmp
+data/clearbox.db
+data/clearbox.db-shm
+data/clearbox.db-wal
+data/chvor.db
+data/chvor.db-shm
+data/chvor.db-wal
+data/models/
+data/whatsapp-auth/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+pnpm-debug.log*
+npm-debug.log*
+
+# AI tooling
+.claude/
+.ai/
+jean.json
+
+# Worktrees
+.worktrees/
+
+# npm lockfile (project uses pnpm)
+package-lock.json
+
+# Test coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# Internal docs (prevent re-adding)
+issues/
+
+# Rust / Tauri build artifacts
+apps/desktop/src-tauri/target/
+apps/desktop/dist/

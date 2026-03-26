@@ -1,0 +1,59 @@
+{
+  "name": "@chvor/server",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE.md",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "postinstall": "npx playwright install chromium",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1",
+    "@ai-sdk/google": "^1",
+    "@ai-sdk/openai": "^1",
+    "@browserbasehq/stagehand": "^2",
+    "@chvor/pc-agent": "workspace:*",
+    "@chvor/shared": "workspace:*",
+    "@hono/node-server": "^1",
+    "@hono/node-ws": "^1",
+    "@huggingface/transformers": "^3",
+    "@modelcontextprotocol/sdk": "^1",
+    "@slack/bolt": "^4.6.0",
+    "@whiskeysockets/baileys": "7.0.0-rc.9",
+    "adm-zip": "^0.5.16",
+    "ai": "^4",
+    "archiver": "^7",
+    "argon2": "^0.41",
+    "better-sqlite3": "^11",
+    "cron-parser": "^4",
+    "discord.js": "^14.25.1",
+    "grammy": "^1",
+    "gray-matter": "^4",
+    "hono": "^4",
+    "matrix-js-sdk": "^41.1.0",
+    "node-edge-tts": "^1",
+    "pdf-parse": "^2.4.5",
+    "pino": "^9",
+    "qrcode": "^1",
+    "sqlite-vec": "^0.1",
+    "yaml": "^2",
+    "yauzl": "^3"
+  },
+  "optionalDependencies": {
+    "onnxruntime-node": "^1.17"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/archiver": "^6",
+    "@types/better-sqlite3": "^7",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/qrcode": "^1",
+    "@types/yauzl": "^2",
+    "tsx": "^4",
+    "typescript": "^5.7"
+  }
+}

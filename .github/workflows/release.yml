@@ -1,0 +1,170 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-tarball:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target_os: linux
+            target_arch: x64
+          - runner: ubuntu-24.04-arm64
+            target_os: linux
+            target_arch: arm64
+          - runner: macos-13
+            target_os: darwin
+            target_arch: x64
+          - runner: macos-14
+            target_os: darwin
+            target_arch: arm64
+          - runner: windows-latest
+            target_os: win
+            target_arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build client
+        run: pnpm --filter @chvor/client build
+
+      - name: Assemble tarball
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NAME="chvor-v${VERSION}-${{ matrix.target_os }}-${{ matrix.target_arch }}"
+          STAGING="staging/${NAME}"
+
+          mkdir -p "${STAGING}/apps/server" "${STAGING}/apps/client" "${STAGING}/packages/shared"
+
+          # Root workspace files
+          cp package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc "${STAGING}/"
+
+          # Server source + bundled data
+          cp apps/server/package.json apps/server/tsconfig.json "${STAGING}/apps/server/"
+          cp -r apps/server/src "${STAGING}/apps/server/src"
+          if [ -d apps/server/data ]; then
+            cp -r apps/server/data "${STAGING}/apps/server/data"
+          fi
+
+          # Client dist (pre-built)
+          cp apps/client/package.json "${STAGING}/apps/client/"
+          cp -r apps/client/dist "${STAGING}/apps/client/dist"
+
+          # Shared source (needed for type-strip imports)
+          cp packages/shared/package.json packages/shared/tsconfig.json "${STAGING}/packages/shared/"
+          cp -r packages/shared/src "${STAGING}/packages/shared/src"
+
+          # Install production deps in staging
+          cd "${STAGING}"
+          pnpm install --prod --frozen-lockfile --ignore-scripts
+          cd -
+
+          # Create archive
+          if [ "${{ matrix.target_os }}" = "win" ]; then
+            cd staging && 7z a -tzip "../${NAME}.zip" "${NAME}" && cd ..
+            sha256sum "${NAME}.zip" > "${NAME}.zip.sha256"
+          else
+            tar -czf "${NAME}.tar.gz" -C staging "${NAME}"
+            sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.target_os }}-${{ matrix.target_arch }}
+          path: |
+            chvor-v*.tar.gz
+            chvor-v*.tar.gz.sha256
+            chvor-v*.zip
+            chvor-v*.zip.sha256
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    needs: [build-tarball]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download tarball artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: tarball-*
+          merge-multiple: true
+
+      - name: Merge checksums
+        run: cat release-assets/*.sha256 > release-assets/SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/chvor-v*.tar.gz
+            release-assets/chvor-v*.zip
+            release-assets/SHA256SUMS.txt
+          generate_release_notes: true
+
+      - name: Publish CLI to npm
+        run: |
+          pnpm install --frozen-lockfile
+          cd packages/cli
+          pnpm build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

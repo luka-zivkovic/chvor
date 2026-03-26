@@ -1,0 +1,631 @@
+import { create } from "zustand";
+import {
+  applyNodeChanges,
+  applyEdgeChanges,
+} from "@xyflow/react";
+import type {
+  Node,
+  Edge,
+  NodeChange,
+  EdgeChange,
+} from "@xyflow/react";
+import type { Skill, Tool, Schedule, WebhookSubscription, CredentialSummary } from "@chvor/shared";
+import { computeOrbitalPositions, OFFSETS, INNER_RADIUS, HUB_SLOT_ANGLE } from "../hooks/use-orbital-layout";
+
+type ExecStatus = "idle" | "pending" | "running" | "completed" | "failed" | "waiting";
+
+export interface BrainNodeData {
+  type: "brain";
+  label: string;
+  providerId: string;
+  model: string;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface SkillNodeData {
+  type: "skill";
+  label: string;
+  skillId: string;
+  category?: string;
+  icon?: string;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface ScheduleHubNodeData {
+  type: "schedule-hub";
+  label: string;
+  scheduleCount: number;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface SkillsHubNodeData {
+  type: "skills-hub";
+  label: string;
+  skillCount: number;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface ToolsHubNodeData {
+  type: "tools-hub";
+  label: string;
+  toolCount: number;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface ToolNodeData {
+  type: "tool";
+  label: string;
+  toolId: string;
+  category?: string;
+  icon?: string;
+  source?: string;
+  builtIn?: boolean;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface ScheduleNodeData {
+  type: "schedule";
+  label: string;
+  scheduleId: string;
+  cronExpression: string;
+  enabled: boolean;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface TriggerNodeData {
+  type: "trigger";
+  label: string;
+  triggerType: "manual" | "schedule";
+  scheduleId?: string;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface OutputNodeData {
+  type: "output";
+  label: string;
+  outputFormat: "text";
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface IntegrationNodeData {
+  type: "integration";
+  label: string;
+  credentialId: string;
+  credentialType: string;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface ConnectionsHubNodeData {
+  type: "connections-hub";
+  label: string;
+  connectionCount: number;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface IntegrationsHubNodeData {
+  type: "integrations-hub";
+  label: string;
+  integrationCount: number;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface WebhooksHubNodeData {
+  type: "webhooks-hub";
+  label: string;
+  webhookCount: number;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface WebhookNodeData {
+  type: "webhook";
+  label: string;
+  webhookId: string;
+  source: string;
+  enabled: boolean;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export interface GhostHubNodeData {
+  type: "ghost-hub";
+  label: string;
+  ctaLabel: string;
+  accentColor: string;
+  targetPanel: string;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
+export type ChvorNodeData =
+  | BrainNodeData
+  | SkillNodeData
+  | SkillsHubNodeData
+  | ToolNodeData
+  | ToolsHubNodeData
+  | ScheduleHubNodeData
+  | ScheduleNodeData
+  | TriggerNodeData
+  | OutputNodeData
+  | IntegrationNodeData
+  | ConnectionsHubNodeData
+  | IntegrationsHubNodeData
+  | WebhooksHubNodeData
+  | WebhookNodeData
+  | GhostHubNodeData;
+export type ChvorNode = Node<ChvorNodeData>;
+export type ChvorEdge = Edge & { data?: { active?: boolean; ghost?: boolean } };
+
+interface CanvasState {
+  nodes: ChvorNode[];
+  edges: ChvorEdge[];
+
+  onNodesChange: (changes: NodeChange[]) => void;
+  onEdgesChange: (changes: EdgeChange[]) => void;
+
+  initializeFromSkills: (skills: Skill[], tools?: Tool[], schedules?: Schedule[], savedPositions?: Map<string, { x: number; y: number }>, channelCreds?: CredentialSummary[], apiCreds?: CredentialSummary[], webhooks?: WebhookSubscription[]) => void;
+  initializeEmptyState: (savedPositions?: Map<string, { x: number; y: number }>) => void;
+  deleteEdge: (edgeId: string) => void;
+
+  setNodeExecutionStatus: (nodeId: string, status: ExecStatus) => void;
+  setEdgeActive: (edgeId: string, active: boolean) => void;
+  resetExecution: () => void;
+  updateBrainProvider: (providerId: string, model: string) => void;
+  updateBrainLabel: (label: string) => void;
+}
+
+export const useCanvasStore = create<CanvasState>((set, get) => ({
+  nodes: [],
+  edges: [],
+
+  onNodesChange: (changes: NodeChange[]) => {
+    set({ nodes: applyNodeChanges(changes, get().nodes) as ChvorNode[] });
+  },
+
+  onEdgesChange: (changes: EdgeChange[]) => {
+    set({ edges: applyEdgeChanges(changes, get().edges) as ChvorEdge[] });
+  },
+
+  // Constellation mode: orbital layout with brain at center
+  // Inner ring: hub nodes (Integrations, Connections, Schedules)
+  // Outer ring: skills grouped by category + fan-out from hubs
+  initializeFromSkills: (skills: Skill[], tools: Tool[] = [], schedules: Schedule[] = [], savedPositions?: Map<string, { x: number; y: number }>, channelCreds: CredentialSummary[] = [], apiCreds: CredentialSummary[] = [], webhooks: WebhookSubscription[] = []) => {
+    const layout = computeOrbitalPositions(skills, tools, schedules, channelCreds, apiCreds, savedPositions, webhooks);
+
+    const brainNode: ChvorNode = {
+      id: "brain-0",
+      type: "brain",
+      position: layout.brainPos,
+      data: {
+        type: "brain",
+        label: "Brain",
+        providerId: "",
+        model: "Not configured",
+        executionStatus: "idle",
+      },
+    };
+
+    const hubNodes: ChvorNode[] = [];
+    const hubEdges: ChvorEdge[] = [];
+
+    // --- Skills hub + fan-out skill nodes ---
+    if (skills.length > 0) {
+      hubNodes.push({
+        id: "skills-hub",
+        type: "skills-hub" as const,
+        position: layout.hubPositions.get("skills-hub") ?? { x: 0, y: 0 },
+        data: {
+          type: "skills-hub" as const,
+          label: "Skills",
+          skillCount: skills.length,
+          executionStatus: "idle" as const,
+        },
+      });
+      hubEdges.push({
+        id: "edge-brain-skills-hub",
+        source: "brain-0",
+        target: "skills-hub",
+        type: "animated",
+        animated: false,
+        data: { active: false },
+      });
+
+      skills.forEach((skill) => {
+        const nodeId = `skill-${skill.id}`;
+        hubNodes.push({
+          id: nodeId,
+          type: "skill" as const,
+          position: layout.skillPositions.get(nodeId) ?? { x: 0, y: 0 },
+          data: {
+            type: "skill" as const,
+            label: skill.metadata.name,
+            skillId: skill.id,
+            category: skill.metadata.category,
+            icon: skill.metadata.icon,
+            executionStatus: "idle" as const,
+          },
+        });
+        hubEdges.push({
+          id: `edge-skills-hub-${skill.id}`,
+          source: "skills-hub",
+          target: nodeId,
+          type: "animated",
+          animated: false,
+          data: { active: false },
+        });
+      });
+    }
+
+    // --- Tools hub + fan-out tool nodes ---
+    if (tools.length > 0) {
+      hubNodes.push({
+        id: "tools-hub",
+        type: "tools-hub" as const,
+        position: layout.hubPositions.get("tools-hub") ?? { x: 0, y: 0 },
+        data: {
+          type: "tools-hub" as const,
+          label: "Tools",
+          toolCount: tools.length,
+          executionStatus: "idle" as const,
+        },
+      });
+      hubEdges.push({
+        id: "edge-brain-tools-hub",
+        source: "brain-0",
+        target: "tools-hub",
+        type: "animated",
+        animated: false,
+        data: { active: false },
+      });
+
+      tools.forEach((tool) => {
+        const nodeId = `tool-${tool.id}`;
+        hubNodes.push({
+          id: nodeId,
+          type: "tool" as const,
+          position: layout.toolPositions.get(nodeId) ?? { x: 0, y: 0 },
+          data: {
+            type: "tool" as const,
+            label: tool.metadata.name,
+            toolId: tool.id,
+            category: tool.metadata.category,
+            icon: tool.metadata.icon,
+            source: tool.source,
+            builtIn: tool.builtIn,
+            executionStatus: "idle" as const,
+          },
+        });
+        hubEdges.push({
+          id: `edge-tools-hub-${tool.id}`,
+          source: "tools-hub",
+          target: nodeId,
+          type: "animated",
+          animated: false,
+          data: { active: false },
+        });
+      });
+    }
+
+    // --- Integrations hub (channels) --- FIXED: was connections-hub
+    if (channelCreds.length > 0) {
+      hubNodes.push({
+        id: "integrations-hub",
+        type: "integrations-hub" as const,
+        position: layout.hubPositions.get("integrations-hub") ?? { x: 0, y: 0 },
+        data: {
+          type: "integrations-hub" as const,
+          label: "Integrations",
+          integrationCount: channelCreds.length,
+          executionStatus: "idle" as const,
+        },
+      });
+      hubEdges.push({
+        id: "edge-brain-integrations-hub",
+        source: "brain-0",
+        target: "integrations-hub",
+        type: "animated",
+        animated: false,
+        data: { active: false },
+      });
+
+      channelCreds.forEach((cred) => {
+        const nodeId = `integration-${cred.id}`;
+        hubNodes.push({
+          id: nodeId,
+          type: "integration" as const,
+          position: layout.channelPositions.get(nodeId) ?? { x: 0, y: 0 },
+          data: {
+            type: "integration" as const,
+            label: cred.name,
+            credentialId: cred.id,
+            credentialType: cred.type,
+            executionStatus: "idle" as const,
+          },
+        });
+        hubEdges.push({
+          id: `edge-integrations-hub-${cred.id}`,
+          source: "integrations-hub",
+          target: nodeId,
+          type: "animated",
+          animated: false,
+          data: { active: false },
+        });
+      });
+    }
+
+    // --- Connections hub (API creds) --- FIXED: was integrations-hub
+    if (apiCreds.length > 0) {
+      hubNodes.push({
+        id: "connections-hub",
+        type: "connections-hub" as const,
+        position: layout.hubPositions.get("connections-hub") ?? { x: 0, y: 0 },
+        data: {
+          type: "connections-hub" as const,
+          label: "Connections",
+          connectionCount: apiCreds.length,
+          executionStatus: "idle" as const,
+        },
+      });
+      hubEdges.push({
+        id: "edge-brain-connections-hub",
+        source: "brain-0",
+        target: "connections-hub",
+        type: "animated",
+        animated: false,
+        data: { active: false },
+      });
+
+      apiCreds.forEach((cred) => {
+        const nodeId = `integration-${cred.id}`;
+        hubNodes.push({
+          id: nodeId,
+          type: "integration" as const,
+          position: layout.apiPositions.get(nodeId) ?? { x: 0, y: 0 },
+          data: {
+            type: "integration" as const,
+            label: cred.name,
+            credentialId: cred.id,
+            credentialType: cred.type,
+            executionStatus: "idle" as const,
+          },
+        });
+        hubEdges.push({
+          id: `edge-connections-hub-${cred.id}`,
+          source: "connections-hub",
+          target: nodeId,
+          type: "animated",
+          animated: false,
+          data: { active: false },
+        });
+      });
+    }
+
+    // --- Schedule hub ---
+    if (schedules.length > 0) {
+      hubNodes.push({
+        id: "schedule-hub",
+        type: "schedule-hub" as const,
+        position: layout.hubPositions.get("schedule-hub") ?? { x: 0, y: 0 },
+        data: {
+          type: "schedule-hub" as const,
+          label: "Schedules",
+          scheduleCount: schedules.length,
+          executionStatus: "idle" as const,
+        },
+      });
+      hubEdges.push({
+        id: "edge-brain-schedule-hub",
+        source: "brain-0",
+        target: "schedule-hub",
+        type: "animated",
+        animated: false,
+        data: { active: false },
+      });
+
+      schedules.forEach((sched) => {
+        const nodeId = `schedule-${sched.id}`;
+        hubNodes.push({
+          id: nodeId,
+          type: "schedule" as const,
+          position: layout.schedulePositions.get(nodeId) ?? { x: 0, y: 0 },
+          data: {
+            type: "schedule" as const,
+            label: sched.name,
+            scheduleId: sched.id,
+            cronExpression: sched.cronExpression,
+            enabled: sched.enabled,
+            executionStatus: "idle" as const,
+          },
+        });
+        hubEdges.push({
+          id: `edge-schedule-hub-${sched.id}`,
+          source: "schedule-hub",
+          target: nodeId,
+          type: "animated",
+          animated: false,
+          data: { active: false },
+        });
+      });
+    }
+
+    // --- Webhooks hub ---
+    if (webhooks.length > 0) {
+      hubNodes.push({
+        id: "webhooks-hub",
+        type: "webhooks-hub" as const,
+        position: layout.hubPositions.get("webhooks-hub") ?? { x: 0, y: 0 },
+        data: {
+          type: "webhooks-hub" as const,
+          label: "Webhooks",
+          webhookCount: webhooks.length,
+          executionStatus: "idle" as const,
+        },
+      });
+      hubEdges.push({
+        id: "edge-brain-webhooks-hub",
+        source: "brain-0",
+        target: "webhooks-hub",
+        type: "animated",
+        animated: false,
+        data: { active: false },
+      });
+
+      webhooks.forEach((wh) => {
+        const nodeId = `webhook-${wh.id}`;
+        hubNodes.push({
+          id: nodeId,
+          type: "webhook" as const,
+          position: layout.webhookPositions.get(nodeId) ?? { x: 0, y: 0 },
+          data: {
+            type: "webhook" as const,
+            label: wh.name,
+            webhookId: wh.id,
+            source: wh.source,
+            enabled: wh.enabled,
+            executionStatus: "idle" as const,
+          },
+        });
+        hubEdges.push({
+          id: `edge-webhooks-hub-${wh.id}`,
+          source: "webhooks-hub",
+          target: nodeId,
+          type: "animated",
+          animated: false,
+          data: { active: false },
+        });
+      });
+    }
+
+    set({
+      nodes: [brainNode, ...hubNodes],
+      edges: [...hubEdges],
+    });
+  },
+
+  // Empty state: brain + ghost hub nodes as onboarding CTAs
+  initializeEmptyState: (savedPositions?: Map<string, { x: number; y: number }>) => {
+    const pos = (id: string, dx: number, dy: number) =>
+      savedPositions?.get(id) ?? { x: dx, y: dy };
+
+    const GHOST_OFFSET = { hw: 36, hh: 47 };
+
+    const brainNode: ChvorNode = {
+      id: "brain-0",
+      type: "brain",
+      position: pos("brain-0", -OFFSETS.brain.hw, -OFFSETS.brain.hh),
+      data: { type: "brain", label: "Brain", providerId: "", model: "Not configured", executionStatus: "idle" },
+    };
+
+    const ghosts: { id: string; slot: number; label: string; ctaLabel: string; color: string; panel: string }[] = [
+      { id: "ghost-skills", slot: 0, label: "Skills", ctaLabel: "+ Add Skill", color: "var(--skill-ai)", panel: "skills" },
+      { id: "ghost-tools", slot: 1, label: "Tools", ctaLabel: "+ Add Tool", color: "var(--tool-accent)", panel: "tools" },
+      { id: "ghost-integrations", slot: 3, label: "Integrations", ctaLabel: "+ Connect", color: "var(--skill-automation)", panel: "settings" },
+    ];
+
+    const ghostNodes: ChvorNode[] = ghosts.map((g) => {
+      const angle = HUB_SLOT_ANGLE(g.slot);
+      return {
+        id: g.id,
+        type: "ghost-hub" as const,
+        position: pos(g.id, Math.cos(angle) * INNER_RADIUS - GHOST_OFFSET.hw, Math.sin(angle) * INNER_RADIUS - GHOST_OFFSET.hh),
+        data: {
+          type: "ghost-hub" as const,
+          label: g.label,
+          ctaLabel: g.ctaLabel,
+          accentColor: g.color,
+          targetPanel: g.panel,
+          executionStatus: "idle" as const,
+        },
+      };
+    });
+
+    const ghostEdges: ChvorEdge[] = ghosts.map((g) => ({
+      id: `edge-brain-${g.id}`,
+      source: "brain-0",
+      target: g.id,
+      type: "animated",
+      animated: false,
+      data: { active: false, ghost: true },
+    }));
+
+    set({ nodes: [brainNode, ...ghostNodes], edges: ghostEdges });
+  },
+
+  deleteEdge: (edgeId: string) => {
+    set({ edges: get().edges.filter((e) => e.id !== edgeId) });
+  },
+
+  setNodeExecutionStatus: (nodeId, status) => {
+    const nodes = get().nodes;
+    const idx = nodes.findIndex((n) => n.id === nodeId);
+    if (idx === -1) return;
+    if ((nodes[idx].data as ChvorNodeData).executionStatus === status) return;
+    const updated = [...nodes];
+    updated[idx] = { ...nodes[idx], data: { ...nodes[idx].data, executionStatus: status } } as ChvorNode;
+    set({ nodes: updated });
+  },
+
+  setEdgeActive: (edgeId, active) => {
+    const edges = get().edges;
+    const idx = edges.findIndex((e) => e.id === edgeId);
+    if (idx === -1) return;
+    if (edges[idx].data?.active === active) return;
+    const updated = [...edges];
+    updated[idx] = { ...edges[idx], data: { ...edges[idx].data, active } };
+    set({ edges: updated });
+  },
+
+  resetExecution: () => {
+    const { nodes, edges } = get();
+    const anyNodeDirty = nodes.some((n) => (n.data as ChvorNodeData).executionStatus !== "idle");
+    const anyEdgeDirty = edges.some((e) => e.data?.active);
+    if (!anyNodeDirty && !anyEdgeDirty) return;
+    set({
+      nodes: anyNodeDirty
+        ? nodes.map((n) =>
+            (n.data as ChvorNodeData).executionStatus !== "idle"
+              ? ({ ...n, data: { ...n.data, executionStatus: "idle" } } as ChvorNode)
+              : n
+          )
+        : nodes,
+      edges: anyEdgeDirty
+        ? edges.map((e) =>
+            e.data?.active ? { ...e, data: { ...e.data, active: false } } : e
+          )
+        : edges,
+    });
+  },
+
+  updateBrainProvider: (providerId, model) => {
+    const nodes = get().nodes;
+    const idx = nodes.findIndex((n) => n.type === "brain");
+    if (idx === -1) return;
+    const d = nodes[idx].data as ChvorNodeData;
+    if ("providerId" in d && d.providerId === providerId && "model" in d && d.model === model) return;
+    const updated = [...nodes];
+    updated[idx] = { ...nodes[idx], data: { ...nodes[idx].data, providerId, model } } as ChvorNode;
+    set({ nodes: updated });
+  },
+
+  updateBrainLabel: (label: string) => {
+    const nodes = get().nodes;
+    const idx = nodes.findIndex((n) => n.id === "brain-0");
+    if (idx === -1) return;
+    if ((nodes[idx].data as ChvorNodeData).label === label) return;
+    const updated = [...nodes];
+    updated[idx] = { ...nodes[idx], data: { ...nodes[idx].data, label } };
+    set({ nodes: updated });
+  },
+}));

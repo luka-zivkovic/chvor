@@ -1,0 +1,274 @@
+import { useEffect, useRef } from "react";
+import { useAppStore } from "../stores/app-store";
+import { useCanvasStore } from "../stores/canvas-store";
+import { useSkillStore } from "../stores/skill-store";
+import { useToolStore } from "../stores/tool-store";
+import { useCredentialStore } from "../stores/credential-store";
+import { usePcStore } from "../stores/pc-store";
+import type { ExecutionEvent } from "@chvor/shared";
+
+// Minimum time a node stays "running" before transitioning to completed/failed
+const MIN_RUNNING_MS = 500;
+// How long an edge stays active after deactivation is requested
+const EDGE_LINGER_MS = 800;
+
+export function useExecution() {
+  const executionEvents = useAppStore((s) => s.executionEvents);
+  const { setNodeExecutionStatus, setEdgeActive, resetExecution } =
+    useCanvasStore();
+  const processedCount = useRef(0);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Track when nodes entered "running" state for minimum display enforcement
+  const runningTimestamps = useRef(new Map<string, number>());
+  // Track pending delayed transitions so we can cancel them on new execution
+  const pendingTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  /** Schedule a callback, tracked by key so it can be cancelled */
+  function scheduleDelayed(key: string, fn: () => void, delayMs: number) {
+    clearTimeout(pendingTimers.current.get(key));
+    pendingTimers.current.set(key, setTimeout(() => {
+      pendingTimers.current.delete(key);
+      fn();
+    }, delayMs));
+  }
+
+  /** Cancel all pending delayed transitions */
+  function clearAllPending() {
+    for (const t of pendingTimers.current.values()) clearTimeout(t);
+    pendingTimers.current.clear();
+    runningTimestamps.current.clear();
+  }
+
+  /** Set node to "running" and record timestamp */
+  function markRunning(nodeId: string) {
+    setNodeExecutionStatus(nodeId, "running");
+    runningTimestamps.current.set(nodeId, Date.now());
+  }
+
+  /** Transition node from "running" to a final status, respecting minimum display time */
+  function markNodeFinal(nodeId: string, status: "completed" | "failed") {
+    const startedAt = runningTimestamps.current.get(nodeId) ?? 0;
+    const elapsed = Date.now() - startedAt;
+    const remaining = MIN_RUNNING_MS - elapsed;
+    if (remaining > 0) {
+      scheduleDelayed(`node-${nodeId}`, () => {
+        setNodeExecutionStatus(nodeId, status);
+        runningTimestamps.current.delete(nodeId);
+      }, remaining);
+    } else {
+      setNodeExecutionStatus(nodeId, status);
+      runningTimestamps.current.delete(nodeId);
+    }
+  }
+
+  /** Deactivate an edge with a linger delay so the glow fades visually */
+  function deactivateEdge(edgeId: string) {
+    scheduleDelayed(`edge-${edgeId}`, () => setEdgeActive(edgeId, false), EDGE_LINGER_MS);
+  }
+
+  useEffect(() => {
+    const newEvents = executionEvents.slice(processedCount.current);
+    processedCount.current = executionEvents.length;
+
+    function handleEvent(event: ExecutionEvent) {
+      switch (event.type) {
+        case "execution.started":
+          clearTimeout(resetTimer.current);
+          clearAllPending();
+          resetExecution();
+          markRunning("brain-0");
+          break;
+
+        case "brain.thinking":
+          markRunning("brain-0");
+          break;
+
+        case "brain.decision": {
+          const kind = (event.data as any).capabilityKind;
+          if (kind === "tool") {
+            const toolId = (event.data as any).toolId;
+            if (toolId) {
+              setEdgeActive("edge-brain-tools-hub", true);
+              setEdgeActive(`edge-tools-hub-${toolId}`, true);
+            }
+          } else {
+            const skillId = event.data.skillId;
+            if (skillId) {
+              setEdgeActive("edge-brain-skills-hub", true);
+              setEdgeActive(`edge-skills-hub-${skillId}`, true);
+            }
+          }
+          break;
+        }
+
+        case "brain.emotion":
+          break;
+
+        case "skill.invoked": {
+          const rawNodeId = event.data.nodeId;
+          const isIntegration = rawNodeId.startsWith("integration-");
+          const isApiConnection = isIntegration && !!event.data.isApiConnection;
+          const nodeId = isIntegration ? rawNodeId
+            : rawNodeId.startsWith("skill-") ? rawNodeId
+            : `skill-${rawNodeId}`;
+          markRunning(nodeId);
+          if (isIntegration) {
+            const credId = rawNodeId.replace("integration-", "");
+            if (isApiConnection) {
+              markRunning("connections-hub");
+              setEdgeActive("edge-brain-connections-hub", true);
+              setEdgeActive(`edge-connections-hub-${credId}`, true);
+            } else {
+              markRunning("integrations-hub");
+              setEdgeActive("edge-brain-integrations-hub", true);
+              setEdgeActive(`edge-integrations-hub-${credId}`, true);
+            }
+          } else {
+            markRunning("skills-hub");
+            setEdgeActive("edge-brain-skills-hub", true);
+            const skillId = nodeId.replace("skill-", "");
+            setEdgeActive(`edge-skills-hub-${skillId}`, true);
+          }
+          break;
+        }
+
+        case "skill.completed": {
+          const rawNodeId = event.data.nodeId;
+          const isIntegration = rawNodeId.startsWith("integration-");
+          const nodeId = isIntegration ? rawNodeId
+            : rawNodeId.startsWith("skill-") ? rawNodeId
+            : `skill-${rawNodeId}`;
+          markNodeFinal(nodeId, "completed");
+          if (isIntegration) {
+            const credId = rawNodeId.replace("integration-", "");
+            const isUnderConnectionsHub = !!useCanvasStore.getState().edges.find((e) => e.id === `edge-connections-hub-${credId}`);
+            if (isUnderConnectionsHub) {
+              markNodeFinal("connections-hub", "completed");
+              deactivateEdge("edge-brain-connections-hub");
+              deactivateEdge(`edge-connections-hub-${credId}`);
+            } else {
+              markNodeFinal("integrations-hub", "completed");
+              deactivateEdge("edge-brain-integrations-hub");
+              deactivateEdge(`edge-integrations-hub-${credId}`);
+            }
+          } else {
+            markNodeFinal("skills-hub", "completed");
+            deactivateEdge("edge-brain-skills-hub");
+            const skillId = nodeId.replace("skill-", "");
+            deactivateEdge(`edge-skills-hub-${skillId}`);
+          }
+          break;
+        }
+
+        case "skill.failed": {
+          const rawNodeId = event.data.nodeId;
+          const isIntegration = rawNodeId.startsWith("integration-");
+          const nodeId = isIntegration ? rawNodeId
+            : rawNodeId.startsWith("skill-") ? rawNodeId
+            : `skill-${rawNodeId}`;
+          markNodeFinal(nodeId, "failed");
+          if (isIntegration) {
+            const credId = rawNodeId.replace("integration-", "");
+            const isUnderConnectionsHub = !!useCanvasStore.getState().edges.find((e) => e.id === `edge-connections-hub-${credId}`);
+            if (isUnderConnectionsHub) {
+              deactivateEdge("edge-brain-connections-hub");
+              deactivateEdge(`edge-connections-hub-${credId}`);
+            } else {
+              deactivateEdge("edge-brain-integrations-hub");
+              deactivateEdge(`edge-integrations-hub-${credId}`);
+            }
+          } else {
+            deactivateEdge("edge-brain-skills-hub");
+            const skillId = nodeId.replace("skill-", "");
+            deactivateEdge(`edge-skills-hub-${skillId}`);
+          }
+          break;
+        }
+
+        case "tool.invoked": {
+          const rawNodeId = event.data.nodeId;
+          const nodeId = rawNodeId.startsWith("tool-") ? rawNodeId : `tool-${rawNodeId}`;
+          markRunning(nodeId);
+          markRunning("tools-hub");
+          setEdgeActive("edge-brain-tools-hub", true);
+          const toolId = nodeId.replace("tool-", "");
+          setEdgeActive(`edge-tools-hub-${toolId}`, true);
+          break;
+        }
+
+        case "tool.completed": {
+          const rawNodeId = event.data.nodeId;
+          const nodeId = rawNodeId.startsWith("tool-") ? rawNodeId : `tool-${rawNodeId}`;
+          markNodeFinal(nodeId, "completed");
+          markNodeFinal("tools-hub", "completed");
+          deactivateEdge("edge-brain-tools-hub");
+          const toolId = nodeId.replace("tool-", "");
+          deactivateEdge(`edge-tools-hub-${toolId}`);
+          break;
+        }
+
+        case "tool.failed": {
+          const rawNodeId = event.data.nodeId;
+          const nodeId = rawNodeId.startsWith("tool-") ? rawNodeId : `tool-${rawNodeId}`;
+          markNodeFinal(nodeId, "failed");
+          deactivateEdge("edge-brain-tools-hub");
+          const toolId = nodeId.replace("tool-", "");
+          deactivateEdge(`edge-tools-hub-${toolId}`);
+          break;
+        }
+
+        case "pc.screenshot":
+        case "pc.action":
+        case "pc.pipeline.start":
+          markRunning("skill-pc-control");
+          markRunning("skills-hub");
+          setEdgeActive("edge-brain-skills-hub", true);
+          setEdgeActive("edge-skills-hub-pc-control", true);
+          break;
+
+        case "pc.actionCompleted":
+        case "pc.pipeline.complete":
+          markNodeFinal("skill-pc-control", event.data.success ? "completed" : "failed");
+          deactivateEdge("edge-brain-skills-hub");
+          deactivateEdge("edge-skills-hub-pc-control");
+          break;
+
+        case "pc.pipeline.layer":
+          usePcStore.getState().handlePipelineEvent(event.type, event.data);
+          break;
+
+        case "execution.completed":
+          markNodeFinal("brain-0", "completed");
+          useSkillStore.getState().fetchSkills();
+          useToolStore.getState().fetchTools();
+          useCredentialStore.getState().fetchAll();
+          clearTimeout(resetTimer.current);
+          resetTimer.current = setTimeout(() => {
+            clearAllPending();
+            resetExecution();
+          }, 2000);
+          break;
+
+        case "execution.failed":
+          markNodeFinal("brain-0", "failed");
+          clearTimeout(resetTimer.current);
+          resetTimer.current = setTimeout(() => {
+            clearAllPending();
+            resetExecution();
+          }, 3000);
+          break;
+      }
+    }
+
+    for (const event of newEvents) {
+      handleEvent(event);
+    }
+  }, [executionEvents, setNodeExecutionStatus, setEdgeActive, resetExecution]);
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(resetTimer.current);
+      clearAllPending();
+    };
+  }, []);
+}

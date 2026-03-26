@@ -1,0 +1,44 @@
+{
+  "name": "chvor",
+  "version": "0.1.0",
+  "description": "Your own AI — install and run chvor.",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "type": "module",
+  "bin": {
+    "chvor": "./bin/chvor.js"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chvor/shared": "workspace:*",
+    "commander": "^13",
+    "@inquirer/prompts": "^7",
+    "yaml": "^2"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luka-zivkovic/chvor.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/luka-zivkovic/chvor",
+  "keywords": [
+    "ai",
+    "assistant",
+    "personal-ai",
+    "mcp",
+    "chvor"
+  ]
+}

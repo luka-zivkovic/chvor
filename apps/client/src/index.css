@@ -1,0 +1,624 @@
+@import "tailwindcss";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ─── Pewter — balanced dark neutral ─── */
+:root {
+  /* Base — #181818 BG, #E4E4E8 Text1 */
+  --background: oklch(0.17 0 0);
+  --foreground: oklch(0.92 0.004 280);
+  --card: oklch(0.24 0.005 285);
+  --card-foreground: oklch(0.92 0.004 280);
+  --popover: oklch(0.21 0.005 285);
+  --popover-foreground: oklch(0.92 0.004 280);
+  --primary: oklch(0.62 0.13 250);
+  --primary-foreground: oklch(0.17 0 0);
+  --secondary: oklch(0.27 0.006 280);
+  --secondary-foreground: oklch(0.92 0.004 280);
+  --muted: oklch(0.21 0.005 285);
+  --muted-foreground: oklch(0.69 0.008 280);
+  --accent: oklch(0.23 0.035 255);
+  --accent-foreground: oklch(0.62 0.13 250);
+  --destructive: oklch(0.58 0.18 25);
+  --destructive-foreground: oklch(0.92 0.004 280);
+  --border: oklch(0.30 0.007 275);
+  --input: oklch(0.24 0.005 285);
+  --ring: oklch(0.62 0.13 250);
+
+  /* Charts */
+  --chart-1: oklch(0.62 0.13 250);
+  --chart-2: oklch(0.70 0.14 160);
+  --chart-3: oklch(0.76 0.14 85);
+  --chart-4: oklch(0.60 0.18 280);
+  --chart-5: oklch(0.58 0.18 25);
+
+  /* Sidebar (kept for shadcn compat) */
+  --sidebar: oklch(0.21 0.005 285);
+  --sidebar-foreground: oklch(0.92 0.004 280);
+  --sidebar-primary: oklch(0.62 0.13 250);
+  --sidebar-primary-foreground: oklch(0.17 0 0);
+  --sidebar-accent: oklch(0.23 0.035 255);
+  --sidebar-accent-foreground: oklch(0.62 0.13 250);
+  --sidebar-border: oklch(0.30 0.007 275);
+  --sidebar-ring: oklch(0.62 0.13 250);
+
+  /* ─── Canvas tokens — pewter dark ─── */
+  --canvas-bg: oklch(0.17 0 0);
+  --canvas-accent: oklch(0.62 0.13 250);
+  --canvas-accent-dim: oklch(0.62 0.13 250 / 0.3);
+  --canvas-dot: oklch(0.30 0.008 260 / 0.18);
+  --node-bg-from: oklch(0.24 0.005 285);
+  --node-bg-to: oklch(0.21 0.005 285);
+  --node-label: oklch(0.92 0.004 280);
+  --node-label-dim: oklch(0.69 0.008 280);
+
+  /* ─── Execution status tokens ─── */
+  --status-running: oklch(0.62 0.13 250);
+  --status-completed: oklch(0.70 0.14 160);
+  --status-failed: oklch(0.58 0.18 25);
+  --status-warning: oklch(0.76 0.14 85);
+
+  /* ─── Edge tokens ─── */
+  --edge-idle: oklch(0.75 0.03 260);
+  --edge-active: oklch(0.62 0.13 250);
+
+  /* ─── Node type tokens ─── */
+  --node-trigger: oklch(0.70 0.14 160);
+  --node-output: oklch(0.62 0.13 250);
+
+  /* ─── Skill category tokens (bumped lightness for dark bg) ─── */
+  --skill-web: oklch(0.60 0.18 260);
+  --skill-communication: oklch(0.62 0.13 250);
+  --skill-file: oklch(0.65 0.14 162);
+  --skill-data: oklch(0.60 0.18 280);
+  --skill-developer: oklch(0.65 0.18 30);
+  --skill-productivity: oklch(0.60 0.15 245);
+  --skill-ai: oklch(0.65 0.18 340);
+  --skill-automation: oklch(0.68 0.15 70);
+  --tool-accent: oklch(0.68 0.15 70);
+
+  /* ─── Glass morphism tokens — frosted dark ─── */
+  --glass-bg: oklch(0.21 0.005 285 / 0.65);
+  --glass-bg-strong: oklch(0.19 0.004 285 / 0.85);
+  --glass-border: oklch(0.30 0.007 275 / 0.5);
+
+  /* ─── Chat panel ─── */
+  --chat-panel-bg: oklch(0.14 0.005 285 / 0.88);
+  --user-bubble-bg: oklch(0.62 0.13 250 / 0.12);
+  --user-bubble-border: oklch(0.62 0.13 250 / 0.08);
+
+  /* ─── Structural ─── */
+  --font-sans: "IBM Plex Sans", sans-serif;
+  --font-serif: "Lora", Georgia, serif;
+  --font-mono: "IBM Plex Mono", "Fira Code", monospace;
+  --radius: 0.5rem;
+  --spacing: 0.25rem;
+  --tracking-normal: 0em;
+
+  /* Shadows (slightly stronger for dark bg) */
+  --shadow-2xs: 0 1px 3px 0 hsl(0 0% 0% / 0.15);
+  --shadow-xs: 0 1px 3px 0 hsl(0 0% 0% / 0.15);
+  --shadow-sm: 0 1px 3px 0 hsl(0 0% 0% / 0.25), 0 1px 2px -1px hsl(0 0% 0% / 0.20);
+  --shadow: 0 1px 3px 0 hsl(0 0% 0% / 0.25), 0 1px 2px -1px hsl(0 0% 0% / 0.20);
+  --shadow-md: 0 1px 3px 0 hsl(0 0% 0% / 0.30), 0 2px 4px -1px hsl(0 0% 0% / 0.25);
+  --shadow-lg: 0 1px 3px 0 hsl(0 0% 0% / 0.35), 0 4px 6px -1px hsl(0 0% 0% / 0.30);
+  --shadow-xl: 0 1px 3px 0 hsl(0 0% 0% / 0.35), 0 8px 10px -1px hsl(0 0% 0% / 0.30);
+  --shadow-2xl: 0 1px 3px 0 hsl(0 0% 0% / 0.50);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Canvas tokens */
+  --color-canvas-bg: var(--canvas-bg);
+  --color-canvas-accent: var(--canvas-accent);
+  --color-canvas-accent-dim: var(--canvas-accent-dim);
+  --color-canvas-dot: var(--canvas-dot);
+  --color-node-bg-from: var(--node-bg-from);
+  --color-node-bg-to: var(--node-bg-to);
+  --color-node-label: var(--node-label);
+  --color-node-label-dim: var(--node-label-dim);
+
+  /* Status tokens */
+  --color-status-running: var(--status-running);
+  --color-status-completed: var(--status-completed);
+  --color-status-failed: var(--status-failed);
+  --color-status-warning: var(--status-warning);
+
+  /* Edge tokens */
+  --color-edge-idle: var(--edge-idle);
+  --color-edge-active: var(--edge-active);
+
+  /* Node type tokens */
+  --color-node-trigger: var(--node-trigger);
+  --color-node-output: var(--node-output);
+
+  /* Skill tokens */
+  --color-skill-web: var(--skill-web);
+  --color-skill-communication: var(--skill-communication);
+  --color-skill-file: var(--skill-file);
+  --color-skill-data: var(--skill-data);
+  --color-skill-developer: var(--skill-developer);
+  --color-skill-productivity: var(--skill-productivity);
+  --color-skill-ai: var(--skill-ai);
+  --color-skill-automation: var(--skill-automation);
+  --color-tool-accent: var(--tool-accent);
+
+  /* Glass tokens */
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-bg-strong: var(--glass-bg-strong);
+  --color-glass-border: var(--glass-border);
+
+  /* Fonts */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+
+  /* Border radius */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Shadows */
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button, a, input, textarea, select {
+    transition: color 150ms ease, background-color 150ms ease,
+                border-color 150ms ease, opacity 150ms ease,
+                box-shadow 150ms ease;
+  }
+}
+
+/* ─── Glass morphism utilities ─── */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(1.1);
+  -webkit-backdrop-filter: blur(20px) saturate(1.1);
+  border: 1px solid var(--glass-border);
+}
+
+.glass-strong {
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(28px) saturate(1.1);
+  -webkit-backdrop-filter: blur(28px) saturate(1.1);
+  border: 1px solid var(--glass-border);
+}
+
+/* ─── HUD typography ─── */
+.hud-text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted-foreground);
+}
+
+.hud-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--node-label);
+}
+
+/* ─── MiniMap glass styling ─── */
+.react-flow__minimap {
+  opacity: 0.35;
+  transition: opacity 200ms ease;
+}
+.react-flow__minimap:hover {
+  opacity: 1;
+}
+
+/* ─── React Flow — dark canvas ─── */
+.react-flow {
+  --xy-background-color: transparent;
+}
+
+.react-flow__pane {
+  cursor: grab;
+}
+
+.react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.react-flow__edge-text {
+  display: none;
+}
+
+/* Suppress React Flow built-in animated edge dash — we use our own AnimatedEdge */
+.react-flow__edge.animated path {
+  animation: none !important;
+  stroke-dasharray: unset !important;
+}
+
+/* ─── Panel slide ─── */
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); opacity: 0.9; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.2s ease-out;
+}
+
+/* ─── UI animations ─── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.2s ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.2s ease-out;
+}
+
+/* ─── Canvas node animations ─── */
+@keyframes edge-flow {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes ripple {
+  0% { transform: scale(1); opacity: 0.5; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.85; }
+}
+
+@keyframes node-completed {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+@keyframes node-activate {
+  0% { filter: brightness(1); }
+  25% { filter: brightness(1.35); }
+  100% { filter: brightness(1); }
+}
+
+@keyframes ring-pulse {
+  0%, 100% { opacity: 0.15; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(1.03); }
+}
+
+@keyframes float-subtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.animate-breathe {
+  animation: breathe 4s ease-in-out infinite;
+}
+
+.animate-ripple {
+  animation: ripple 2s ease-out infinite;
+}
+
+.animate-ripple-delayed {
+  animation: ripple 2s ease-out 1s infinite;
+}
+
+.animate-node-completed {
+  animation: node-completed 0.4s ease-out;
+}
+
+.animate-node-activate {
+  animation: node-activate 1.2s ease-out;
+}
+
+.animate-ring-pulse {
+  animation: ring-pulse 6s ease-in-out infinite;
+}
+
+.animate-float-subtle {
+  animation: float-subtle 8s ease-in-out infinite;
+}
+
+/* Brain ambient breathing shadow */
+@keyframes brain-breathe {
+  0%, 100% { filter: brightness(1) drop-shadow(0 0 8px oklch(0.62 0.13 250 / 0.08)); }
+  50% { filter: brightness(1.02) drop-shadow(0 0 16px oklch(0.62 0.13 250 / 0.15)); }
+}
+.animate-brain-breathe {
+  animation: brain-breathe 4s ease-in-out infinite;
+}
+
+/* Emotion shift ripple — one-shot expanding ring */
+@keyframes emotion-shift {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+.animate-emotion-shift {
+  animation: emotion-shift 1.2s ease-out forwards;
+}
+/* ─── Volumetric glass animations ─── */
+@keyframes glass-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes glass-breathe {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.03); }
+}
+@keyframes glass-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+@keyframes glass-settle {
+  0% { transform: scale(1.06); filter: brightness(1.15); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+@keyframes glass-ripple {
+  0% { transform: scale(1); opacity: 0.4; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+@keyframes energy-flow {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+.animate-glass-float {
+  animation: glass-float 6s ease-in-out infinite;
+  will-change: transform;
+}
+.animate-glass-breathe {
+  animation: glass-breathe 5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+.animate-glass-pulse {
+  animation: glass-pulse 2.5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+.animate-glass-settle {
+  animation: glass-settle 0.8s ease-out;
+}
+.animate-glass-ripple {
+  animation: glass-ripple 2.5s ease-out infinite;
+}
+.energy-flow {
+  animation: energy-flow 2s linear infinite;
+  will-change: stroke-dashoffset;
+}
+/* Compat aliases for nodes still referencing old names */
+.animate-field-pulse { animation: glass-pulse 2.5s ease-in-out infinite; }
+.animate-field-intensify { animation: glass-settle 0.8s ease-out; }
+
+@keyframes ghost-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.55; }
+}
+.animate-ghost-pulse { animation: ghost-pulse 4s ease-in-out infinite; }
+
+/* ─── Whimsical emotion particle animations ─── */
+@keyframes emotion-wander {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
+  20% { transform: translate(12px, -18px) rotate(15deg); opacity: 0.35; }
+  40% { transform: translate(-8px, -8px) rotate(-10deg); opacity: 0.15; }
+  60% { transform: translate(15px, 10px) rotate(20deg); opacity: 0.3; }
+  80% { transform: translate(-12px, 6px) rotate(-5deg); opacity: 0.2; }
+}
+@keyframes emotion-sparkle {
+  0%, 100% { transform: scale(0.6) rotate(0deg); opacity: 0; }
+  15% { transform: scale(1.3) rotate(45deg); opacity: 0.5; }
+  30% { transform: scale(0.8) rotate(90deg); opacity: 0.15; }
+  50% { transform: scale(1.1) rotate(180deg); opacity: 0.4; }
+  70% { transform: scale(0.7) rotate(270deg); opacity: 0.1; }
+  85% { transform: scale(1.2) rotate(315deg); opacity: 0.35; }
+}
+@keyframes emotion-drift {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 0.15; }
+  50% { transform: translateY(-12px) scale(1.08); opacity: 0.3; }
+}
+@keyframes emotion-float {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 0.15; }
+  25% { transform: translateY(-10px) scale(1.1); opacity: 0.35; }
+  50% { transform: translateY(-4px) scale(0.95); opacity: 0.2; }
+  75% { transform: translateY(-14px) scale(1.05); opacity: 0.3; }
+}
+@keyframes emotion-bounce {
+  0%, 100% { transform: translateY(0) rotate(0deg); opacity: 0.15; }
+  25% { transform: translateY(-20px) rotate(15deg); opacity: 0.35; }
+  50% { transform: translateY(0) rotate(-10deg); opacity: 0.2; }
+  75% { transform: translateY(-14px) rotate(8deg); opacity: 0.3; }
+}
+@keyframes emotion-converge {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.2; }
+  50% { transform: translate(var(--cx, 0px), var(--cy, 0px)) scale(0.7); opacity: 0.4; }
+}
+
+/* Energy pulse traveling along active edges */
+@keyframes edge-energy-pulse {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+.edge-energy-pulse {
+  animation: edge-energy-pulse 1.5s linear infinite;
+  will-change: stroke-dashoffset;
+}
+
+/* ─── Markdown prose styles for chat messages ─── */
+.cb-markdown { overflow-wrap: break-word; word-break: break-word; }
+.cb-markdown > * + * { margin-top: 0.75em; }
+.cb-markdown h1 { font-size: 1.25rem; font-weight: 700; }
+.cb-markdown h2 { font-size: 1.1rem; font-weight: 600; }
+.cb-markdown h3 { font-size: 1rem; font-weight: 600; }
+.cb-markdown p { line-height: 1.65; }
+.cb-markdown strong { font-weight: 600; color: var(--foreground); }
+.cb-markdown em { font-style: italic; }
+.cb-markdown a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
+.cb-markdown a:hover { opacity: 0.8; }
+.cb-markdown ul { list-style: disc; padding-left: 1.25em; }
+.cb-markdown ol { list-style: decimal; padding-left: 1.25em; }
+.cb-markdown li { line-height: 1.55; }
+.cb-markdown li + li { margin-top: 0.25em; }
+/* Task list checkboxes (remarkGfm) */
+.cb-markdown li.task-list-item { list-style: none; margin-left: -1.25em; }
+.cb-markdown li.task-list-item input[type="checkbox"] {
+  margin-right: 0.4em;
+  accent-color: var(--primary);
+  vertical-align: -1px;
+}
+.cb-markdown blockquote {
+  border-left: 2px solid var(--primary);
+  padding-left: 0.75em;
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.cb-markdown hr { border-color: var(--border); }
+.cb-markdown table { width: 100%; border-collapse: collapse; font-size: 0.8rem; display: block; overflow-x: auto; }
+.cb-markdown th,
+.cb-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.35em 0.6em;
+  text-align: left;
+  white-space: nowrap;
+}
+.cb-markdown th { font-weight: 600; background: var(--muted); }
+.cb-markdown img { max-width: 100%; height: auto; border-radius: 0.5rem; }
+.cb-markdown code:not(pre code) {
+  background: var(--muted);
+  color: var(--primary);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  word-break: break-word;
+}
+.cb-markdown pre {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  max-width: 100%;
+}
+.cb-markdown pre code {
+  background: none;
+  color: var(--foreground);
+  padding: 0;
+  font-family: var(--font-mono);
+  word-break: normal;
+}
+
+/* ─── Thinking dots animation ─── */
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40% { transform: translateY(-6px); opacity: 1; }
+}
+.thinking-dot { animation: bounce-dot 1.2s ease-in-out infinite; }
+.thinking-dot:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dot:nth-child(3) { animation-delay: 0.3s; }
+
+/* ─── Dock + Layout animations ─── */
+@keyframes dock-appear {
+  from { opacity: 0; transform: translateY(8px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-dock-appear {
+  animation: dock-appear 0.25s ease-out;
+}
+
+/* ─── Chat scrollbar — thin warm ─── */
+.chat-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.chat-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background: oklch(0.40 0.008 280 / 0.4);
+  border-radius: 4px;
+}
+.chat-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.50 0.008 280 / 0.5);
+}
+
+/* ─── Expand hint fade ─── */
+@keyframes hint-fade {
+  0% { opacity: 0; transform: translateY(4px); }
+  15% { opacity: 0.6; transform: translateY(0); }
+  85% { opacity: 0.6; }
+  100% { opacity: 0; }
+}
+.animate-hint-fade {
+  animation: hint-fade 3s ease-out forwards;
+}

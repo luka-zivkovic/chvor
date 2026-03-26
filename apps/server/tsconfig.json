@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "lib": ["ES2023"],
+    "paths": {
+      "@chvor/shared": ["../../packages/shared/src/index.ts"],
+      "@chvor/pc-agent": ["../../packages/pc-agent/src/lib/index.ts"],
+      "@chvor/pc-agent/a11y": ["../../packages/pc-agent/src/lib/a11y/index.ts"]
+    }
+  },
+  "include": ["src", "../../packages/pc-agent/src/types.d.ts"]
+}

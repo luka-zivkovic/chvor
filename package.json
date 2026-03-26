@@ -1,0 +1,36 @@
+{
+  "name": "chvor",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE.md",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @chvor/client dev & pnpm --filter @chvor/server dev",
+    "dev:client": "pnpm --filter @chvor/client dev",
+    "dev:server": "pnpm --filter @chvor/server dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint apps/ packages/",
+    "format": "prettier --write \"apps/**/*.{ts,tsx}\" \"packages/**/*.ts\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx}\" \"packages/**/*.ts\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "eslint": "^9",
+    "eslint-plugin-react-hooks": "^5",
+    "prettier": "^3",
+    "typescript": "^5.7",
+    "typescript-eslint": "^8"
+  },
+  "packageManager": "pnpm@10.22.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "*",
+      "@whiskeysockets/baileys",
+      "better-sqlite3",
+      "esbuild",
+      "onnxruntime-node",
+      "protobufjs",
+      "sharp"
+    ]
+  }
+}

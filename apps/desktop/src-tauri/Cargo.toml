@@ -1,0 +1,36 @@
+[package]
+name = "chvor-desktop"
+version = "0.1.0"
+description = "Chvor Desktop — one-click installer and manager"
+authors = ["Luka Zivkovic"]
+edition = "2021"
+
+[lib]
+name = "chvor_desktop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-process = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio = { version = "1", features = ["full"] }
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
+zip = "2"
+dirs = "6"
+semver = "1"
+futures-util = "0.3"
+open = "5"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

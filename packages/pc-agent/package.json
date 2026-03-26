@@ -1,0 +1,30 @@
+{
+  "name": "@chvor/pc-agent",
+  "version": "0.0.1",
+  "description": "Chvor PC Agent — library for screen capture, input control, and accessibility tree + standalone CLI for remote PC control",
+  "type": "module",
+  "exports": {
+    ".": "./src/lib/index.ts",
+    "./a11y": "./src/lib/a11y/index.ts"
+  },
+  "bin": {
+    "chvor-pc-agent": "./dist/cli.js"
+  },
+  "main": "./src/lib/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "node --experimental-strip-types src/cli.ts",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "^4",
+    "screenshot-desktop": "^1",
+    "sharp": "^0.33",
+    "ws": "^8"
+  },
+  "devDependencies": {
+    "@types/ws": "^8",
+    "typescript": "^5.7"
+  }
+}

@@ -1,0 +1,147 @@
+name: Desktop Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-desktop:
+    strategy:
+      matrix:
+        include:
+          - runner: windows-latest
+            target: windows
+          - runner: macos-14
+            target: macos
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # macOS: import signing certificate
+      - name: Import Apple certificate
+        if: matrix.target == 'macos'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+
+      # Build Tauri app
+      - name: Build desktop app
+        working-directory: apps/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS notarization
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ "${{ matrix.target }}" = "macos" ]; then
+            pnpm tauri build --target universal-apple-darwin
+          else
+            pnpm tauri build
+          fi
+        shell: bash
+
+      # Upload artifacts
+      - name: Upload Windows artifacts
+        if: matrix.target == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+
+      - name: Upload macOS artifacts
+        if: matrix.target == 'macos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos
+          path: |
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+
+  publish-desktop:
+    needs: build-desktop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: desktop-assets
+          pattern: desktop-*
+          merge-multiple: true
+
+      - name: Generate updater JSON
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+
+          # Find the macOS .tar.gz signature
+          MAC_SIG=$(cat desktop-assets/*.app.tar.gz.sig 2>/dev/null || echo "")
+
+          # Find the Windows MSI/NSIS signature (if generated)
+          WIN_SIG=$(cat desktop-assets/*.msi.sig 2>/dev/null || echo "")
+
+          cat > desktop-assets/latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "notes": "See the release notes on GitHub.",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-universal": {
+                "signature": "${MAC_SIG}",
+                "url": "https://github.com/luka-zivkovic/chvor/releases/download/${VERSION}/Chvor.app.tar.gz"
+              },
+              "windows-x86_64": {
+                "signature": "${WIN_SIG}",
+                "url": "https://github.com/luka-zivkovic/chvor/releases/download/${VERSION}/Chvor_${VERSION#v}_x64-setup.exe"
+              }
+            }
+          }
+          EOF
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop-assets/**/*.msi
+            desktop-assets/**/*.exe
+            desktop-assets/**/*.dmg
+            desktop-assets/**/*.app.tar.gz
+            desktop-assets/**/*.app.tar.gz.sig
+            desktop-assets/latest.json
