@@ -21,9 +21,11 @@ jobs:
           - runner: ubuntu-latest
             target_os: linux
             target_arch: x64
-          - runner: ubuntu-24.04-arm64
-            target_os: linux
-            target_arch: arm64
+          # NOTE: ubuntu-24.04-arm64 disabled — GitHub free tier has very
+          # limited arm64 runners. Docker image covers linux/arm64 via buildx.
+          # - runner: ubuntu-24.04-arm64
+          #   target_os: linux
+          #   target_arch: arm64
           - runner: macos-15
             target_os: darwin
             target_arch: x64
