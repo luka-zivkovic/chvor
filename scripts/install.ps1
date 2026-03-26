@@ -110,7 +110,7 @@ $nodeVer = & node -v
 Write-Host "Node.js $nodeVer detected."
 
 Write-Host "Installing chvor globally via npm..."
-npm install -g chvor
+npm install -g @chvor/cli
 
 Write-Host ""
 Write-Host "chvor installed successfully!" -ForegroundColor Green

@@ -23,7 +23,7 @@ irm https://raw.githubusercontent.com/luka-zivkovic/chvor/main/scripts/install.p
 **What it does:**
 
 1. Checks for Node.js 22+ — installs it via Homebrew (macOS), NodeSource (Linux), or winget/Chocolatey/Scoop (Windows) if missing
-2. Runs `npm install -g chvor`
+2. Runs `npm install -g @chvor/cli`
 3. Launches `chvor onboard` — an interactive wizard that asks for your LLM provider, API key, and port
 4. Downloads the latest release, starts the server, and opens `http://localhost:3001`
 
@@ -66,7 +66,7 @@ Built with Tauri 2.0 (Rust + React). The app is ~6MB — it manages the server a
 If you already have Node.js 22+:
 
 ```bash
-npm install -g chvor
+npm install -g @chvor/cli
 chvor onboard
 ```
 

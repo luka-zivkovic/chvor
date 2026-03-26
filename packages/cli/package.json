@@ -1,5 +1,5 @@
 {
-  "name": "chvor",
+  "name": "@chvor/cli",
   "version": "0.1.0",
   "description": "Your own AI — install and run chvor.",
   "license": "SEE LICENSE IN LICENSE.md",

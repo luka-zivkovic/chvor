@@ -99,7 +99,7 @@ fi
 echo "Node.js $(node -v) detected."
 
 echo "Installing chvor globally via npm..."
-npm install -g chvor
+npm install -g @chvor/cli
 
 echo ""
 echo -e "${GREEN}${BOLD}chvor installed successfully!${NC}"
