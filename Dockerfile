@@ -48,10 +48,13 @@ COPY apps/client/package.json apps/client/
 # Install Playwright for web-agent browser tool
 RUN npx playwright install --with-deps chromium
 
-RUN mkdir -p /home/node/.chvor && chown -R node:node /home/node/.chvor /app
-USER node
+# Entrypoint fixes bind-mount permissions then drops to 'node' user
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
+    mkdir -p /home/node/.chvor/data && chown -R node:node /home/node/.chvor /app
 ENV NODE_ENV=production
 ENV CHVOR_DATA_DIR=/home/node/.chvor/data
 EXPOSE 3001
 VOLUME /home/node/.chvor
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "--import", "tsx", "apps/server/src/index.ts"]
