@@ -9,8 +9,6 @@ const social = new Hono();
  */
 social.get("/callback", (c) => {
   const status = c.req.query("status") ?? "unknown";
-  const accountId = c.req.query("connected_account_id") ?? "";
-
   const success = status === "success" || status === "active";
 
   const html = `<!DOCTYPE html>
@@ -39,7 +37,7 @@ social.get("/callback", (c) => {
   <div class="card">
     <div class="icon">${success ? "&#10003;" : "&#10007;"}</div>
     <h1>${success ? "Account Connected!" : "Connection Failed"}</h1>
-    <p>${success ? "You can close this tab and return to Chvor." : `Status: ${status}. Please try again in Chvor.`}</p>
+    <p>${success ? "You can close this tab and return to Chvor." : "The connection was not successful. Please try again in Chvor."}</p>
   </div>
 </body>
 </html>`;

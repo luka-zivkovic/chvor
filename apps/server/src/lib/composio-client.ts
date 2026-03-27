@@ -31,8 +31,7 @@ function getComposioApiKey(): string | null {
   const full = getCredentialData(composioCred.id);
   if (!full) return null;
 
-  // Return first value (apiKey)
-  return Object.values(full.data)[0] ?? null;
+  return (full.data as Record<string, string>).apiKey ?? null;
 }
 
 async function composioFetch(
@@ -129,6 +128,9 @@ export async function listConnectedAccounts(
  * Disconnect (delete) a connected account by ID.
  */
 export async function disconnectAccount(accountId: string): Promise<void> {
+  if (!/^[a-zA-Z0-9_-]+$/.test(accountId)) {
+    throw new Error("Invalid account ID");
+  }
   await composioFetch(`/connected_accounts/${accountId}`, {
     method: "DELETE",
   });
