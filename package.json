@@ -26,6 +26,7 @@
     "onlyBuiltDependencies": [
       "*",
       "@whiskeysockets/baileys",
+      "argon2",
       "better-sqlite3",
       "esbuild",
       "onnxruntime-node",

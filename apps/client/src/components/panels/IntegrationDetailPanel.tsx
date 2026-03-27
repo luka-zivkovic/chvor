@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useCanvasStore } from "../../stores/canvas-store";
 import { useCredentialStore } from "../../stores/credential-store";
 import { useUIStore } from "../../stores/ui-store";
+import { useWhatsAppStore } from "../../stores/whatsapp-store";
 import { StatusBadge } from "../credentials/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +34,9 @@ function statusDotClass(status: string): string {
 export function IntegrationDetailPanel() {
   const detailNodeId = useUIStore((s) => s.detailNodeId);
   const nodes = useCanvasStore((s) => s.nodes);
-  const { credentials, providers, updateCredential } = useCredentialStore();
+  const { credentials, providers, updateCredential, removeCredential } = useCredentialStore();
+  const whatsappDisconnect = useWhatsAppStore((s) => s.disconnect);
+  const closePanel = useUIStore((s) => s.closePanel);
 
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
@@ -42,6 +45,8 @@ export function IntegrationDetailPanel() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const node = nodes.find((n) => n.id === detailNodeId);
   if (!node) return <p className="text-xs text-muted-foreground">Node not found</p>;
@@ -119,6 +124,27 @@ export function IntegrationDetailPanel() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    if (!credential) return;
+    if (!confirmRemove) {
+      setConfirmRemove(true);
+      return;
+    }
+    setRemoving(true);
+    try {
+      if (data.credentialType === "whatsapp") {
+        await whatsappDisconnect();
+      }
+      await api.credentials.delete(credential.id);
+      removeCredential(credential.id);
+      closePanel();
+    } catch {
+      setConfirmRemove(false);
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -277,16 +303,28 @@ export function IntegrationDetailPanel() {
       {/* Access Control (WhatsApp only) */}
       {data.credentialType === "whatsapp" && <WhatsAppAccessControl />}
 
-      {/* Edit Button */}
+      {/* Actions */}
       {credential && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={startEditing}
-          className="w-full text-[10px]"
-        >
-          Edit
-        </Button>
+        <div className="flex flex-col gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={startEditing}
+            className="w-full text-[10px]"
+          >
+            Edit
+          </Button>
+          <Button
+            variant={confirmRemove ? "destructive" : "outline"}
+            size="sm"
+            onClick={handleRemove}
+            onBlur={() => setConfirmRemove(false)}
+            disabled={removing}
+            className="w-full text-[10px]"
+          >
+            {removing ? "Removing..." : confirmRemove ? "Confirm removal?" : "Remove Integration"}
+          </Button>
+        </div>
       )}
     </div>
   );

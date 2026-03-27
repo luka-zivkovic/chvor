@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 
 import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml } from "yaml";
-import type { TemplateManifest, TemplateIndexEntry } from "@chvor/shared";
+import type { TemplateManifest, TemplateIndexEntry } from "../types/template.js";
 import { getAppDir } from "./paths.js";
 
 const DEFAULT_REGISTRY_URL =

@@ -1,6 +1,6 @@
 import { readConfig } from "../lib/config.js";
 import { readFileSync } from "node:fs";
-import { validateSkillForPublishing } from "@chvor/shared";
+import { validateSkillForPublishing } from "../lib/validate-skill.js";
 
 function getBaseUrl(): string {
   const config = readConfig();

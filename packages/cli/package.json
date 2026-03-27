@@ -1,6 +1,6 @@
 {
   "name": "@chvor/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Your own AI — install and run chvor.",
   "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
@@ -20,7 +20,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@chvor/shared": "workspace:*",
     "commander": "^13",
     "@inquirer/prompts": "^7",
     "yaml": "^2"

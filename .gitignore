@@ -11,17 +11,18 @@ dist/
 .env
 .env.local
 .env.*.local
-data/.encryption-key
-apps/server/data/.encryption-key
 *.tmp
-data/clearbox.db
-data/clearbox.db-shm
-data/clearbox.db-wal
-data/chvor.db
-data/chvor.db-shm
-data/chvor.db-wal
-data/models/
-data/whatsapp-auth/
+
+# Runtime data (databases, auth state, models)
+**/.encryption-key
+**/chvor.db
+**/chvor.db-shm
+**/chvor.db-wal
+**/a2ui.db
+**/a2ui.db-shm
+**/a2ui.db-wal
+**/whatsapp-auth/
+**/models/
 
 # IDE
 .vscode/

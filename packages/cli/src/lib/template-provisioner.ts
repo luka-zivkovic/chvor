@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { TemplateManifest } from "@chvor/shared";
+import type { TemplateManifest } from "../types/template.js";
 import { getSkillsDir, getToolsDir, ensureDir } from "./paths.js";
 import { getTemplateSkillsDir, getTemplateToolsDir } from "./template-loader.js";
 

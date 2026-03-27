@@ -19,7 +19,7 @@ import {
   listBundledTemplates,
 } from "../lib/template-loader.js";
 import { provision } from "../lib/template-provisioner.js";
-import type { TemplateManifest, TemplateCredentialDef } from "@chvor/shared";
+import type { TemplateManifest, TemplateCredentialDef } from "../types/template.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(

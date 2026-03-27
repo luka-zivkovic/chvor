@@ -291,9 +291,6 @@ importers:
 
   packages/cli:
     dependencies:
-      '@chvor/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@inquirer/prompts':
         specifier: ^7
         version: 7.10.1(@types/node@25.3.2)
