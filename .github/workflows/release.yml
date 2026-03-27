@@ -78,9 +78,11 @@ jobs:
           cp apps/client/package.json "${STAGING}/apps/client/"
           cp -r apps/client/dist "${STAGING}/apps/client/dist"
 
-          # Shared source (needed for type-strip imports)
+          # Shared package (source + compiled dist — dist is required at runtime
+          # because package.json declares "main": "./dist/index.js")
           cp packages/shared/package.json packages/shared/tsconfig.json "${STAGING}/packages/shared/"
           cp -r packages/shared/src "${STAGING}/packages/shared/src"
+          cp -r packages/shared/dist "${STAGING}/packages/shared/dist"
 
           # Install production deps in staging
           cd "${STAGING}"

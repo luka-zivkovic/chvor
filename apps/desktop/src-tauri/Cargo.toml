@@ -1,6 +1,6 @@
 [package]
 name = "chvor-desktop"
-version = "0.1.1"
+version = "0.1.2"
 description = "Chvor Desktop — one-click installer and manager"
 authors = ["Luka Zivkovic"]
 edition = "2021"
