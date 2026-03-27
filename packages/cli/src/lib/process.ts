@@ -148,13 +148,24 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
       stdio: "inherit",
     });
 
+    if (child.pid === undefined) {
+      throw new Error("Failed to spawn server process.");
+    }
+
     const pidPath = getPidPath();
     writeFileSync(pidPath, String(child.pid), "utf-8");
+
+    child.on("error", (err) => {
+      console.error(`Server process error: ${err.message}`);
+      try { unlinkSync(pidPath); } catch { /* ignore */ }
+      process.exit(1);
+    });
 
     // Forward SIGTERM/SIGINT to child so service managers (launchd, systemd)
     // see a clean exit(0) instead of 128+signal
     for (const sig of ["SIGTERM", "SIGINT"] as const) {
       process.on(sig, () => {
+        try { unlinkSync(pidPath); } catch { /* ignore */ }
         child.kill(sig);
       });
     }
@@ -163,7 +174,7 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
       try {
         unlinkSync(pidPath);
       } catch {
-        // ignore
+        // ignore — may already be cleaned up by signal handler
       }
       process.exit(code ?? 0);
     });
@@ -189,6 +200,10 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
       stdio: ["ignore", logFd, logFd],
       detached: true,
     });
+
+    if (child.pid === undefined) {
+      throw new Error("Failed to spawn server process.");
+    }
 
     child.unref();
 

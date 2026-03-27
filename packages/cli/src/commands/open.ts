@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readConfig } from "../lib/config.js";
 
 export async function open(): Promise<void> {
@@ -8,13 +8,13 @@ export async function open(): Promise<void> {
 
   switch (process.platform) {
     case "darwin":
-      execSync(`open ${url}`);
+      execFileSync("open", [url]);
       break;
     case "win32":
-      execSync(`start ${url}`);
+      execFileSync("cmd", ["/c", "start", "", url]);
       break;
     default:
-      execSync(`xdg-open ${url}`);
+      execFileSync("xdg-open", [url]);
       break;
   }
 

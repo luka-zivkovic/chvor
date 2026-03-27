@@ -8,14 +8,20 @@ function getVbsPath(instance?: string): string {
   return join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", `${name}.vbs`);
 }
 
+function escapeVbs(s: string): string {
+  return s.replace(/"/g, '""');
+}
+
 export async function install(nodePath: string, cliPath: string, instance?: string): Promise<void> {
   const vbsPath = getVbsPath(instance);
 
+  const escapedNode = escapeVbs(nodePath);
+  const escapedCli = escapeVbs(cliPath);
   const args = instance ? `start -i ${instance}` : "start";
 
   // VBScript that runs chvor start in a hidden window (no console flash)
   const vbs = `Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run """${nodePath}"" ""${cliPath}"" ${args}", 0, False
+WshShell.Run """${escapedNode}"" ""${escapedCli}"" ${args}", 0, False
 `;
 
   writeFileSync(vbsPath, vbs, "utf-8");

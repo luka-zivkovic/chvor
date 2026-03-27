@@ -31,6 +31,8 @@ program
   .option("-i, --instance <name>", "Named instance to start")
   .action(async (opts) => {
     if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
       const { setInstance } = await import("./lib/paths.js");
       setInstance(opts.instance);
     }
@@ -48,6 +50,8 @@ program
   .option("-i, --instance <name>", "Named instance to stop")
   .action(async (opts) => {
     if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
       const { setInstance } = await import("./lib/paths.js");
       setInstance(opts.instance);
     }
@@ -254,6 +258,10 @@ serviceCmd
   .description("Enable auto-start on login")
   .option("-i, --instance <name>", "Named instance")
   .action(async (opts: { instance?: string }) => {
+    if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
+    }
     const { serviceInstall } = await import("./commands/service.js");
     await serviceInstall(opts);
   });
@@ -263,6 +271,10 @@ serviceCmd
   .description("Disable auto-start on login")
   .option("-i, --instance <name>", "Named instance")
   .action(async (opts: { instance?: string }) => {
+    if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
+    }
     const { serviceUninstall } = await import("./commands/service.js");
     await serviceUninstall(opts);
   });
@@ -272,6 +284,10 @@ serviceCmd
   .description("Check auto-start status")
   .option("-i, --instance <name>", "Named instance")
   .action(async (opts: { instance?: string }) => {
+    if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
+    }
     const { serviceStatus } = await import("./commands/service.js");
     await serviceStatus(opts);
   });
@@ -286,6 +302,8 @@ authCmd
   .option("-i, --instance <name>", "Named instance to reset")
   .action(async (opts: { instance?: string }) => {
     if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
       const { setInstance } = await import("./lib/paths.js");
       setInstance(opts.instance);
     }

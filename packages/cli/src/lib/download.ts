@@ -1,9 +1,10 @@
-import { createWriteStream, createReadStream, existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { createWriteStream, createReadStream, existsSync, rmSync, readdirSync, realpathSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
 
 import { getAppDir, getDownloadsDir, ensureDir } from "./paths.js";
 import { readConfig, writeConfig } from "./config.js";
@@ -140,6 +141,12 @@ export async function downloadRelease(version: string): Promise<void> {
   // cannot overwrite existing directories even with -Force)
   const appDir = getAppDir();
   if (existsSync(appDir)) {
+    // Safety: resolve symlinks and verify the target is under the user's home
+    const realAppDir = realpathSync(appDir);
+    const realHome = resolve(homedir());
+    if (!realAppDir.startsWith(realHome + sep)) {
+      throw new Error(`Refusing to delete path outside home directory: ${realAppDir}`);
+    }
     rmSync(appDir, { recursive: true, force: true });
   }
   ensureDir(appDir);
@@ -185,40 +192,28 @@ export function ensurePlaywright(): boolean {
   const playwrightCli = join(appDir, "node_modules", "@playwright", "test", "cli.js");
   if (!existsSync(playwrightCli)) return false;
 
-  // Check if Chromium is already installed by looking for the browser revision
+  // Check if Chromium is already installed by looking for the local browsers dir.
+  // Playwright stores downloaded browsers under playwright-core/.local-browsers/
+  const localBrowsers = join(appDir, "node_modules", "playwright-core", ".local-browsers");
+  const alreadyInstalled = existsSync(localBrowsers) &&
+    (readdirSync(localBrowsers).some((entry) => entry.toLowerCase().includes("chromium")));
+
+  if (alreadyInstalled) return true;
+
   try {
-    const result = execFileSync("node", [playwrightCli, "install", "--dry-run", "chromium"], {
+    console.log("Installing browser engine (Chromium) for web agent...");
+    execFileSync("node", [playwrightCli, "install", "chromium"], {
+      stdio: "inherit",
       cwd: appDir,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
     });
-    // If dry-run outputs nothing or indicates installed, it's ready
-    if (!result.includes("browser does not need")) {
-      console.log("Installing browser engine (Chromium) for web agent...");
-      execFileSync("node", [playwrightCli, "install", "chromium"], {
-        stdio: "inherit",
-        cwd: appDir,
-      });
-      console.log("Browser engine installed.");
-    }
+    console.log("Browser engine installed.");
     return true;
   } catch {
-    // Fallback: just try to install — idempotent
-    try {
-      console.log("Installing browser engine (Chromium) for web agent...");
-      execFileSync("node", [playwrightCli, "install", "chromium"], {
-        stdio: "inherit",
-        cwd: appDir,
-      });
-      console.log("Browser engine installed.");
-      return true;
-    } catch {
-      console.warn(
-        "Warning: failed to install browser engine. " +
-        "The web agent won't work until you run: npx playwright install chromium"
-      );
-      return false;
-    }
+    console.warn(
+      "Warning: failed to install browser engine. " +
+      "The web agent won't work until you run: npx playwright install chromium"
+    );
+    return false;
   }
 }
 

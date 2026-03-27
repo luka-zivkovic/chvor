@@ -1,5 +1,5 @@
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -21,13 +21,15 @@ export async function install(nodePath: string, cliPath: string, instance?: stri
   const args = ["start", "--foreground"];
   if (instance) args.push("-i", instance);
 
+  const execArgs = [`"${nodePath}"`, `"${cliPath}"`, ...args.map((a) => `"${a}"`)].join(" ");
+
   const unit = `[Unit]
 Description=Chvor AI Server${instance ? ` (${instance})` : ""}
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=${nodePath} ${cliPath} ${args.join(" ")}
+ExecStart=${execArgs}
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
@@ -38,9 +40,9 @@ WantedBy=default.target
 
   writeFileSync(servicePath, unit, "utf-8");
 
-  execSync("systemctl --user daemon-reload", { stdio: "inherit" });
-  execSync(`systemctl --user enable ${serviceName}`, { stdio: "inherit" });
-  execSync(`systemctl --user start ${serviceName}`, { stdio: "inherit" });
+  execFileSync("systemctl", ["--user", "daemon-reload"], { stdio: "inherit" });
+  execFileSync("systemctl", ["--user", "enable", serviceName], { stdio: "inherit" });
+  execFileSync("systemctl", ["--user", "start", serviceName], { stdio: "inherit" });
 
   console.log(`Auto-start installed. Chvor will start on login.`);
   console.log(`  Service: ${servicePath}`);
@@ -56,18 +58,18 @@ export async function uninstall(instance?: string): Promise<void> {
   }
 
   try {
-    execSync(`systemctl --user stop ${serviceName}`, { stdio: "pipe" });
+    execFileSync("systemctl", ["--user", "stop", serviceName], { stdio: "pipe" });
   } catch {
     // Already stopped
   }
   try {
-    execSync(`systemctl --user disable ${serviceName}`, { stdio: "pipe" });
+    execFileSync("systemctl", ["--user", "disable", serviceName], { stdio: "pipe" });
   } catch {
     // Already disabled
   }
 
   unlinkSync(servicePath);
-  execSync("systemctl --user daemon-reload", { stdio: "pipe" });
+  execFileSync("systemctl", ["--user", "daemon-reload"], { stdio: "pipe" });
 
   console.log("Auto-start removed.");
 }
@@ -82,7 +84,7 @@ export async function status(instance?: string): Promise<void> {
   }
 
   try {
-    const output = execSync(`systemctl --user is-active ${serviceName}`, {
+    const output = execFileSync("systemctl", ["--user", "is-active", serviceName], {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
     });
