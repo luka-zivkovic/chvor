@@ -1,3 +1,4 @@
+import { Component } from "react";
 import type { A2UISurface } from "@chvor/shared";
 import {
   A2UIText,
@@ -72,6 +73,43 @@ function renderNode(
   return null;
 }
 
+/* ─── Error Boundary ─── */
+
+interface EBProps {
+  children: React.ReactNode;
+  surfaceId: string;
+}
+
+interface EBState {
+  error: Error | null;
+}
+
+class A2UIErrorBoundary extends Component<EBProps, EBState> {
+  state: EBState = { error: null };
+
+  static getDerivedStateFromError(error: Error): EBState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error(`[a2ui] render crash on surface "${this.props.surfaceId}":`, error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-4">
+          <p className="text-sm font-medium text-destructive">Surface render error</p>
+          <p className="mt-1 text-xs text-muted-foreground">{this.state.error.message}</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/* ─── Renderer ─── */
+
 export function A2UIRenderer({ surfaceId, surface }: { surfaceId: string; surface: A2UISurface }) {
   if (!surface.root || !surface.rendering) {
     return (
@@ -81,5 +119,9 @@ export function A2UIRenderer({ surfaceId, surface }: { surfaceId: string; surfac
     );
   }
 
-  return <div className="a2ui-surface">{renderNode(surface.root, surface, new Set(), 0)}</div>;
+  return (
+    <A2UIErrorBoundary surfaceId={surfaceId}>
+      <div className="a2ui-surface">{renderNode(surface.root, surface, new Set(), 0)}</div>
+    </A2UIErrorBoundary>
+  );
 }

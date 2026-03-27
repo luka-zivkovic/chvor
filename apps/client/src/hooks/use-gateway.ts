@@ -143,9 +143,10 @@ export function useGateway() {
   }, [reinitSession]);
 
   useEffect(() => {
+    useAppStore.getState().setSend(send);
     useAppStore.getState().setSendChat(sendChat);
     useAppStore.getState().setStopGeneration(stopGeneration);
-  }, [sendChat, stopGeneration]);
+  }, [send, sendChat, stopGeneration]);
 
   return { send, sendChat, stopGeneration };
 }

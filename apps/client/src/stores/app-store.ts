@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   ChatMessage,
+  GatewayClientEvent,
   GatewayServerEvent,
   ExecutionEvent,
   EmotionState,
@@ -53,8 +54,10 @@ interface AppState {
   _reinitSession: ((id: string) => void) | null;
   setReinitSession: (fn: (id: string) => void) => void;
 
-  _sendChat: ((text: string) => void) | null;
-  setSendChat: (fn: (text: string) => void) => void;
+  _send: ((event: GatewayClientEvent) => void) | null;
+  setSend: (fn: (event: GatewayClientEvent) => void) => void;
+  _sendChat: ((text: string, inputModality?: "voice", media?: MediaArtifact[]) => void) | null;
+  setSendChat: (fn: (text: string, inputModality?: "voice", media?: MediaArtifact[]) => void) => void;
   _stopGeneration: (() => void) | null;
   setStopGeneration: (fn: () => void) => void;
   loadConversations: () => Promise<void>;
@@ -141,6 +144,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   messagesLoading: false,
   _reinitSession: null,
   setReinitSession: (fn) => set({ _reinitSession: fn }),
+  _send: null,
+  setSend: (fn) => set({ _send: fn }),
   _sendChat: null,
   setSendChat: (fn) => set({ _sendChat: fn }),
   _stopGeneration: null,

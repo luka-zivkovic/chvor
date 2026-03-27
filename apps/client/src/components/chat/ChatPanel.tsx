@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAppStore } from "../../stores/app-store";
-import { useGateway } from "../../hooks/use-gateway";
+
 import { cn } from "@/lib/utils";
 import { MessageBubble } from "./MessageBubble";
 import { StreamingMessage } from "./StreamingMessage";
@@ -151,7 +151,9 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   const newConversation = useAppStore((s) => s.newConversation);
   const updateConversationTitle = useAppStore((s) => s.updateConversationTitle);
   const messagesLoading = useAppStore((s) => s.messagesLoading);
-  const { send, sendChat, stopGeneration } = useGateway();
+  const send = useAppStore((s) => s._send);
+  const sendChat = useAppStore((s) => s._sendChat);
+  const stopGeneration = useAppStore((s) => s._stopGeneration);
   const { setTalkModeActive } = useVoiceStore();
   const audioUrls = useVoiceStore((s) => s.audioUrls);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -182,14 +184,14 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   }, []);
 
   const handleStop = useCallback(() => {
-    stopGeneration();
+    stopGeneration?.();
     useAppStore.getState().clearStreaming();
   }, [stopGeneration]);
 
   const handleSend = (text: string, inputModality?: "voice", media?: import("@chvor/shared").MediaArtifact[]) => {
     // Auto-stop current generation when sending a new message
     if (isStreaming) {
-      stopGeneration();
+      stopGeneration?.();
       useAppStore.getState().clearStreaming();
     }
     userScrolledUp.current = false;
@@ -202,7 +204,7 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
       timestamp: new Date().toISOString(),
       ...(media?.length ? { media } : {}),
     });
-    sendChat(text, inputModality, media);
+    sendChat?.(text, inputModality, media);
   };
 
   const lastIsUser = messages.length > 0 && messages[messages.length - 1].role === "user";
@@ -312,7 +314,7 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
       {pendingApprovals.length > 0 && (
         <div className="shrink-0">
           {pendingApprovals.map((a) => (
-            <CommandApproval key={a.requestId} approval={a} onSend={send} />
+            <CommandApproval key={a.requestId} approval={a} onSend={send ?? (() => {})} />
           ))}
         </div>
       )}
