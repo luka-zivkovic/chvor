@@ -184,14 +184,14 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   }, []);
 
   const handleStop = useCallback(() => {
-    stopGeneration?.();
+    stopGeneration();
     useAppStore.getState().clearStreaming();
   }, [stopGeneration]);
 
   const handleSend = (text: string, inputModality?: "voice", media?: import("@chvor/shared").MediaArtifact[]) => {
     // Auto-stop current generation when sending a new message
     if (isStreaming) {
-      stopGeneration?.();
+      stopGeneration();
       useAppStore.getState().clearStreaming();
     }
     userScrolledUp.current = false;
@@ -204,7 +204,7 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
       timestamp: new Date().toISOString(),
       ...(media?.length ? { media } : {}),
     });
-    sendChat?.(text, inputModality, media);
+    sendChat(text, inputModality, media);
   };
 
   const lastIsUser = messages.length > 0 && messages[messages.length - 1].role === "user";
@@ -314,7 +314,7 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
       {pendingApprovals.length > 0 && (
         <div className="shrink-0">
           {pendingApprovals.map((a) => (
-            <CommandApproval key={a.requestId} approval={a} onSend={send ?? (() => {})} />
+            <CommandApproval key={a.requestId} approval={a} onSend={send} />
           ))}
         </div>
       )}

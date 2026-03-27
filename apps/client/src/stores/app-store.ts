@@ -54,11 +54,11 @@ interface AppState {
   _reinitSession: ((id: string) => void) | null;
   setReinitSession: (fn: (id: string) => void) => void;
 
-  _send: ((event: GatewayClientEvent) => void) | null;
+  _send: (event: GatewayClientEvent) => void;
   setSend: (fn: (event: GatewayClientEvent) => void) => void;
-  _sendChat: ((text: string, inputModality?: "voice", media?: MediaArtifact[]) => void) | null;
+  _sendChat: (text: string, inputModality?: "voice", media?: MediaArtifact[]) => void;
   setSendChat: (fn: (text: string, inputModality?: "voice", media?: MediaArtifact[]) => void) => void;
-  _stopGeneration: (() => void) | null;
+  _stopGeneration: () => void;
   setStopGeneration: (fn: () => void) => void;
   loadConversations: () => Promise<void>;
   switchConversation: (compositeId: string) => Promise<void>;
@@ -144,11 +144,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   messagesLoading: false,
   _reinitSession: null,
   setReinitSession: (fn) => set({ _reinitSession: fn }),
-  _send: null,
+  _send: () => {},
   setSend: (fn) => set({ _send: fn }),
-  _sendChat: null,
+  _sendChat: () => {},
   setSendChat: (fn) => set({ _sendChat: fn }),
-  _stopGeneration: null,
+  _stopGeneration: () => {},
   setStopGeneration: (fn) => set({ _stopGeneration: fn }),
 
   loadConversations: async () => {

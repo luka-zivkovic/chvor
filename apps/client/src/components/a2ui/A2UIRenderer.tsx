@@ -120,7 +120,7 @@ export function A2UIRenderer({ surfaceId, surface }: { surfaceId: string; surfac
   }
 
   return (
-    <A2UIErrorBoundary surfaceId={surfaceId}>
+    <A2UIErrorBoundary key={surfaceId} surfaceId={surfaceId}>
       <div className="a2ui-surface">{renderNode(surface.root, surface, new Set(), 0)}</div>
     </A2UIErrorBoundary>
   );
