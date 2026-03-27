@@ -161,6 +161,7 @@ pub async fn start_server(
     let mut cmd = StdCommand::new("node");
     cmd.arg("--import").arg("tsx");
     cmd.arg(server_entry.to_string_lossy().as_ref());
+    cmd.current_dir(app_dir());
     cmd.env("PORT", &port);
     cmd.env("CHVOR_DATA_DIR", data_dir.to_string_lossy().as_ref());
     cmd.env("CHVOR_SKILLS_DIR", skills_dir.to_string_lossy().as_ref());

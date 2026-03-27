@@ -145,6 +145,7 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
 
     const child = spawn("node", ["--import", "tsx", serverEntry], {
       env,
+      cwd: getAppDir(),
       stdio: "inherit",
     });
 
@@ -197,6 +198,7 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
 
     const child = spawn("node", ["--import", "tsx", serverEntry], {
       env,
+      cwd: getAppDir(),
       stdio: ["ignore", logFd, logFd],
       detached: true,
     });
