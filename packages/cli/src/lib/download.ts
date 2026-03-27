@@ -6,6 +6,10 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 
+function escapePsPath(p: string): string {
+  return p.replace(/'/g, "''");
+}
+
 import { getAppDir, getDownloadsDir, ensureDir } from "./paths.js";
 import { readConfig, writeConfig } from "./config.js";
 import { getAssetName, getPlatform } from "./platform.js";
@@ -144,7 +148,9 @@ export async function downloadRelease(version: string): Promise<void> {
     // Safety: resolve symlinks and verify the target is under the user's home
     const realAppDir = realpathSync(appDir);
     const realHome = resolve(homedir());
-    if (!realAppDir.startsWith(realHome + sep)) {
+    // Case-insensitive comparison on Windows where paths are case-insensitive
+    const norm = (p: string) => process.platform === "win32" ? p.toLowerCase() : p;
+    if (!norm(realAppDir).startsWith(norm(realHome) + sep)) {
       throw new Error(`Refusing to delete path outside home directory: ${realAppDir}`);
     }
     rmSync(appDir, { recursive: true, force: true });
@@ -155,18 +161,18 @@ export async function downloadRelease(version: string): Promise<void> {
   if (getPlatform() === "win") {
     execFileSync("powershell", [
       "-NoProfile", "-Command",
-      `Expand-Archive -Path '${tarballPath}' -DestinationPath '${appDir}' -Force`,
+      `Expand-Archive -Path '${escapePsPath(tarballPath)}' -DestinationPath '${escapePsPath(appDir)}' -Force`,
     ], { stdio: "inherit" });
     // Move contents up from the nested directory (strip-components equivalent)
     const nested = join(appDir, assetName.replace(/\.zip$/, ""));
     if (existsSync(nested)) {
       execFileSync("powershell", [
         "-NoProfile", "-Command",
-        `Get-ChildItem -Path '${nested}' | Move-Item -Destination '${appDir}' -Force`,
+        `Get-ChildItem -Path '${escapePsPath(nested)}' | Move-Item -Destination '${escapePsPath(appDir)}' -Force`,
       ], { stdio: "inherit" });
       execFileSync("powershell", [
         "-NoProfile", "-Command",
-        `Remove-Item -Path '${nested}' -Recurse -Force`,
+        `Remove-Item -Path '${escapePsPath(nested)}' -Recurse -Force`,
       ], { stdio: "inherit" });
     }
   } else {

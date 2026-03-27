@@ -114,7 +114,7 @@ jobs:
 
   publish-desktop:
     needs: build-desktop
-    if: always() && !cancelled()
+    if: needs.build-desktop.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

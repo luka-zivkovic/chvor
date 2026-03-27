@@ -12,6 +12,10 @@ function getServiceName(instance?: string): string {
   return instance ? `chvor-${instance}.service` : "chvor.service";
 }
 
+function escapeSystemdArg(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 export async function install(nodePath: string, cliPath: string, instance?: string): Promise<void> {
   const servicePath = getServicePath(instance);
   const serviceName = getServiceName(instance);
@@ -21,7 +25,7 @@ export async function install(nodePath: string, cliPath: string, instance?: stri
   const args = ["start", "--foreground"];
   if (instance) args.push("-i", instance);
 
-  const execArgs = [`"${nodePath}"`, `"${cliPath}"`, ...args.map((a) => `"${a}"`)].join(" ");
+  const execArgs = [`"${escapeSystemdArg(nodePath)}"`, `"${escapeSystemdArg(cliPath)}"`, ...args.map((a) => `"${escapeSystemdArg(a)}"`)].join(" ");
 
   const unit = `[Unit]
 Description=Chvor AI Server${instance ? ` (${instance})` : ""}

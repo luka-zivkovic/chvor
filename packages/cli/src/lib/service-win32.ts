@@ -17,7 +17,7 @@ export async function install(nodePath: string, cliPath: string, instance?: stri
 
   const escapedNode = escapeVbs(nodePath);
   const escapedCli = escapeVbs(cliPath);
-  const args = instance ? `start -i ${instance}` : "start";
+  const args = instance ? `start -i ""${escapeVbs(instance)}""` : "start";
 
   // VBScript that runs chvor start in a hidden window (no console flash)
   const vbs = `Set WshShell = CreateObject("WScript.Shell")

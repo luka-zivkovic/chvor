@@ -84,6 +84,8 @@ instancesCmd
   .command("start <name>")
   .description("Start a named instance")
   .action(async (name: string) => {
+    const { validateInstanceName } = await import("./lib/validate.js");
+    validateInstanceName(name);
     const { startInstance } = await import("./commands/instances.js");
     await startInstance(name);
   });
@@ -92,6 +94,8 @@ instancesCmd
   .command("stop <name>")
   .description("Stop a named instance")
   .action(async (name: string) => {
+    const { validateInstanceName } = await import("./lib/validate.js");
+    validateInstanceName(name);
     const { stopInstance } = await import("./commands/instances.js");
     await stopInstance(name);
   });

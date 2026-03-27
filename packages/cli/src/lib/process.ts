@@ -153,7 +153,7 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
     }
 
     const pidPath = getPidPath();
-    writeFileSync(pidPath, String(child.pid), "utf-8");
+    writeFileSync(pidPath, String(child.pid), { encoding: "utf-8", mode: 0o600 });
 
     child.on("error", (err) => {
       console.error(`Server process error: ${err.message}`);
@@ -176,7 +176,7 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
       } catch {
         // ignore — may already be cleaned up by signal handler
       }
-      process.exit(code ?? 0);
+      process.exit(code ?? 1);
     });
 
     // Wait for health
@@ -208,7 +208,7 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
     child.unref();
 
     const pidPath = getPidPath();
-    writeFileSync(pidPath, String(child.pid), "utf-8");
+    writeFileSync(pidPath, String(child.pid), { encoding: "utf-8", mode: 0o600 });
 
     console.log(`Chvor started (PID ${child.pid}). Logs: ${logPath}`);
 

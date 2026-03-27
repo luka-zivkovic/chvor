@@ -3,6 +3,15 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 function getPlistPath(instance?: string): string {
   const name = instance ? `ai.chvor.server.${instance}` : "ai.chvor.server";
   return join(homedir(), "Library", "LaunchAgents", `${name}.plist`);
@@ -28,12 +37,12 @@ export async function install(nodePath: string, cliPath: string, instance?: stri
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${label}</string>
+  <string>${escapeXml(label)}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${nodePath}</string>
-    <string>${cliPath}</string>
-${args.map((a) => `    <string>${a}</string>`).join("\n")}
+    <string>${escapeXml(nodePath)}</string>
+    <string>${escapeXml(cliPath)}</string>
+${args.map((a) => `    <string>${escapeXml(a)}</string>`).join("\n")}
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -43,9 +52,9 @@ ${args.map((a) => `    <string>${a}</string>`).join("\n")}
     <false/>
   </dict>
   <key>StandardOutPath</key>
-  <string>${join(homedir(), ".chvor", "logs", "launchd-stdout.log")}</string>
+  <string>${escapeXml(join(homedir(), ".chvor", "logs", "launchd-stdout.log"))}</string>
   <key>StandardErrorPath</key>
-  <string>${join(homedir(), ".chvor", "logs", "launchd-stderr.log")}</string>
+  <string>${escapeXml(join(homedir(), ".chvor", "logs", "launchd-stderr.log"))}</string>
 </dict>
 </plist>`;
 
