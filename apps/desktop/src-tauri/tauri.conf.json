@@ -48,13 +48,7 @@
     },
     "macOS": {
       "signingIdentity": "Developer ID Application: Luka Zivkovic (8YW274D5TQ)",
-      "providerShortName": "8YW274D5TQ",
-      "dmg": {
-        "background": "icons/dmg-background.png",
-        "windowSize": { "width": 660, "height": 400 },
-        "appPosition": { "x": 180, "y": 170 },
-        "applicationFolderPosition": { "x": 480, "y": 170 }
-      }
+      "providerShortName": "8YW274D5TQ"
     }
   },
   "plugins": {}
