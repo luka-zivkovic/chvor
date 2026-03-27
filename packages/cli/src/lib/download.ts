@@ -1,9 +1,14 @@
-import { createWriteStream, createReadStream, existsSync } from "node:fs";
-import { join } from "node:path";
+import { createWriteStream, createReadStream, existsSync, rmSync, readdirSync, realpathSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
+
+function escapePsPath(p: string): string {
+  return p.replace(/'/g, "''");
+}
 
 import { getAppDir, getDownloadsDir, ensureDir } from "./paths.js";
 import { readConfig, writeConfig } from "./config.js";
@@ -101,7 +106,6 @@ export async function downloadRelease(version: string): Promise<void> {
   const tarballPath = join(downloadsDir, assetName);
 
   // Download the tarball
-  console.log(`Downloading ${assetName}...`);
   const res = await fetch(url, {
     headers: { "User-Agent": "chvor-cli" },
   });
@@ -115,6 +119,10 @@ export async function downloadRelease(version: string): Promise<void> {
   if (!res.body) {
     throw new Error("Download response has no body");
   }
+
+  const contentLength = res.headers.get("content-length");
+  const sizeMB = contentLength ? `${Math.round(Number(contentLength) / 1024 / 1024)} MB` : "";
+  console.log(`Downloading ${assetName}${sizeMB ? ` (${sizeMB})` : ""}...`);
 
   const fileStream = createWriteStream(tarballPath);
   await pipeline(Readable.fromWeb(res.body as never), fileStream);
@@ -133,26 +141,38 @@ export async function downloadRelease(version: string): Promise<void> {
     console.log("Checksum verified.");
   }
 
-  // Extract
+  // Extract — wipe previous install to avoid conflicts (Windows Move-Item
+  // cannot overwrite existing directories even with -Force)
   const appDir = getAppDir();
+  if (existsSync(appDir)) {
+    // Safety: resolve symlinks and verify the target is under the user's home
+    const realAppDir = realpathSync(appDir);
+    const realHome = resolve(homedir());
+    // Case-insensitive comparison on Windows where paths are case-insensitive
+    const norm = (p: string) => process.platform === "win32" ? p.toLowerCase() : p;
+    if (!norm(realAppDir).startsWith(norm(realHome) + sep)) {
+      throw new Error(`Refusing to delete path outside home directory: ${realAppDir}`);
+    }
+    rmSync(appDir, { recursive: true, force: true });
+  }
   ensureDir(appDir);
 
   console.log(`Extracting to ${appDir}...`);
   if (getPlatform() === "win") {
     execFileSync("powershell", [
       "-NoProfile", "-Command",
-      `Expand-Archive -Path '${tarballPath}' -DestinationPath '${appDir}' -Force`,
+      `Expand-Archive -Path '${escapePsPath(tarballPath)}' -DestinationPath '${escapePsPath(appDir)}' -Force`,
     ], { stdio: "inherit" });
     // Move contents up from the nested directory (strip-components equivalent)
     const nested = join(appDir, assetName.replace(/\.zip$/, ""));
     if (existsSync(nested)) {
       execFileSync("powershell", [
         "-NoProfile", "-Command",
-        `Get-ChildItem -Path '${nested}' | Move-Item -Destination '${appDir}' -Force`,
+        `Get-ChildItem -Path '${escapePsPath(nested)}' | Move-Item -Destination '${escapePsPath(appDir)}' -Force`,
       ], { stdio: "inherit" });
       execFileSync("powershell", [
         "-NoProfile", "-Command",
-        `Remove-Item -Path '${nested}' -Recurse -Force`,
+        `Remove-Item -Path '${escapePsPath(nested)}' -Recurse -Force`,
       ], { stdio: "inherit" });
     }
   } else {
@@ -162,20 +182,8 @@ export async function downloadRelease(version: string): Promise<void> {
   }
   console.log("Extraction complete.");
 
-  // Install Playwright's Chromium browser (required by browser agent / Stagehand)
-  console.log("Installing browser engine (Chromium)...");
-  try {
-    execFileSync("node", [
-      join(appDir, "node_modules", "@playwright", "test", "cli.js"),
-      "install", "chromium",
-    ], { stdio: "inherit", cwd: appDir });
-    console.log("Browser engine installed.");
-  } catch (err) {
-    console.warn(
-      "Warning: failed to install browser engine. " +
-      "The web agent won't work until you run: npx playwright install chromium"
-    );
-  }
+  // Note: Playwright Chromium is installed lazily on first web-agent use,
+  // not during initial setup, to keep install fast.
 
   // Update config
   const config = readConfig();
@@ -183,6 +191,36 @@ export async function downloadRelease(version: string): Promise<void> {
   writeConfig(config);
 
   console.log(`Chvor v${version} installed successfully.`);
+}
+
+export function ensurePlaywright(): boolean {
+  const appDir = getAppDir();
+  const playwrightCli = join(appDir, "node_modules", "@playwright", "test", "cli.js");
+  if (!existsSync(playwrightCli)) return false;
+
+  // Check if Chromium is already installed by looking for the local browsers dir.
+  // Playwright stores downloaded browsers under playwright-core/.local-browsers/
+  const localBrowsers = join(appDir, "node_modules", "playwright-core", ".local-browsers");
+  const alreadyInstalled = existsSync(localBrowsers) &&
+    (readdirSync(localBrowsers).some((entry) => entry.toLowerCase().includes("chromium")));
+
+  if (alreadyInstalled) return true;
+
+  try {
+    console.log("Installing browser engine (Chromium) for web agent...");
+    execFileSync("node", [playwrightCli, "install", "chromium"], {
+      stdio: "inherit",
+      cwd: appDir,
+    });
+    console.log("Browser engine installed.");
+    return true;
+  } catch {
+    console.warn(
+      "Warning: failed to install browser engine. " +
+      "The web agent won't work until you run: npx playwright install chromium"
+    );
+    return false;
+  }
 }
 
 async function computeSha256(filePath: string): Promise<string> {

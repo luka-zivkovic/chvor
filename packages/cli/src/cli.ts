@@ -31,6 +31,8 @@ program
   .option("-i, --instance <name>", "Named instance to start")
   .action(async (opts) => {
     if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
       const { setInstance } = await import("./lib/paths.js");
       setInstance(opts.instance);
     }
@@ -48,6 +50,8 @@ program
   .option("-i, --instance <name>", "Named instance to stop")
   .action(async (opts) => {
     if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
       const { setInstance } = await import("./lib/paths.js");
       setInstance(opts.instance);
     }
@@ -80,6 +84,8 @@ instancesCmd
   .command("start <name>")
   .description("Start a named instance")
   .action(async (name: string) => {
+    const { validateInstanceName } = await import("./lib/validate.js");
+    validateInstanceName(name);
     const { startInstance } = await import("./commands/instances.js");
     await startInstance(name);
   });
@@ -88,6 +94,8 @@ instancesCmd
   .command("stop <name>")
   .description("Stop a named instance")
   .action(async (name: string) => {
+    const { validateInstanceName } = await import("./lib/validate.js");
+    validateInstanceName(name);
     const { stopInstance } = await import("./commands/instances.js");
     await stopInstance(name);
   });
@@ -237,6 +245,57 @@ toolCmd
     await toolPublish(path);
   });
 
+program
+  .command("open")
+  .description("Open chvor in your default browser")
+  .action(async () => {
+    const { open } = await import("./commands/open.js");
+    await open();
+  });
+
+const serviceCmd = program
+  .command("service")
+  .description("Manage auto-start on login");
+
+serviceCmd
+  .command("install")
+  .description("Enable auto-start on login")
+  .option("-i, --instance <name>", "Named instance")
+  .action(async (opts: { instance?: string }) => {
+    if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
+    }
+    const { serviceInstall } = await import("./commands/service.js");
+    await serviceInstall(opts);
+  });
+
+serviceCmd
+  .command("uninstall")
+  .description("Disable auto-start on login")
+  .option("-i, --instance <name>", "Named instance")
+  .action(async (opts: { instance?: string }) => {
+    if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
+    }
+    const { serviceUninstall } = await import("./commands/service.js");
+    await serviceUninstall(opts);
+  });
+
+serviceCmd
+  .command("status")
+  .description("Check auto-start status")
+  .option("-i, --instance <name>", "Named instance")
+  .action(async (opts: { instance?: string }) => {
+    if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
+    }
+    const { serviceStatus } = await import("./commands/service.js");
+    await serviceStatus(opts);
+  });
+
 const authCmd = program
   .command("auth")
   .description("Manage authentication");
@@ -247,6 +306,8 @@ authCmd
   .option("-i, --instance <name>", "Named instance to reset")
   .action(async (opts: { instance?: string }) => {
     if (opts.instance) {
+      const { validateInstanceName } = await import("./lib/validate.js");
+      validateInstanceName(opts.instance);
       const { setInstance } = await import("./lib/paths.js");
       setInstance(opts.instance);
     }

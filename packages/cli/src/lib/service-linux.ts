@@ -1,0 +1,101 @@
+import { writeFileSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
+function getServicePath(instance?: string): string {
+  const name = instance ? `chvor-${instance}` : "chvor";
+  return join(homedir(), ".config", "systemd", "user", `${name}.service`);
+}
+
+function getServiceName(instance?: string): string {
+  return instance ? `chvor-${instance}.service` : "chvor.service";
+}
+
+function escapeSystemdArg(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+export async function install(nodePath: string, cliPath: string, instance?: string): Promise<void> {
+  const servicePath = getServicePath(instance);
+  const serviceName = getServiceName(instance);
+
+  mkdirSync(join(homedir(), ".config", "systemd", "user"), { recursive: true });
+
+  const args = ["start", "--foreground"];
+  if (instance) args.push("-i", instance);
+
+  const execArgs = [`"${escapeSystemdArg(nodePath)}"`, `"${escapeSystemdArg(cliPath)}"`, ...args.map((a) => `"${escapeSystemdArg(a)}"`)].join(" ");
+
+  const unit = `[Unit]
+Description=Chvor AI Server${instance ? ` (${instance})` : ""}
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${execArgs}
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target
+`;
+
+  writeFileSync(servicePath, unit, "utf-8");
+
+  execFileSync("systemctl", ["--user", "daemon-reload"], { stdio: "inherit" });
+  execFileSync("systemctl", ["--user", "enable", serviceName], { stdio: "inherit" });
+  execFileSync("systemctl", ["--user", "start", serviceName], { stdio: "inherit" });
+
+  console.log(`Auto-start installed. Chvor will start on login.`);
+  console.log(`  Service: ${servicePath}`);
+}
+
+export async function uninstall(instance?: string): Promise<void> {
+  const servicePath = getServicePath(instance);
+  const serviceName = getServiceName(instance);
+
+  if (!existsSync(servicePath)) {
+    console.log("Auto-start is not installed.");
+    return;
+  }
+
+  try {
+    execFileSync("systemctl", ["--user", "stop", serviceName], { stdio: "pipe" });
+  } catch {
+    // Already stopped
+  }
+  try {
+    execFileSync("systemctl", ["--user", "disable", serviceName], { stdio: "pipe" });
+  } catch {
+    // Already disabled
+  }
+
+  unlinkSync(servicePath);
+  execFileSync("systemctl", ["--user", "daemon-reload"], { stdio: "pipe" });
+
+  console.log("Auto-start removed.");
+}
+
+export async function status(instance?: string): Promise<void> {
+  const servicePath = getServicePath(instance);
+  const serviceName = getServiceName(instance);
+
+  if (!existsSync(servicePath)) {
+    console.log("Auto-start: not installed");
+    return;
+  }
+
+  try {
+    const output = execFileSync("systemctl", ["--user", "is-active", serviceName], {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    console.log(`Auto-start: installed (${output.trim()})`);
+    console.log(`  Service: ${servicePath}`);
+  } catch {
+    console.log("Auto-start: installed (inactive)");
+    console.log(`  Service: ${servicePath}`);
+  }
+}

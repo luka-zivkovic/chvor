@@ -148,18 +148,35 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
       stdio: "inherit",
     });
 
+    if (child.pid === undefined) {
+      throw new Error("Failed to spawn server process.");
+    }
+
     const pidPath = getPidPath();
-    writeFileSync(pidPath, String(child.pid), "utf-8");
+    writeFileSync(pidPath, String(child.pid), { encoding: "utf-8", mode: 0o600 });
+
+    child.on("error", (err) => {
+      console.error(`Server process error: ${err.message}`);
+      try { unlinkSync(pidPath); } catch { /* ignore */ }
+      process.exit(1);
+    });
+
+    // Forward SIGTERM/SIGINT to child so service managers (launchd, systemd)
+    // see a clean exit(0) instead of 128+signal
+    for (const sig of ["SIGTERM", "SIGINT"] as const) {
+      process.on(sig, () => {
+        try { unlinkSync(pidPath); } catch { /* ignore */ }
+        child.kill(sig);
+      });
+    }
 
     child.on("exit", (code) => {
       try {
         unlinkSync(pidPath);
       } catch {
-        // ignore
+        // ignore — may already be cleaned up by signal handler
       }
-      if (code !== 0) {
-        console.error(`Chvor exited with code ${code}`);
-      }
+      process.exit(code ?? 1);
     });
 
     // Wait for health
@@ -184,10 +201,14 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
       detached: true,
     });
 
+    if (child.pid === undefined) {
+      throw new Error("Failed to spawn server process.");
+    }
+
     child.unref();
 
     const pidPath = getPidPath();
-    writeFileSync(pidPath, String(child.pid), "utf-8");
+    writeFileSync(pidPath, String(child.pid), { encoding: "utf-8", mode: 0o600 });
 
     console.log(`Chvor started (PID ${child.pid}). Logs: ${logPath}`);
 
@@ -243,7 +264,7 @@ export async function stopServer(): Promise<void> {
 export async function pollHealth(
   port: string,
   token?: string,
-  timeoutMs = 15000,
+  timeoutMs = 30000,
   intervalMs = 500
 ): Promise<boolean> {
   const start = Date.now();
