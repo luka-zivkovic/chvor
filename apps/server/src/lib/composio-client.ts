@@ -63,7 +63,13 @@ async function resolveAuthConfigId(
   );
 
   const config = managed ?? items[0];
-  return (config as { id: string }).id;
+  const id = (config as { id?: string }).id;
+  if (!id) {
+    throw new Error(
+      `Auth config for "${toolkit}" is missing an ID. This may indicate an SDK version mismatch.`,
+    );
+  }
+  return id;
 }
 
 /**
