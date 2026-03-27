@@ -298,7 +298,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function filterEnv(
+export function filterEnv(
   env: NodeJS.ProcessEnv
 ): Record<string, string> {
   const result: Record<string, string> = {};

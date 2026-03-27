@@ -17,15 +17,20 @@
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "commander": "^13",
     "@inquirer/prompts": "^7",
+    "tsx": "^4",
     "yaml": "^2"
   },
   "optionalDependencies": {
     "better-sqlite3": "^11"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.0"
   },
   "repository": {
     "type": "git",
