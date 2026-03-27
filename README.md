@@ -29,7 +29,7 @@
 
 An open-source AI platform that runs on your machine and shows you how it thinks. Every skill, tool, and decision is visible on a living brain canvas. It learns permanently, heals itself when things break, and gets better the more you use it.
 
-> **⚠️ Currently, Chvor runs locally.** Do not expose your instance to the public internet without authentication (`CHVOR_TOKEN`). **Agent mode** — public-facing with built-in auth and rate limiting — is coming soon.
+> **Currently, Chvor runs locally.** Do not expose your instance to the public internet without authentication (`CHVOR_TOKEN`). **Agent mode** — public-facing with built-in auth and rate limiting — is coming soon.
 
 ---
 
@@ -98,39 +98,39 @@ pnpm dev  # opens localhost:5173
 
 ## Features
 
-### 🧠 Brain Canvas
+### Brain Canvas
 
 A real-time visualization of your AI's reasoning. Every skill activation, tool call, and decision branch animates on an interactive node graph — not after the fact, but as it happens.
 
-### 🔗 Multi-Channel
+### Multi-Channel
 
 One AI, everywhere. Web Chat, Telegram, Discord, Slack, WhatsApp — same personality, same memory, same context across all channels.
 
-### ⚡ MCP-Native Tools
+### MCP-Native Tools
 
 Built on the [Model Context Protocol](https://modelcontextprotocol.io). Connect any MCP server as a tool — filesystem, web search, databases, code execution. Tools auto-discover and appear on the canvas.
 
-### 🎭 Skills & Personality
+### Skills & Personality
 
 Skills define behavior with YAML — personality, trigger patterns, tool bindings, rules. Give your AI a name, a tone, and directives it always follows. No two Chvors are alike.
 
-### 🧬 Cognitive Memory
+### Cognitive Memory
 
 Not a simple vector store. A graph-based cognitive architecture with spaced repetition, emotional awareness, consolidation cycles, and predictive retrieval. Your AI learns permanently — important things strengthen, the rest fades naturally.
 
-### 🔄 Self-Healing
+### Self-Healing
 
 When a tool fails or a skill errors, Chvor detects the issue, retries with adjusted parameters, and recovers gracefully. Your AI doesn't crash — it adapts. All visible on the brain canvas.
 
-### 💬 Emotion Engine
+### Emotion Engine
 
 Sentiment-aware responses. Your AI reads the conversation context and adapts its tone — more empathetic when you're frustrated, more concise when you're in a hurry.
 
-### ⏰ Scheduled Tasks
+### Scheduled Tasks
 
 Cron-based automations. Your AI runs tasks on a schedule and delivers results to any channel — daily summaries, monitoring alerts, reminders.
 
-### 🔒 Encrypted at Rest
+### Encrypted at Rest
 
 API keys and credentials stored with AES-256-GCM encryption. Zero plaintext storage. All data stays on your machine.
 
@@ -208,10 +208,10 @@ API keys and credentials stored with AES-256-GCM encryption. Zero plaintext stor
 
 | Status | Feature |
 |--------|---------|
-| ✅ Shipped | Brain Canvas, Multi-Channel, MCP Tools, Skills, Cognitive Memory, Schedules, Emotion Engine, Self-Healing |
-| 🧪 Experimental | Desktop App (Tauri), A2UI (AI-to-UI), PC Control |
-| 🔨 In Progress | Skill Registry, Templates |
-| 📋 Planned | Agent Mode, Team Workspaces, Voice Channels, Plugin SDK, Fine-tuning, Mobile App |
+| **Shipped** | Brain Canvas, Multi-Channel, MCP Tools, Skills, Cognitive Memory, Schedules, Emotion Engine, Self-Healing |
+| **Experimental** | Desktop App (Tauri), A2UI (AI-to-UI), PC Control |
+| **In Progress** | Skill Registry, Templates |
+| **Planned** | Agent Mode, Team Workspaces, Voice Channels, Plugin SDK, Fine-tuning, Mobile App |
 
 See the full [roadmap on chvor.dev](https://chvor.dev/roadmap).
 
@@ -235,9 +235,9 @@ Good places to start contributing:
 
 Chvor is source-available under the [Chvor Sustainable Use License v1.0](LICENSE.md).
 
-- ✅ Personal use, self-hosting, internal business use — **fully free**
-- ✅ Consulting & building workflows for clients — **allowed**
-- ⚠️ Offering as a competing SaaS or embedding in a commercial product — **requires a commercial agreement**
+- Personal use, self-hosting, internal business use — **fully free**
+- Consulting and building workflows for clients — **allowed**
+- Offering as a competing SaaS or embedding in a commercial product — **requires a commercial agreement**
 
 ---
 
