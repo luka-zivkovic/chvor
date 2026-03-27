@@ -1,103 +1,170 @@
+<p align="center">
+  <img src="docs/assets/chvor-logo.png" alt="Chvor" width="80" />
+</p>
+
 <h1 align="center">Chvor</h1>
 
 <p align="center">
-  <strong>Your own AI &mdash; built by you, visible to you, unique to you.</strong>
+  <strong>The AI you can see think.</strong><br />
+  <sub>Open-source. Self-hosted. Learns permanently.</sub>
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> &bull;
-  <a href="#features">Features</a> &bull;
-  <a href="#architecture">Architecture</a> &bull;
-  <a href="#contributing">Contributing</a> &bull;
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#features">Features</a> ·
+  <a href="docs/INSTALL.md">Install</a> ·
+  <a href="#documentation">Docs</a> ·
+  <a href="https://discord.gg/hvNKpYaJ2D">Discord</a> ·
   <a href="#license">License</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-Sustainable%20Use-blue" alt="License" />
-  <img src="https://img.shields.io/badge/node-%3E%3D20-green" alt="Node" />
-  <img src="https://img.shields.io/badge/pnpm-%3E%3D10-orange" alt="pnpm" />
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-Sustainable%20Use%20v1.0-blue" alt="License" /></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node 22+" />
+  <img src="https://img.shields.io/badge/pnpm-%3E%3D10-orange" alt="pnpm 10+" />
+  <a href="https://discord.gg/hvNKpYaJ2D"><img src="https://img.shields.io/badge/discord-join-7289da" alt="Discord" /></a>
 </p>
 
 ---
 
-<!-- TODO: Replace with actual demo GIF -->
-<!-- <p align="center"><img src="docs/demo.gif" width="720" /></p> -->
+An open-source AI platform that runs on your machine and shows you how it thinks. Every skill, tool, and decision is visible on a living brain canvas. It learns permanently, heals itself when things break, and gets better the more you use it.
 
-> ChatGPT is everyone's AI. **Chvor is yours.**
+> **⚠️ Currently, Chvor runs locally.** Do not expose your instance to the public internet without authentication (`CHVOR_TOKEN`). **Agent mode** — public-facing with built-in auth and rate limiting — is coming soon.
 
-Every AI assistant today is the same. Same interface, same personality, same black box. Chvor is different &mdash; you give it a name, a personality, wire it to your tools, and **watch it think** on a living brain canvas. Talk to it from the web, Telegram, Discord, or Slack. No two Chvors are alike.
-
-## Features
-
-**See your AI think** &mdash; A real-time brain canvas shows every skill, tool, and decision as it happens. Edges animate during execution. It's mission control for your AI.
-
-**Multi-channel** &mdash; One AI, everywhere. Chat from the web UI, Telegram, Discord, or Slack. Same personality, same memory, same context across all channels.
-
-**MCP-native** &mdash; Built on the [Model Context Protocol](https://modelcontextprotocol.io). Connect any MCP server as a tool. Filesystem, web search, databases &mdash; your AI can use them all.
-
-**Skills & Tools** &mdash; Skills define behavior (personality, workflows). Tools provide capabilities (MCP servers, built-in utilities). Mix and match to build your perfect AI.
-
-**Visual orchestration** &mdash; Two modes: *Constellation* (AI decides what to use) and *Pipeline* (you wire nodes manually). Switch between autonomous and controlled execution.
-
-**Memory & personality** &mdash; Your AI remembers conversations, learns your preferences, and follows your directives. Give it a name, a tone, and rules to live by.
-
-**Scheduled tasks** &mdash; Set up cron-based automations. Your AI can run tasks on a schedule and deliver results to any channel.
-
-**Encrypted credentials** &mdash; API keys stored with AES-256-GCM encryption. Manage them through the UI or environment variables.
+---
 
 ## Quick Start
 
-### One-command install (macOS / Linux)
+**One command** — installs Node.js if needed, sets up everything, and launches the onboarding wizard:
 
 ```bash
+# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/luka-zivkovic/chvor/main/scripts/install.sh | bash
-```
 
-### One-command install (Windows PowerShell)
-
-```powershell
+# Windows (PowerShell)
 irm https://raw.githubusercontent.com/luka-zivkovic/chvor/main/scripts/install.ps1 | iex
 ```
 
-### Or download the desktop app
+**After install:**
 
-No terminal needed &mdash; [download the installer](https://github.com/luka-zivkovic/chvor/releases/latest) for Windows (.msi) or macOS (.dmg).
+```bash
+chvor start       # Start the server
+chvor stop        # Stop the server
+chvor update      # Update to the latest version
+```
 
-**All install options:** See [docs/INSTALL.md](docs/INSTALL.md) for Docker, npm, from-source, and detailed setup instructions.
+Open **http://localhost:3001** — you'll see the brain canvas.
+
+<details>
+<summary><strong>Other install methods</strong></summary>
+
+### npm
+
+```bash
+npm install -g @chvor/cli
+chvor onboard
+```
+
+### Docker
+
+```bash
+docker run -d --name chvor -p 3001:3001 -v ~/.chvor:/home/node/.chvor ghcr.io/luka-zivkovic/chvor:latest
+```
+
+### Docker Compose
+
+```bash
+git clone https://github.com/luka-zivkovic/chvor.git && cd chvor
+docker compose up -d
+```
+
+### Desktop App <sup>experimental</sup>
+
+Download [.msi (Windows)](https://github.com/luka-zivkovic/chvor/releases/latest) or [.dmg (macOS)](https://github.com/luka-zivkovic/chvor/releases/latest) — no terminal required.
+
+### From Source
+
+```bash
+git clone https://github.com/luka-zivkovic/chvor.git && cd chvor
+pnpm install && cp .env.example .env
+pnpm dev  # opens localhost:5173
+```
+
+**Full guide:** [docs/INSTALL.md](docs/INSTALL.md)
+
+</details>
+
+---
+
+## Features
+
+### 🧠 Brain Canvas
+
+A real-time visualization of your AI's reasoning. Every skill activation, tool call, and decision branch animates on an interactive node graph — not after the fact, but as it happens.
+
+### 🔗 Multi-Channel
+
+One AI, everywhere. Web Chat, Telegram, Discord, Slack, WhatsApp — same personality, same memory, same context across all channels.
+
+### ⚡ MCP-Native Tools
+
+Built on the [Model Context Protocol](https://modelcontextprotocol.io). Connect any MCP server as a tool — filesystem, web search, databases, code execution. Tools auto-discover and appear on the canvas.
+
+### 🎭 Skills & Personality
+
+Skills define behavior with YAML — personality, trigger patterns, tool bindings, rules. Give your AI a name, a tone, and directives it always follows. No two Chvors are alike.
+
+### 🧬 Cognitive Memory
+
+Not a simple vector store. A graph-based cognitive architecture with spaced repetition, emotional awareness, consolidation cycles, and predictive retrieval. Your AI learns permanently — important things strengthen, the rest fades naturally.
+
+### 🔄 Self-Healing
+
+When a tool fails or a skill errors, Chvor detects the issue, retries with adjusted parameters, and recovers gracefully. Your AI doesn't crash — it adapts. All visible on the brain canvas.
+
+### 💬 Emotion Engine
+
+Sentiment-aware responses. Your AI reads the conversation context and adapts its tone — more empathetic when you're frustrated, more concise when you're in a hurry.
+
+### ⏰ Scheduled Tasks
+
+Cron-based automations. Your AI runs tasks on a schedule and delivers results to any channel — daily summaries, monitoring alerts, reminders.
+
+### 🔒 Encrypted at Rest
+
+API keys and credentials stored with AES-256-GCM encryption. Zero plaintext storage. All data stays on your machine.
+
+---
 
 ## Architecture
 
 ```
-                     +------------------+
-                     |   Brain Canvas   |  React Flow constellation
-                     |  (Vite + React)  |  Real-time execution viz
-                     +--------+---------+
-                              |
-                         WebSocket
-                              |
-                     +--------+---------+
-                     |     Gateway      |  Hono + Node.js
-                     |   Orchestrator   |  LLM routing, MCP, tools
-                     +--------+---------+
-                              |
-              +---------------+---------------+
-              |               |               |
-        +-----+-----+  +-----+-----+  +------+------+
-        |  Web Chat  |  | Telegram  |  |   Discord   |
-        |  Channel   |  |  Channel  |  |   Channel   |
-        +------------+  +-----------+  +-------------+
+                     ┌──────────────────┐
+                     │   Brain Canvas   │  React Flow
+                     │  (Vite + React)  │  Real-time execution viz
+                     └────────┬─────────┘
+                              │ WebSocket
+                     ┌────────┴─────────┐
+                     │     Gateway      │  Hono + Node.js
+                     │   Orchestrator   │  LLM routing, MCP, tools
+                     └────────┬─────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              │               │               │
+        ┌─────┴─────┐  ┌─────┴─────┐  ┌──────┴──────┐
+        │  Web Chat  │  │ Telegram  │  │   Discord   │
+        └───────────┘  └───────────┘  └─────────────┘
 ```
 
 **Monorepo** (pnpm workspaces):
-- `apps/client` &mdash; Vite + React + React Flow + Tailwind v4 + Zustand
-- `apps/server` &mdash; Hono + better-sqlite3 + Vercel AI SDK
-- `packages/shared` &mdash; Shared TypeScript types
 
-**Key patterns:**
-- All channels route through a single gateway &rarr; orchestrator &rarr; LLM
-- WebSocket pushes execution events to the canvas in real-time
-- Skills (behavioral) and Tools (MCP) are loaded from `~/.chvor/`
-- Bundled defaults in `data/bundled-skills/` and `data/bundled-tools/`
+| Package | Stack |
+|---------|-------|
+| `apps/client` | Vite + React + React Flow + Tailwind v4 + Zustand |
+| `apps/server` | Hono + better-sqlite3 + Vercel AI SDK |
+| `packages/shared` | Shared TypeScript types |
+
+---
 
 ## Configuration
 
@@ -112,47 +179,71 @@ No terminal needed &mdash; [download the installer](https://github.com/luka-zivk
 | `SLACK_BOT_TOKEN` | No | Slack bot token (or set via UI) |
 | `SLACK_APP_TOKEN` | No | Slack app-level token (or set via UI) |
 
+---
+
 ## Documentation
 
 | Doc | Description |
 |-----|-------------|
-| [Installation](docs/INSTALL.md) | All install options (CLI, desktop app, Docker, npm, source) |
-| [Memory System](docs/MEMORY.md) | Graph-based cognitive memory with decay, consolidation, and prediction |
-| [Channels](docs/CHANNELS.md) | Telegram, Discord, Slack, WhatsApp, and Matrix integration |
-| [Schedules](docs/SCHEDULES.md) | Cron-based automation with multi-channel delivery |
-| [Skills & Tools](docs/SKILLS-AND-TOOLS.md) | Skill/tool system, bundled capabilities, MCP, and registry |
-| [Browser](docs/BROWSER.md) | Web agent (Stagehand) and HTTP browse automation |
-| [PC Control](docs/PC-CONTROL.md) | Screen control with 3-layer pipeline (action router, a11y, vision) |
-| [Knowledge](docs/KNOWLEDGE.md) | Document ingestion (PDF, DOCX, URL, images) and fact extraction |
-| [Brain Canvas](docs/CANVAS.md) | Real-time execution visualizer and interactive constellation |
-| [Voice](docs/VOICE.md) | Speech-to-text and text-to-speech with multiple providers |
-| [Emotions](docs/EMOTIONS.md) | VAD emotion model, personality presets, and canvas particles |
-| [Webhooks](docs/WEBHOOKS.md) | GitHub, Notion, Gmail, and generic webhook subscriptions |
-| [Registry](docs/REGISTRY.md) | Skill/tool registry specification and publishing |
-| [Security](SECURITY.md) | Security policy, design, and self-hosting best practices |
+| **[Installation](docs/INSTALL.md)** | CLI, desktop app, Docker, npm, source |
+| **[Memory System](docs/MEMORY.md)** | Graph-based cognitive memory with decay & consolidation |
+| **[Channels](docs/CHANNELS.md)** | Telegram, Discord, Slack, WhatsApp integration |
+| **[Skills & Tools](docs/SKILLS-AND-TOOLS.md)** | Skill system, MCP tools, and registry |
+| **[Brain Canvas](docs/CANVAS.md)** | Real-time execution visualizer |
+| [Schedules](docs/SCHEDULES.md) | Cron-based automation |
+| [Browser](docs/BROWSER.md) | Web agent and HTTP browse automation |
+| [PC Control](docs/PC-CONTROL.md) | Screen control with vision pipeline |
+| [Knowledge](docs/KNOWLEDGE.md) | Document ingestion and fact extraction |
+| [Voice](docs/VOICE.md) | Speech-to-text and text-to-speech |
+| [Emotions](docs/EMOTIONS.md) | VAD emotion model and personality presets |
+| [Webhooks](docs/WEBHOOKS.md) | GitHub, Notion, Gmail webhook subscriptions |
+| [Registry](docs/REGISTRY.md) | Skill/tool registry and publishing |
+| [Security](SECURITY.md) | Security policy and self-hosting practices |
 
-## Contributing
+**Landing page & web docs:** [chvor.dev](https://chvor.dev) · [chvor.dev/docs](https://chvor.dev/docs)
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
+---
 
-We welcome contributions! Good places to start:
+## Roadmap
+
+| Status | Feature |
+|--------|---------|
+| ✅ Shipped | Brain Canvas, Multi-Channel, MCP Tools, Skills, Cognitive Memory, Schedules, Emotion Engine, Self-Healing |
+| 🧪 Experimental | Desktop App (Tauri), A2UI (AI-to-UI), PC Control |
+| 🔨 In Progress | Skill Registry, Templates |
+| 📋 Planned | Agent Mode, Team Workspaces, Voice Channels, Plugin SDK, Fine-tuning, Mobile App |
+
+See the full [roadmap on chvor.dev](https://chvor.dev/roadmap).
+
+---
+
+## Community
+
+- **[Discord](https://discord.gg/hvNKpYaJ2D)** — Chat, ask questions, share builds
+- **[GitHub Issues](https://github.com/luka-zivkovic/chvor/issues)** — Bug reports, feature requests
+- **[Contributing](CONTRIBUTING.md)** — Setup instructions and guidelines
+- **Email** — lukazivkovic58@gmail.com
+
+Good places to start contributing:
 - Issues labeled `good first issue`
 - New MCP tool integrations
 - Documentation improvements
-- Bug reports and feature requests
+
+---
 
 ## License
 
 Chvor is source-available under the [Chvor Sustainable Use License v1.0](LICENSE.md).
 
-**What this means:**
-- **Personal use, self-hosting, internal business use:** Fully free. Go wild.
-- **Consulting & building workflows for clients:** Allowed.
-- **Offering as a competing SaaS or embedding in a commercial product:** Requires a commercial agreement — [contact us](https://chvor.ai).
+- ✅ Personal use, self-hosting, internal business use — **fully free**
+- ✅ Consulting & building workflows for clients — **allowed**
+- ⚠️ Offering as a competing SaaS or embedding in a commercial product — **requires a commercial agreement**
 
 ---
 
 <p align="center">
-  <strong>See your AI think.</strong><br />
-  <a href="https://chvor.ai">chvor.ai</a>
+  <img src="docs/assets/chvor-logo.png" alt="" width="24" />
+  <br />
+  <strong>The AI you can see think.</strong><br />
+  <a href="https://chvor.dev">chvor.dev</a> · <a href="https://discord.gg/hvNKpYaJ2D">Discord</a> · <a href="https://github.com/luka-zivkovic/chvor">GitHub</a>
 </p>
