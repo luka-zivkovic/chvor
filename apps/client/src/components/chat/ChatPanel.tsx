@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAppStore } from "../../stores/app-store";
-import { useGateway } from "../../hooks/use-gateway";
+
 import { cn } from "@/lib/utils";
 import { MessageBubble } from "./MessageBubble";
 import { StreamingMessage } from "./StreamingMessage";
@@ -151,7 +151,9 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   const newConversation = useAppStore((s) => s.newConversation);
   const updateConversationTitle = useAppStore((s) => s.updateConversationTitle);
   const messagesLoading = useAppStore((s) => s.messagesLoading);
-  const { send, sendChat, stopGeneration } = useGateway();
+  const send = useAppStore((s) => s._send);
+  const sendChat = useAppStore((s) => s._sendChat);
+  const stopGeneration = useAppStore((s) => s._stopGeneration);
   const { setTalkModeActive } = useVoiceStore();
   const audioUrls = useVoiceStore((s) => s.audioUrls);
   const scrollRef = useRef<HTMLDivElement>(null);

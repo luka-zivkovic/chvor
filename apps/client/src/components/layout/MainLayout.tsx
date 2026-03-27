@@ -24,6 +24,7 @@ import { PcViewer } from "../pc-viewer/PcViewer";
 import { useUIStore } from "../../stores/ui-store";
 import { useAppStore } from "../../stores/app-store";
 import { useExecution } from "../../hooks/use-execution";
+import { useGateway } from "../../hooks/use-gateway";
 import { cn } from "@/lib/utils";
 
 const PANEL_META: Record<string, { title: string; subtitle: string; width?: number }> = {
@@ -129,6 +130,7 @@ export function MainLayout() {
   const setLayoutMode = useUIStore((s) => s.setLayoutMode);
 
   useExecution();
+  useGateway();
 
   const isExpanded = layoutMode === "canvas-expanded";
   const isCanvas = layoutMode === "canvas";
