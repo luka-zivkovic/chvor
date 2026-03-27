@@ -1,20 +1,12 @@
 /**
- * Composio REST API client — thin wrapper for social account management.
- * Composio handles OAuth token storage & refresh for 500+ apps.
+ * Composio SDK client — uses the official @composio/core SDK
+ * for social account management (OAuth connections).
  */
 
+import { Composio } from "@composio/core";
 import { listCredentials, getCredentialData } from "../db/credential-store.ts";
 
-const COMPOSIO_API_BASE = "https://backend.composio.dev/api/v3";
 const COMPOSIO_ENTITY_ID = "default"; // Chvor is single-user
-
-interface ComposioConnectedAccount {
-  id: string;
-  status: "INITIATED" | "ACTIVE" | "FAILED" | "INACTIVE";
-  appName: string;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface SocialAccount {
   id: string;
@@ -34,10 +26,7 @@ function getComposioApiKey(): string | null {
   return (full.data as Record<string, string>).apiKey ?? null;
 }
 
-async function composioFetch(
-  path: string,
-  options: RequestInit = {},
-): Promise<Response> {
+function getClient(): Composio {
   const apiKey = getComposioApiKey();
   if (!apiKey) {
     throw new Error(
@@ -45,23 +34,42 @@ async function composioFetch(
         "You can get a free key at https://app.composio.dev/settings",
     );
   }
+  return new Composio({ apiKey });
+}
 
-  const url = `${COMPOSIO_API_BASE}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "x-api-key": apiKey,
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
+/**
+ * Resolve the auth config ID for a given toolkit (e.g. "reddit").
+ * Looks for a Composio-managed config first, falls back to any available config.
+ */
+async function resolveAuthConfigId(
+  client: Composio,
+  toolkit: string,
+): Promise<string> {
+  const configs = await client.authConfigs.list({ toolkit });
+  const items = configs.items ?? [];
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Composio API error (${res.status}): ${body}`);
+  if (items.length === 0) {
+    throw new Error(
+      `No auth config found for "${toolkit}" in Composio. ` +
+        `Please create one at https://app.composio.dev or via the Composio dashboard.`,
+    );
   }
 
-  return res;
+  // Prefer Composio-managed config, otherwise use the first available
+  const managed = items.find(
+    (c: Record<string, unknown>) =>
+      (c as { type?: string }).type === "COMPOSIO_MANAGED" ||
+      (c as { isComposioManaged?: boolean }).isComposioManaged === true,
+  );
+
+  const config = managed ?? items[0];
+  const id = (config as { id?: string }).id;
+  if (!id) {
+    throw new Error(
+      `Auth config for "${toolkit}" is missing an ID. This may indicate an SDK version mismatch.`,
+    );
+  }
+  return id;
 }
 
 /**
@@ -72,22 +80,16 @@ export async function initiateConnection(
   toolkit: string,
   redirectUrl?: string,
 ): Promise<{ redirectUrl: string; connectedAccountId: string }> {
-  const res = await composioFetch("/connected_accounts", {
-    method: "POST",
-    body: JSON.stringify({
-      integration_id: toolkit,
-      user_id: COMPOSIO_ENTITY_ID,
-      ...(redirectUrl ? { redirect_url: redirectUrl } : {}),
-    }),
-  });
+  const client = getClient();
+  const authConfigId = await resolveAuthConfigId(client, toolkit);
 
-  const data = (await res.json()) as {
-    redirectUrl?: string;
-    connectionStatus?: string;
-    connectedAccountId?: string;
-  };
+  const connectionRequest = await client.connectedAccounts.link(
+    COMPOSIO_ENTITY_ID,
+    authConfigId,
+    redirectUrl ? { callbackUrl: redirectUrl } : undefined,
+  );
 
-  if (!data.redirectUrl) {
+  if (!connectionRequest.redirectUrl) {
     throw new Error(
       `Composio did not return an OAuth URL for "${toolkit}". ` +
         `Make sure "${toolkit}" is a valid Composio app name.`,
@@ -95,8 +97,8 @@ export async function initiateConnection(
   }
 
   return {
-    redirectUrl: data.redirectUrl,
-    connectedAccountId: data.connectedAccountId ?? "",
+    redirectUrl: connectionRequest.redirectUrl,
+    connectedAccountId: connectionRequest.id ?? "",
   };
 }
 
@@ -106,21 +108,19 @@ export async function initiateConnection(
 export async function listConnectedAccounts(
   toolkit?: string,
 ): Promise<SocialAccount[]> {
-  const params = new URLSearchParams();
-  params.set("user_ids", COMPOSIO_ENTITY_ID);
-  if (toolkit) params.set("toolkit_slugs", toolkit);
-  params.set("statuses", "ACTIVE");
+  const client = getClient();
+  const result = await client.connectedAccounts.list({
+    userIds: [COMPOSIO_ENTITY_ID],
+    ...(toolkit ? { toolkitSlugs: [toolkit] } : {}),
+    statuses: ["ACTIVE"],
+  });
 
-  const res = await composioFetch(`/connected_accounts?${params.toString()}`);
-  const data = (await res.json()) as {
-    items?: ComposioConnectedAccount[];
-  };
-
-  return (data.items ?? []).map((item) => ({
+  const items = result.items ?? [];
+  return items.map((item) => ({
     id: item.id,
-    platform: item.appName,
-    status: item.status.toLowerCase(),
-    connectedAt: item.createdAt,
+    platform: item.toolkit?.slug ?? "unknown",
+    status: item.status?.toLowerCase() ?? "unknown",
+    connectedAt: item.createdAt ?? "",
   }));
 }
 
@@ -131,7 +131,6 @@ export async function disconnectAccount(accountId: string): Promise<void> {
   if (!/^[a-zA-Z0-9_-]+$/.test(accountId)) {
     throw new Error("Invalid account ID");
   }
-  await composioFetch(`/connected_accounts/${accountId}`, {
-    method: "DELETE",
-  });
+  const client = getClient();
+  await client.connectedAccounts.delete(accountId);
 }
