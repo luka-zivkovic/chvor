@@ -18,6 +18,7 @@
     "@browserbasehq/stagehand": "^2",
     "@chvor/pc-agent": "workspace:*",
     "@chvor/shared": "workspace:*",
+    "@composio/core": "^0.6.7",
     "@hono/node-server": "^1",
     "@hono/node-ws": "^1",
     "@huggingface/transformers": "^3",
