@@ -12,7 +12,7 @@ fn fix_macos_path() {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
     let output = Command::new(&shell)
-        .args(["-l", "-i", "-c", "/usr/bin/printenv PATH"])
+        .args(["-l", "-c", "/usr/bin/printenv PATH"])
         .output();
 
     if let Ok(output) = output {
