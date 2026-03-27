@@ -54,4 +54,4 @@ ENV NODE_ENV=production
 ENV CHVOR_DATA_DIR=/home/node/.chvor/data
 EXPOSE 3001
 VOLUME /home/node/.chvor
-CMD ["node", "apps/server/src/index.ts"]
+CMD ["node", "--import", "tsx", "apps/server/src/index.ts"]

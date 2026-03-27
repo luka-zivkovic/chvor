@@ -9,7 +9,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/index.js"
+    "start": "node --import tsx src/index.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1",
@@ -40,6 +40,7 @@
     "pino": "^9",
     "qrcode": "^1",
     "sqlite-vec": "^0.1",
+    "tsx": "^4",
     "yaml": "^2",
     "yauzl": "^3"
   },
@@ -53,7 +54,6 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/qrcode": "^1",
     "@types/yauzl": "^2",
-    "tsx": "^4",
     "typescript": "^5.7"
   }
 }

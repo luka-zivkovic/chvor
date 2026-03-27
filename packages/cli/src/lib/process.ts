@@ -143,7 +143,7 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
   if (opts.foreground) {
     console.log(`Starting Chvor on port ${port} (foreground)...`);
 
-    const child = spawn("node", [serverEntry], {
+    const child = spawn("node", ["--import", "tsx", serverEntry], {
       env,
       stdio: "inherit",
     });
@@ -195,7 +195,7 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
     const logPath = join(logsDir, "server.log");
     const logFd = openSync(logPath, "a");
 
-    const child = spawn("node", [serverEntry], {
+    const child = spawn("node", ["--import", "tsx", serverEntry], {
       env,
       stdio: ["ignore", logFd, logFd],
       detached: true,
@@ -298,7 +298,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function filterEnv(
+export function filterEnv(
   env: NodeJS.ProcessEnv
 ): Record<string, string> {
   const result: Record<string, string> = {};
