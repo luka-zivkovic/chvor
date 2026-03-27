@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read as _, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use crate::platform::silent_command;
 use tauri::{AppHandle, Emitter};
 
 use super::config::{read_config, write_config};
@@ -262,7 +262,7 @@ pub async fn download_release(version: String, app: AppHandle) -> Result<(), Str
 
     #[cfg(not(target_os = "windows"))]
     {
-        let status = Command::new("tar")
+        let status = silent_command("tar")
             .args([
                 "-xzf",
                 &tarball_path.to_string_lossy(),
@@ -289,7 +289,7 @@ pub async fn download_release(version: String, app: AppHandle) -> Result<(), Str
         .join("cli.js");
 
     if playwright_cli.exists() {
-        let _ = Command::new("node")
+        let _ = silent_command("node")
             .args([
                 playwright_cli.to_string_lossy().as_ref(),
                 "install",

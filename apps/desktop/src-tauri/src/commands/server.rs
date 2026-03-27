@@ -4,6 +4,8 @@ use std::process::Command as StdCommand;
 use std::sync::Mutex;
 use tauri::State;
 
+use crate::platform::silent_command;
+
 use super::config::{chvor_home, read_config};
 
 #[derive(Debug, Serialize, Clone)]
@@ -158,10 +160,13 @@ pub async fn start_server(
     let log_path = logs_dir.join("server.log");
 
     // Build the command — use tsx loader so Node can execute .ts source files
-    let mut cmd = StdCommand::new("node");
+    let mut cmd = silent_command("node");
     cmd.arg("--import").arg("tsx");
     cmd.arg(server_entry.to_string_lossy().as_ref());
     cmd.current_dir(app_dir());
+    // Ensure `--import tsx` can resolve tsx from the app's node_modules,
+    // regardless of how Node resolves modules on Windows.
+    cmd.env("NODE_PATH", app_dir().join("node_modules").to_string_lossy().as_ref());
     cmd.env("PORT", &port);
     cmd.env("CHVOR_DATA_DIR", data_dir.to_string_lossy().as_ref());
     cmd.env("CHVOR_SKILLS_DIR", skills_dir.to_string_lossy().as_ref());

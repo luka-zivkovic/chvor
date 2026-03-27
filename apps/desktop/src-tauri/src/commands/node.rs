@@ -1,5 +1,6 @@
 use serde::Serialize;
-use std::process::Command;
+
+use crate::platform::silent_command;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,7 +19,7 @@ fn parse_major(version: &str) -> Option<u32> {
 
 #[tauri::command]
 pub fn detect_node() -> NodeInfo {
-    let output = Command::new("node").arg("-v").output();
+    let output = silent_command("node").arg("-v").output();
 
     match output {
         Ok(out) if out.status.success() => {
@@ -47,7 +48,7 @@ pub async fn install_node() -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
         // winget verifies package identity — safe to invoke directly
-        let winget = Command::new("winget")
+        let winget = silent_command("winget")
             .args([
                 "install",
                 "OpenJS.NodeJS.LTS",
@@ -72,10 +73,10 @@ pub async fn install_node() -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
         // Check if Homebrew is available (user-installed — we don't install it)
-        let brew_check = Command::new("brew").arg("--version").output();
+        let brew_check = silent_command("brew").arg("--version").output();
         if let Ok(out) = brew_check {
             if out.status.success() {
-                let install = Command::new("brew")
+                let install = silent_command("brew")
                     .args(["install", "node@22"])
                     .output()
                     .map_err(|e| format!("Failed to install Node.js: {}", e))?;
