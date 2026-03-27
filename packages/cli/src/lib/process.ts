@@ -151,15 +151,21 @@ export async function spawnServer(opts: SpawnOptions = {}): Promise<void> {
     const pidPath = getPidPath();
     writeFileSync(pidPath, String(child.pid), "utf-8");
 
+    // Forward SIGTERM/SIGINT to child so service managers (launchd, systemd)
+    // see a clean exit(0) instead of 128+signal
+    for (const sig of ["SIGTERM", "SIGINT"] as const) {
+      process.on(sig, () => {
+        child.kill(sig);
+      });
+    }
+
     child.on("exit", (code) => {
       try {
         unlinkSync(pidPath);
       } catch {
         // ignore
       }
-      if (code !== 0) {
-        console.error(`Chvor exited with code ${code}`);
-      }
+      process.exit(code ?? 0);
     });
 
     // Wait for health
@@ -243,7 +249,7 @@ export async function stopServer(): Promise<void> {
 export async function pollHealth(
   port: string,
   token?: string,
-  timeoutMs = 15000,
+  timeoutMs = 30000,
   intervalMs = 500
 ): Promise<boolean> {
   const start = Date.now();

@@ -237,6 +237,45 @@ toolCmd
     await toolPublish(path);
   });
 
+program
+  .command("open")
+  .description("Open chvor in your default browser")
+  .action(async () => {
+    const { open } = await import("./commands/open.js");
+    await open();
+  });
+
+const serviceCmd = program
+  .command("service")
+  .description("Manage auto-start on login");
+
+serviceCmd
+  .command("install")
+  .description("Enable auto-start on login")
+  .option("-i, --instance <name>", "Named instance")
+  .action(async (opts: { instance?: string }) => {
+    const { serviceInstall } = await import("./commands/service.js");
+    await serviceInstall(opts);
+  });
+
+serviceCmd
+  .command("uninstall")
+  .description("Disable auto-start on login")
+  .option("-i, --instance <name>", "Named instance")
+  .action(async (opts: { instance?: string }) => {
+    const { serviceUninstall } = await import("./commands/service.js");
+    await serviceUninstall(opts);
+  });
+
+serviceCmd
+  .command("status")
+  .description("Check auto-start status")
+  .option("-i, --instance <name>", "Named instance")
+  .action(async (opts: { instance?: string }) => {
+    const { serviceStatus } = await import("./commands/service.js");
+    await serviceStatus(opts);
+  });
+
 const authCmd = program
   .command("auth")
   .description("Manage authentication");

@@ -1,4 +1,4 @@
-import { createWriteStream, createReadStream, existsSync } from "node:fs";
+import { createWriteStream, createReadStream, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
@@ -101,7 +101,6 @@ export async function downloadRelease(version: string): Promise<void> {
   const tarballPath = join(downloadsDir, assetName);
 
   // Download the tarball
-  console.log(`Downloading ${assetName}...`);
   const res = await fetch(url, {
     headers: { "User-Agent": "chvor-cli" },
   });
@@ -115,6 +114,10 @@ export async function downloadRelease(version: string): Promise<void> {
   if (!res.body) {
     throw new Error("Download response has no body");
   }
+
+  const contentLength = res.headers.get("content-length");
+  const sizeMB = contentLength ? `${Math.round(Number(contentLength) / 1024 / 1024)} MB` : "";
+  console.log(`Downloading ${assetName}${sizeMB ? ` (${sizeMB})` : ""}...`);
 
   const fileStream = createWriteStream(tarballPath);
   await pipeline(Readable.fromWeb(res.body as never), fileStream);
@@ -133,8 +136,12 @@ export async function downloadRelease(version: string): Promise<void> {
     console.log("Checksum verified.");
   }
 
-  // Extract
+  // Extract — wipe previous install to avoid conflicts (Windows Move-Item
+  // cannot overwrite existing directories even with -Force)
   const appDir = getAppDir();
+  if (existsSync(appDir)) {
+    rmSync(appDir, { recursive: true, force: true });
+  }
   ensureDir(appDir);
 
   console.log(`Extracting to ${appDir}...`);
@@ -162,20 +169,8 @@ export async function downloadRelease(version: string): Promise<void> {
   }
   console.log("Extraction complete.");
 
-  // Install Playwright's Chromium browser (required by browser agent / Stagehand)
-  console.log("Installing browser engine (Chromium)...");
-  try {
-    execFileSync("node", [
-      join(appDir, "node_modules", "@playwright", "test", "cli.js"),
-      "install", "chromium",
-    ], { stdio: "inherit", cwd: appDir });
-    console.log("Browser engine installed.");
-  } catch (err) {
-    console.warn(
-      "Warning: failed to install browser engine. " +
-      "The web agent won't work until you run: npx playwright install chromium"
-    );
-  }
+  // Note: Playwright Chromium is installed lazily on first web-agent use,
+  // not during initial setup, to keep install fast.
 
   // Update config
   const config = readConfig();
@@ -183,6 +178,48 @@ export async function downloadRelease(version: string): Promise<void> {
   writeConfig(config);
 
   console.log(`Chvor v${version} installed successfully.`);
+}
+
+export function ensurePlaywright(): boolean {
+  const appDir = getAppDir();
+  const playwrightCli = join(appDir, "node_modules", "@playwright", "test", "cli.js");
+  if (!existsSync(playwrightCli)) return false;
+
+  // Check if Chromium is already installed by looking for the browser revision
+  try {
+    const result = execFileSync("node", [playwrightCli, "install", "--dry-run", "chromium"], {
+      cwd: appDir,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    // If dry-run outputs nothing or indicates installed, it's ready
+    if (!result.includes("browser does not need")) {
+      console.log("Installing browser engine (Chromium) for web agent...");
+      execFileSync("node", [playwrightCli, "install", "chromium"], {
+        stdio: "inherit",
+        cwd: appDir,
+      });
+      console.log("Browser engine installed.");
+    }
+    return true;
+  } catch {
+    // Fallback: just try to install — idempotent
+    try {
+      console.log("Installing browser engine (Chromium) for web agent...");
+      execFileSync("node", [playwrightCli, "install", "chromium"], {
+        stdio: "inherit",
+        cwd: appDir,
+      });
+      console.log("Browser engine installed.");
+      return true;
+    } catch {
+      console.warn(
+        "Warning: failed to install browser engine. " +
+        "The web agent won't work until you run: npx playwright install chromium"
+      );
+      return false;
+    }
+  }
 }
 
 async function computeSha256(filePath: string): Promise<string> {

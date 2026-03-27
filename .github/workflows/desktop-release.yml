@@ -10,6 +10,7 @@ permissions:
 jobs:
   build-desktop:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - runner: windows-latest
@@ -41,9 +42,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # macOS: import signing certificate
+      - name: Build shared package
+        run: pnpm --filter @chvor/shared build
+
+      - name: Sync version from git tag
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          node -e "
+            const fs = require('fs');
+            const f = 'src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(f, 'utf8'));
+            c.version = '$VERSION';
+            fs.writeFileSync(f, JSON.stringify(c, null, 2) + '\n');
+          "
+          echo "Tauri version set to $VERSION"
+
+      # macOS: import signing certificate (optional — skipped if secrets not configured)
       - name: Import Apple certificate
-        if: matrix.target == 'macos'
+        if: matrix.target == 'macos' && env.APPLE_CERTIFICATE != ''
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -62,7 +80,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS notarization
+          # macOS notarization (optional — builds unsigned if not set)
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -96,6 +114,7 @@ jobs:
 
   publish-desktop:
     needs: build-desktop
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
