@@ -615,6 +615,23 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDef[] = [
       },
     ],
   },
+  {
+    id: "composio",
+    name: "Composio",
+    icon: "share-2",
+    credentialType: "composio",
+    description: "Connect social accounts (Twitter, Reddit, LinkedIn) and 500+ apps via OAuth",
+    usageContext: "x-api-key: <apiKey>. API base: https://backend.composio.dev/api/v3/",
+    requiredFields: [
+      {
+        key: "apiKey",
+        label: "API Key",
+        type: "password",
+        placeholder: "sk-...",
+        helpUrl: "https://app.composio.dev/settings",
+      },
+    ],
+  },
 ];
 
 // ── Image Generation Providers ───────────────────────────────────

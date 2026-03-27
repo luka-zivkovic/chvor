@@ -3793,6 +3793,148 @@ nativeToolMapping.set(PC_OBSERVE_NAME, { kind: "skill", id: "pc-control" });
 nativeToolMapping.set(PC_SHELL_NAME, { kind: "skill", id: "pc-control" });
 
 // ---------------------------------------------------------------------------
+// Social Account Management (Composio)
+// ---------------------------------------------------------------------------
+
+const SOCIAL_CONNECT_NAME = "native__social_connect";
+const socialConnectToolDef = tool({
+  description:
+    "[Social] Connect a social media account (Twitter/X, Reddit, LinkedIn, Instagram, etc.) via OAuth. " +
+    "Returns a clickable authorization URL the user must visit to grant access. " +
+    "Requires a Composio API key credential — if missing, guide the user to get one at https://app.composio.dev/settings",
+  parameters: z.object({
+    platform: z
+      .string()
+      .describe(
+        "Platform to connect, e.g. 'twitter', 'reddit', 'linkedin', 'instagram', 'youtube', 'tiktok', 'facebook', 'bluesky', 'mastodon', 'pinterest', 'threads', 'discord', 'telegram'",
+      ),
+  }),
+});
+
+async function handleSocialConnect(
+  args: Record<string, unknown>,
+): Promise<NativeToolResult> {
+  try {
+    const { initiateConnection } = await import("./composio-client.ts");
+    const platform = String(args.platform).toLowerCase().trim();
+
+    const serverPort = process.env.PORT ?? "3001";
+    const callbackUrl = `http://localhost:${serverPort}/api/social/callback`;
+
+    const result = await initiateConnection(platform, callbackUrl);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `To connect your ${platform} account, open this link:\n\n` +
+            `${result.redirectUrl}\n\n` +
+            `After authorizing, you'll be redirected back and the connection will be active. ` +
+            `Use native__social_list to verify the connection afterwards.`,
+        },
+      ],
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text", text: `Social connect failed: ${msg}` }] };
+  }
+}
+
+handlers.set(SOCIAL_CONNECT_NAME, handleSocialConnect);
+nativeToolMapping.set(SOCIAL_CONNECT_NAME, { kind: "tool", id: "composio" });
+
+const SOCIAL_LIST_NAME = "native__social_list";
+const socialListToolDef = tool({
+  description:
+    "[Social] List connected social media accounts. Shows which platforms the user has authorized via Composio.",
+  parameters: z.object({
+    platform: z
+      .string()
+      .optional()
+      .describe("Optional: filter by platform name (e.g. 'twitter')"),
+  }),
+});
+
+async function handleSocialList(
+  args: Record<string, unknown>,
+): Promise<NativeToolResult> {
+  try {
+    const { listConnectedAccounts } = await import("./composio-client.ts");
+    const platform = args.platform ? String(args.platform).toLowerCase().trim() : undefined;
+
+    const accounts = await listConnectedAccounts(platform);
+
+    if (accounts.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: platform
+              ? `No connected ${platform} accounts found. Use native__social_connect to connect one.`
+              : "No social accounts connected yet. Use native__social_connect to connect a platform.",
+          },
+        ],
+      };
+    }
+
+    const lines = accounts.map(
+      (a, i) => `${i + 1}. **${a.platform}** — ${a.status} (connected ${a.connectedAt})\n   id: \`${a.id}\``,
+    );
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Connected social accounts:\n\n${lines.join("\n")}`,
+        },
+      ],
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text", text: `Failed to list social accounts: ${msg}` }] };
+  }
+}
+
+handlers.set(SOCIAL_LIST_NAME, handleSocialList);
+nativeToolMapping.set(SOCIAL_LIST_NAME, { kind: "tool", id: "composio" });
+
+const SOCIAL_DISCONNECT_NAME = "native__social_disconnect";
+const socialDisconnectToolDef = tool({
+  description:
+    "[Social] Disconnect a social media account. Use native__social_list first to get the account ID.",
+  parameters: z.object({
+    accountId: z.string().describe("The connected account ID to disconnect (from native__social_list)"),
+  }),
+});
+
+async function handleSocialDisconnect(
+  args: Record<string, unknown>,
+): Promise<NativeToolResult> {
+  try {
+    const { disconnectAccount } = await import("./composio-client.ts");
+    const accountId = String(args.accountId);
+
+    await disconnectAccount(accountId);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Account \`${accountId}\` has been disconnected successfully.`,
+        },
+      ],
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text", text: `Failed to disconnect account: ${msg}` }] };
+  }
+}
+
+handlers.set(SOCIAL_DISCONNECT_NAME, handleSocialDisconnect);
+nativeToolMapping.set(SOCIAL_DISCONNECT_NAME, { kind: "tool", id: "composio" });
+
+// ---------------------------------------------------------------------------
 // Registry API
 // ---------------------------------------------------------------------------
 
@@ -3835,6 +3977,9 @@ export function getNativeToolDefinitions(): Record<
     [REGISTRY_SEARCH_NAME]: registrySearchToolDef,
     [REGISTRY_INSTALL_NAME]: registryInstallToolDef,
     [REGISTRY_UNINSTALL_NAME]: registryUninstallToolDef,
+    [SOCIAL_CONNECT_NAME]: socialConnectToolDef,
+    [SOCIAL_LIST_NAME]: socialListToolDef,
+    [SOCIAL_DISCONNECT_NAME]: socialDisconnectToolDef,
     ...(isCapabilityEnabled("tool", "a2ui") ? {
       [A2UI_PUSH_NAME]: a2uiPushToolDef,
       [A2UI_RESET_NAME]: a2uiResetToolDef,
