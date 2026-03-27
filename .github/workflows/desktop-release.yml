@@ -78,6 +78,7 @@ jobs:
       - name: Build desktop app
         working-directory: apps/desktop
         env:
+          CI: true
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # macOS notarization (optional — builds unsigned if not set)
@@ -91,6 +92,28 @@ jobs:
             pnpm tauri build
           fi
         shell: bash
+
+      # Re-create DMG with classic layout (app left → Applications right)
+      # Tauri's built-in DMG styling uses AppleScript which hangs in headless CI,
+      # so we use create-dmg instead.
+      - name: Create styled DMG
+        if: matrix.target == 'macos'
+        shell: bash
+        run: |
+          brew install create-dmg
+          BUNDLE_DIR="apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle"
+          APP_PATH="$BUNDLE_DIR/macos/Chvor.app"
+          DMG_DIR="$BUNDLE_DIR/dmg"
+          rm -f "$DMG_DIR"/*.dmg
+          create-dmg \
+            --volname "Chvor" \
+            --window-pos 200 120 \
+            --window-size 660 400 \
+            --icon-size 80 \
+            --icon "Chvor.app" 180 170 \
+            --app-drop-link 480 170 \
+            "$DMG_DIR/Chvor.dmg" \
+            "$APP_PATH"
 
       # Upload artifacts
       - name: Upload Windows artifacts
