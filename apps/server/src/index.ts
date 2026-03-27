@@ -55,6 +55,7 @@ import channelPolicyRoute from "./routes/channel-policy.ts";
 import mediaConfigRoute from "./routes/media-config.ts";
 import registryRoute from "./routes/registry.ts";
 import pcControlRoute from "./routes/pc-control.ts";
+import socialRoute from "./routes/social.ts";
 import { handlePcAgentConnection, handlePcAgentMessage, handlePcAgentClose, onPcAgentEvent, onPcFrame, shutdownPcAgents, initLocalBackend } from "./lib/pc-control.ts";
 import { getPcControlEnabled } from "./db/config-store.ts";
 import { initActivityTable } from "./db/activity-store.ts";
@@ -268,6 +269,7 @@ app.route("/api/a2ui", a2uiRoute);
 app.route("/api/auth", authRoute);
 app.route("/api/backup", backupRoute);
 app.route("/api/pc", pcControlRoute);
+app.route("/api/social", socialRoute);
 
 // Serve TTS audio files (no auth — ephemeral UUIDs)
 app.get("/audio/:filename", (c) => {
