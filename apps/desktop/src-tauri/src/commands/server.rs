@@ -157,8 +157,9 @@ pub async fn start_server(
 
     let log_path = logs_dir.join("server.log");
 
-    // Build the command
+    // Build the command — use tsx loader so Node can execute .ts source files
     let mut cmd = StdCommand::new("node");
+    cmd.arg("--import").arg("tsx");
     cmd.arg(server_entry.to_string_lossy().as_ref());
     cmd.env("PORT", &port);
     cmd.env("CHVOR_DATA_DIR", data_dir.to_string_lossy().as_ref());

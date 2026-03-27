@@ -253,6 +253,9 @@ importers:
       sqlite-vec:
         specifier: ^0.1
         version: 0.1.6
+      tsx:
+        specifier: ^4
+        version: 4.21.0
       yaml:
         specifier: ^2
         version: 2.8.2
@@ -278,9 +281,6 @@ importers:
       '@types/yauzl':
         specifier: ^2
         version: 2.10.3
-      tsx:
-        specifier: ^4
-        version: 4.21.0
       typescript:
         specifier: ^5.7
         version: 5.9.3
