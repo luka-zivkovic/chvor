@@ -87,7 +87,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ "${{ matrix.target }}" = "macos" ]; then
-            pnpm tauri build --target universal-apple-darwin
+            pnpm tauri build --target universal-apple-darwin --bundles app,updater
           else
             pnpm tauri build
           fi

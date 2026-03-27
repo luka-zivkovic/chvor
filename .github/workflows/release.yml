@@ -184,6 +184,11 @@ jobs:
           pnpm --filter @chvor/shared build
           cd packages/cli
           pnpm build
-          npm publish --access public
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          if npm view "@chvor/cli@${CURRENT_VERSION}" version 2>/dev/null; then
+            echo "Version ${CURRENT_VERSION} already published — skipping"
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
