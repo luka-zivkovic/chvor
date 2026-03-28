@@ -42,9 +42,7 @@
         "language": "en-US"
       }
     },
-    "macOS": {
-      "signingIdentity": "Developer ID Application: Luka Zivkovic (8YW274D5TQ)"
-    }
+    "macOS": {}
   },
   "plugins": {}
 }

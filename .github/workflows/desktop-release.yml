@@ -74,10 +74,11 @@ jobs:
           security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
 
-      # Build Tauri app (signing only — notarization is a separate step)
+      # Build Tauri app (no signing — signing identity removed from config to
+      # prevent Tauri from attempting inline notarization which hangs in CI)
       - name: Build desktop app
         working-directory: apps/desktop
-        timeout-minutes: 30
+        timeout-minutes: 20
         env:
           CI: true
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -90,14 +91,22 @@ jobs:
           fi
         shell: bash
 
-      # Verify code signature (macOS)
-      - name: Verify code signature
-        if: matrix.target == 'macos'
+      # Code sign the app bundle (macOS only, separate from build to avoid Tauri's
+      # inline notarization which hangs indefinitely in headless CI)
+      - name: Sign app bundle
+        if: matrix.target == 'macos' && env.APPLE_CERTIFICATE != ''
+        timeout-minutes: 5
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
         shell: bash
         run: |
           APP_PATH="apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Chvor.app"
-          echo "Verifying code signature..."
-          codesign -v --deep --strict "$APP_PATH" && echo "Code signature valid" || echo "WARNING: Code signature verification failed"
+          IDENTITY="Developer ID Application: Luka Zivkovic (8YW274D5TQ)"
+          echo "Signing $APP_PATH..."
+          codesign --deep --force --options runtime --sign "$IDENTITY" "$APP_PATH"
+          echo "Verifying signature..."
+          codesign -v --deep --strict "$APP_PATH"
+          echo "Code signing complete"
 
       # Notarize as a separate step with explicit timeout
       - name: Notarize app
