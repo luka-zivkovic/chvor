@@ -134,3 +134,49 @@ export async function disconnectAccount(accountId: string): Promise<void> {
   const client = getClient();
   await client.connectedAccounts.delete(accountId);
 }
+
+// ---------------------------------------------------------------------------
+// Action execution (bypasses composio-mcp, uses SDK directly)
+// ---------------------------------------------------------------------------
+
+export interface ComposioAction {
+  name: string;
+  displayName: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+/**
+ * List available actions for a toolkit (e.g. "reddit", "twitter").
+ * Returns action names the agent can pass to executeAction().
+ */
+export async function listActions(
+  toolkit: string,
+): Promise<ComposioAction[]> {
+  const client = getClient();
+  const tools = await client.tools.get(COMPOSIO_ENTITY_ID, {
+    toolkits: [toolkit],
+  });
+
+  return (tools ?? []).map((t: Record<string, unknown>) => ({
+    name: (t.name ?? t.slug ?? "") as string,
+    displayName: (t.displayName ?? t.display_name ?? t.name ?? "") as string,
+    description: (t.description ?? "") as string,
+    parameters: (t.parameters ?? t.inputSchema ?? {}) as Record<string, unknown>,
+  }));
+}
+
+/**
+ * Execute a Composio action by name (e.g. "REDDIT_GET_SUBREDDIT_POSTS").
+ */
+export async function executeAction(
+  actionName: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const client = getClient();
+  const result = await client.tools.execute(actionName, {
+    userId: COMPOSIO_ENTITY_ID,
+    arguments: args,
+  });
+  return result;
+}
