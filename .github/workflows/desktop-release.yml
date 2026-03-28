@@ -91,50 +91,10 @@ jobs:
           fi
         shell: bash
 
-      # Code sign the app bundle (macOS only, separate from build to avoid Tauri's
-      # inline notarization which hangs indefinitely in headless CI)
-      - name: Sign app bundle
-        if: matrix.target == 'macos' && env.APPLE_CERTIFICATE != ''
-        timeout-minutes: 5
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-        shell: bash
-        run: |
-          APP_PATH="apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Chvor.app"
-          IDENTITY="Developer ID Application: Luka Zivkovic (8YW274D5TQ)"
-          echo "Signing $APP_PATH..."
-          codesign --deep --force --options runtime --sign "$IDENTITY" "$APP_PATH"
-          echo "Verifying signature..."
-          codesign -v --deep --strict "$APP_PATH"
-          echo "Code signing complete"
-
-      # Notarize as a separate step with explicit timeout
-      - name: Notarize app
-        if: matrix.target == 'macos' && env.APPLE_ID != ''
-        timeout-minutes: 15
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        shell: bash
-        run: |
-          APP_PATH="apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Chvor.app"
-
-          # Create a zip for notarization submission
-          ditto -c -k --keepParent "$APP_PATH" Chvor-notarize.zip
-
-          echo "Submitting for notarization..."
-          xcrun notarytool submit Chvor-notarize.zip \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait --timeout 10m
-
-          echo "Stapling notarization ticket..."
-          xcrun stapler staple "$APP_PATH"
-
-          rm -f Chvor-notarize.zip
-          echo "Notarization complete"
+      # TODO: Code signing + notarization disabled — codesign hangs in CI
+      # even with correct keychain setup. Ship unsigned for now; macOS users
+      # right-click > Open on first launch. Re-enable once keychain issue
+      # is debugged (likely needs security unlock-keychain before each codesign call).
 
       # Re-create DMG with classic layout (app left → Applications right)
       # Tauri's built-in DMG styling uses AppleScript which hangs in headless CI,
