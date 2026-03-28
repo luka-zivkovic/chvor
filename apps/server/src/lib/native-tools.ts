@@ -3935,6 +3935,119 @@ handlers.set(SOCIAL_DISCONNECT_NAME, handleSocialDisconnect);
 nativeToolMapping.set(SOCIAL_DISCONNECT_NAME, { kind: "tool", id: "composio" });
 
 // ---------------------------------------------------------------------------
+// Social Action Execution (Composio — direct SDK, bypasses composio-mcp)
+// ---------------------------------------------------------------------------
+
+const SOCIAL_ACTIONS_NAME = "native__social_actions";
+const socialActionsToolDef = tool({
+  description:
+    "[Social] List available actions for a connected social platform. " +
+    "Call this to discover what actions you can perform (e.g. post, comment, browse) " +
+    "before using native__social_execute. The account must already be connected.",
+  parameters: z.object({
+    platform: z
+      .string()
+      .describe(
+        "Platform toolkit name, e.g. 'reddit', 'twitter', 'linkedin', 'instagram'",
+      ),
+  }),
+});
+
+async function handleSocialActions(
+  args: Record<string, unknown>,
+): Promise<NativeToolResult> {
+  try {
+    const { listActions } = await import("./composio-client.ts");
+    const platform = String(args.platform).toLowerCase().trim();
+
+    const allActions = await listActions(platform);
+
+    if (allActions.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `No actions found for "${platform}". Make sure the account is connected (use native__social_list) and the platform name is correct.`,
+          },
+        ],
+      };
+    }
+
+    const MAX_ACTIONS = 50;
+    const actions = allActions.slice(0, MAX_ACTIONS);
+    const truncNote = allActions.length > MAX_ACTIONS
+      ? `\n\nShowing first ${MAX_ACTIONS} of ${allActions.length} total actions.`
+      : "";
+
+    const lines = actions.map(
+      (a) => `- **${a.name}** — ${a.description || a.displayName || "(no description)"}`,
+    );
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Available ${platform} actions (${allActions.length}):\n\n${lines.join("\n")}${truncNote}\n\nUse native__social_execute with the action name and required arguments.`,
+        },
+      ],
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text", text: `Failed to list actions: ${msg}` }] };
+  }
+}
+
+handlers.set(SOCIAL_ACTIONS_NAME, handleSocialActions);
+nativeToolMapping.set(SOCIAL_ACTIONS_NAME, { kind: "tool", id: "composio" });
+
+const SOCIAL_EXECUTE_NAME = "native__social_execute";
+const socialExecuteToolDef = tool({
+  description:
+    "[Social] Execute a Composio action on a connected social account. " +
+    "Use native__social_actions first to discover available action names and their parameters. " +
+    "Example: action='REDDIT_GET_SUBREDDIT_POSTS', arguments={subreddit: 'programming'}",
+  parameters: z.object({
+    action: z
+      .string()
+      .describe("The Composio action name, e.g. 'REDDIT_GET_SUBREDDIT_POSTS'"),
+    arguments: z
+      .record(z.unknown())
+      .optional()
+      .default({})
+      .describe("Action-specific arguments as key-value pairs"),
+  }),
+});
+
+async function handleSocialExecute(
+  args: Record<string, unknown>,
+): Promise<NativeToolResult> {
+  try {
+    const { executeAction } = await import("./composio-client.ts");
+    const action = String(args.action).trim();
+    const actionArgs = (args.arguments ?? {}) as Record<string, unknown>;
+
+    const result = await executeAction(action, actionArgs);
+
+    const raw =
+      typeof result === "string" ? result : JSON.stringify(result.data, null, 2);
+    const MAX_RESPONSE = 8000;
+    const text = raw.length > MAX_RESPONSE
+      ? raw.slice(0, MAX_RESPONSE) + `\n\n... (truncated, ${raw.length} chars total)`
+      : raw;
+
+    return {
+      content: [{ type: "text", text }],
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text", text: `Action execution failed: ${msg}` }] };
+  }
+}
+
+handlers.set(SOCIAL_EXECUTE_NAME, handleSocialExecute);
+nativeToolMapping.set(SOCIAL_EXECUTE_NAME, { kind: "tool", id: "composio" });
+
+// ---------------------------------------------------------------------------
 // Registry API
 // ---------------------------------------------------------------------------
 
@@ -3980,6 +4093,8 @@ export function getNativeToolDefinitions(): Record<
     [SOCIAL_CONNECT_NAME]: socialConnectToolDef,
     [SOCIAL_LIST_NAME]: socialListToolDef,
     [SOCIAL_DISCONNECT_NAME]: socialDisconnectToolDef,
+    [SOCIAL_ACTIONS_NAME]: socialActionsToolDef,
+    [SOCIAL_EXECUTE_NAME]: socialExecuteToolDef,
     ...(isCapabilityEnabled("tool", "a2ui") ? {
       [A2UI_PUSH_NAME]: a2uiPushToolDef,
       [A2UI_RESET_NAME]: a2uiResetToolDef,
