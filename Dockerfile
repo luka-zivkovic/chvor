@@ -22,9 +22,8 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 COPY apps/client/package.json apps/client/
 COPY apps/server/package.json apps/server/
 COPY packages/shared/package.json packages/shared/
-RUN pnpm install --prod --frozen-lockfile --ignore-scripts && \
-    rm -rf node_modules/@chvor && \
-    pnpm rebuild better-sqlite3 argon2
+RUN pnpm install --prod --frozen-lockfile && \
+    rm -rf node_modules/@chvor
 
 # Stage 3: Production image
 FROM node:22-slim

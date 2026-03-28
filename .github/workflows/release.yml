@@ -88,12 +88,10 @@ jobs:
           cp packages/pc-agent/package.json "${STAGING}/packages/pc-agent/"
           cp -r packages/pc-agent/src "${STAGING}/packages/pc-agent/src"
 
-          # Install production deps in staging (--ignore-scripts to avoid
-          # running arbitrary postinstall hooks, then explicitly rebuild
-          # native modules that need platform-specific binaries).
+          # Install production deps (onlyBuiltDependencies in package.json
+          # controls which packages may run install scripts).
           cd "${STAGING}"
-          pnpm install --prod --frozen-lockfile --ignore-scripts
-          pnpm rebuild better-sqlite3 argon2
+          pnpm install --prod --frozen-lockfile
           cd -
 
           # Cross-platform sha256
