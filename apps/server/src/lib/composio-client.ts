@@ -148,35 +148,39 @@ export interface ComposioAction {
 
 /**
  * List available actions for a toolkit (e.g. "reddit", "twitter").
- * Returns action names the agent can pass to executeAction().
+ * Uses getRawComposioTools() to get typed Tool objects directly.
  */
 export async function listActions(
   toolkit: string,
 ): Promise<ComposioAction[]> {
   const client = getClient();
-  const tools = await client.tools.get(COMPOSIO_ENTITY_ID, {
+  const tools = await client.tools.getRawComposioTools({
     toolkits: [toolkit],
   });
 
-  return (tools ?? []).map((t: Record<string, unknown>) => ({
-    name: (t.name ?? t.slug ?? "") as string,
-    displayName: (t.displayName ?? t.display_name ?? t.name ?? "") as string,
-    description: (t.description ?? "") as string,
-    parameters: (t.parameters ?? t.inputSchema ?? {}) as Record<string, unknown>,
+  return (tools ?? []).map((t) => ({
+    name: t.slug,
+    displayName: t.name,
+    description: t.description ?? "",
+    parameters: (t.inputParameters ?? {}) as Record<string, unknown>,
   }));
 }
 
 /**
  * Execute a Composio action by name (e.g. "REDDIT_GET_SUBREDDIT_POSTS").
+ * Returns { data, error, successful } from the SDK.
  */
 export async function executeAction(
   actionName: string,
   args: Record<string, unknown>,
-): Promise<unknown> {
+): Promise<{ data: Record<string, unknown>; error: string | null; successful: boolean }> {
   const client = getClient();
   const result = await client.tools.execute(actionName, {
     userId: COMPOSIO_ENTITY_ID,
     arguments: args,
   });
+  if (!result.successful) {
+    throw new Error(result.error ?? `Action "${actionName}" failed`);
+  }
   return result;
 }

@@ -3960,9 +3960,9 @@ async function handleSocialActions(
     const { listActions } = await import("./composio-client.ts");
     const platform = String(args.platform).toLowerCase().trim();
 
-    const actions = await listActions(platform);
+    const allActions = await listActions(platform);
 
-    if (actions.length === 0) {
+    if (allActions.length === 0) {
       return {
         content: [
           {
@@ -3973,6 +3973,12 @@ async function handleSocialActions(
       };
     }
 
+    const MAX_ACTIONS = 50;
+    const actions = allActions.slice(0, MAX_ACTIONS);
+    const truncNote = allActions.length > MAX_ACTIONS
+      ? `\n\nShowing first ${MAX_ACTIONS} of ${allActions.length} total actions.`
+      : "";
+
     const lines = actions.map(
       (a) => `- **${a.name}** — ${a.description || a.displayName || "(no description)"}`,
     );
@@ -3981,7 +3987,7 @@ async function handleSocialActions(
       content: [
         {
           type: "text",
-          text: `Available ${platform} actions (${actions.length}):\n\n${lines.join("\n")}\n\nUse native__social_execute with the action name and required arguments.`,
+          text: `Available ${platform} actions (${allActions.length}):\n\n${lines.join("\n")}${truncNote}\n\nUse native__social_execute with the action name and required arguments.`,
         },
       ],
     };
@@ -4022,8 +4028,12 @@ async function handleSocialExecute(
 
     const result = await executeAction(action, actionArgs);
 
-    const text =
-      typeof result === "string" ? result : JSON.stringify(result, null, 2);
+    const raw =
+      typeof result === "string" ? result : JSON.stringify(result.data, null, 2);
+    const MAX_RESPONSE = 8000;
+    const text = raw.length > MAX_RESPONSE
+      ? raw.slice(0, MAX_RESPONSE) + `\n\n... (truncated, ${raw.length} chars total)`
+      : raw;
 
     return {
       content: [{ type: "text", text }],
