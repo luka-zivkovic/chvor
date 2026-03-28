@@ -87,6 +87,7 @@ jobs:
           # Install production deps in staging
           cd "${STAGING}"
           pnpm install --prod --frozen-lockfile --ignore-scripts
+          pnpm rebuild better-sqlite3 argon2
           cd -
 
           # Cross-platform sha256

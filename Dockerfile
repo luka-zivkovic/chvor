@@ -24,13 +24,13 @@ COPY apps/server/package.json apps/server/
 COPY packages/shared/package.json packages/shared/
 RUN pnpm install --prod --frozen-lockfile --ignore-scripts && \
     rm -rf node_modules/@chvor && \
-    cd node_modules/better-sqlite3 && npx --yes node-gyp rebuild
+    pnpm rebuild better-sqlite3 argon2
 
 # Stage 3: Production image
 FROM node:22-slim
 WORKDIR /app
 
-# Copy production node_modules (with compiled better-sqlite3)
+# Copy production node_modules (with compiled native modules)
 COPY --from=deps /app/node_modules node_modules
 
 # Set up @chvor/shared as a real package (not a workspace symlink)
