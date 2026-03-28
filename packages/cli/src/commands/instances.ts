@@ -40,7 +40,7 @@ function discoverInstances(): InstanceInfo[] {
       }
       instances.push({
         name: "(default)",
-        port: config.port || "3001",
+        port: config.port || "9147",
         running,
         pid,
         template: config.templateName,

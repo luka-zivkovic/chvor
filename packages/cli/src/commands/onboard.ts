@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { input, select, password } from "@inquirer/prompts";
+import { input, select } from "@inquirer/prompts";
 import { writeConfig } from "../lib/config.js";
 import { validatePort } from "../lib/validate.js";
 import { getDataDir, ensureDir } from "../lib/paths.js";
@@ -35,16 +35,17 @@ export async function onboard(): Promise<void> {
     ],
   });
 
-  const apiKey = await password({ message: "API key:" });
-
-  const port = validatePort(await input({ message: "Port?", default: "3001" }));
+  const port = validatePort(await input({ message: "Port?", default: "9147" }));
 
   const token = randomBytes(32).toString("hex");
 
+  // Write config but do NOT mark as onboarded yet — that happens after
+  // download + server start succeed, so a failed install doesn't leave
+  // the user in a half-configured state.
   writeConfig({
     port,
     token,
-    onboarded: true,
+    onboarded: false,
     llmProvider: provider,
   });
 
@@ -55,37 +56,9 @@ export async function onboard(): Promise<void> {
 
   await spawnServer({ port });
 
-  // spawnServer already polls health internally — check once more briefly
-  // to decide whether we can configure credentials via API
-  const serverReady = await pollHealth(port, token, 5000);
+  const serverReady = await pollHealth(port, token, 30000);
 
   if (serverReady) {
-    const providerNames: Record<string, string> = {
-      anthropic: "Anthropic",
-      openai: "OpenAI",
-      "google-ai": "Google AI",
-    };
-
-    try {
-      const credRes = await fetch(`http://localhost:${port}/api/credentials`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name: providerNames[provider],
-          type: provider,
-          data: { apiKey },
-        }),
-      });
-      if (!credRes.ok) {
-        console.warn(`Warning: failed to save credentials (${credRes.status}). You can add them later in the UI.`);
-      }
-    } catch {
-      console.warn("Warning: could not reach server to save credentials. You can add them later in the UI.");
-    }
-
     try {
       const personaRes = await fetch(`http://localhost:${port}/api/persona`, {
         method: "PATCH",
@@ -108,12 +81,22 @@ export async function onboard(): Promise<void> {
   } else {
     console.warn(
       "\n  Server is still starting up. Your config has been saved." +
-      "\n  Credentials and persona will be configured when you open the UI."
+      "\n  Persona will be configured when you open the UI."
     );
   }
 
+  // Mark as onboarded only after download + server start succeeded
+  writeConfig({
+    port,
+    token,
+    onboarded: true,
+    llmProvider: provider,
+    installedVersion: version,
+  });
+
   console.log(`\n  chvor is running at http://localhost:${port}`);
-  console.log("  Open this URL in your browser to get started.\n");
+  console.log("  Open this URL in your browser to get started.");
+  console.log("  You can add your API key in Settings once you're in.\n");
   console.log("  Useful commands:");
   console.log("    chvor stop            Stop the server");
   console.log("    chvor start           Start the server");

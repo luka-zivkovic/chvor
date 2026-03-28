@@ -73,13 +73,13 @@ if [ "${1:-}" = "--docker" ]; then
   echo "Starting chvor container..."
   docker run -d \
     --name chvor \
-    -p 3001:3001 \
+    -p 9147:9147 \
     -v ~/.chvor:/home/node/.chvor \
     ghcr.io/luka-zivkovic/chvor:latest
 
   echo ""
   echo -e "${GREEN}${BOLD}chvor is running!${NC}"
-  echo -e "Open ${BOLD}http://localhost:3001${NC} in your browser."
+  echo -e "Open ${BOLD}http://localhost:9147${NC} in your browser."
   exit 0
 fi
 
@@ -103,5 +103,4 @@ npm install -g @chvor/cli
 
 echo ""
 echo -e "${GREEN}${BOLD}chvor installed successfully!${NC}"
-echo "Running onboarding..."
-chvor onboard
+echo -e "Run ${BOLD}chvor${NC} to complete setup."

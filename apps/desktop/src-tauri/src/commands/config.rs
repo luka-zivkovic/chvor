@@ -24,7 +24,7 @@ impl Default for ChvorConfig {
     fn default() -> Self {
         Self {
             installed_version: None,
-            port: "3001".to_string(),
+            port: "9147".to_string(),
             token: None,
             onboarded: false,
             llm_provider: None,

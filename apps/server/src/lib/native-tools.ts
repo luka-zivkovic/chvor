@@ -3818,7 +3818,7 @@ async function handleSocialConnect(
     const { initiateConnection } = await import("./composio-client.ts");
     const platform = String(args.platform).toLowerCase().trim();
 
-    const serverPort = process.env.PORT ?? "3001";
+    const serverPort = process.env.PORT ?? "9147";
     const callbackUrl = `http://localhost:${serverPort}/api/social/callback`;
 
     const result = await initiateConnection(platform, callbackUrl);

@@ -119,7 +119,7 @@ program
 program
   .command("docker")
   .description("Pull and run chvor as a Docker container")
-  .option("-p, --port <port>", "Host port", "3001")
+  .option("-p, --port <port>", "Host port", "9147")
   .action(async (opts) => {
     const { docker } = await import("./commands/docker.js");
     await docker(opts);

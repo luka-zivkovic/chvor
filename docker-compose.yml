@@ -3,7 +3,7 @@ services:
     build: .
     image: ghcr.io/luka-zivkovic/chvor:latest
     ports:
-      - "${PORT:-3001}:3001"
+      - "${PORT:-9147}:9147"
     volumes:
       - chvor-data:/home/node/.chvor
     env_file:
@@ -13,7 +13,7 @@ services:
       - NODE_ENV=production
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/pulse').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:9147/api/pulse').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3

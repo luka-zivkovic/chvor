@@ -69,7 +69,7 @@ export default function Dashboard() {
       await invoke("start_server", { port: config?.port || null });
       // Wait for health
       await invoke("poll_health", {
-        port: config?.port || "3001",
+        port: config?.port || "9147",
         token: config?.token || null,
       });
       await refresh();
@@ -93,7 +93,7 @@ export default function Dashboard() {
   }
 
   function handleOpen() {
-    const p = port || config?.port || "3001";
+    const p = port || config?.port || "9147";
     invoke("open_browser", { url: `http://localhost:${p}` });
   }
 
@@ -104,7 +104,7 @@ export default function Dashboard() {
       await invoke("update_server");
       await invoke("start_server", { port: config?.port || null });
       await invoke("poll_health", {
-        port: config?.port || "3001",
+        port: config?.port || "9147",
         token: config?.token || null,
       });
       // Refresh state
@@ -236,7 +236,7 @@ export default function Dashboard() {
           <div className="px-6 grid grid-cols-3 gap-4 animate-fade-in">
             <InfoCard
               label="Port"
-              value={port || config?.port || "3001"}
+              value={port || config?.port || "9147"}
               mono
             />
             <InfoCard

@@ -74,17 +74,14 @@ jobs:
           security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
 
-      # Build Tauri app
+      # Build Tauri app (signing only — notarization is a separate step)
       - name: Build desktop app
         working-directory: apps/desktop
+        timeout-minutes: 30
         env:
           CI: true
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS notarization (optional — builds unsigned if not set)
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ "${{ matrix.target }}" = "macos" ]; then
             pnpm tauri build --target universal-apple-darwin --bundles app
@@ -92,6 +89,43 @@ jobs:
             pnpm tauri build
           fi
         shell: bash
+
+      # Verify code signature (macOS)
+      - name: Verify code signature
+        if: matrix.target == 'macos'
+        shell: bash
+        run: |
+          APP_PATH="apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Chvor.app"
+          echo "Verifying code signature..."
+          codesign -v --deep --strict "$APP_PATH" && echo "Code signature valid" || echo "WARNING: Code signature verification failed"
+
+      # Notarize as a separate step with explicit timeout
+      - name: Notarize app
+        if: matrix.target == 'macos' && env.APPLE_ID != ''
+        timeout-minutes: 15
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          APP_PATH="apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Chvor.app"
+
+          # Create a zip for notarization submission
+          ditto -c -k --keepParent "$APP_PATH" Chvor-notarize.zip
+
+          echo "Submitting for notarization..."
+          xcrun notarytool submit Chvor-notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 10m
+
+          echo "Stapling notarization ticket..."
+          xcrun stapler staple "$APP_PATH"
+
+          rm -f Chvor-notarize.zip
+          echo "Notarization complete"
 
       # Re-create DMG with classic layout (app left → Applications right)
       # Tauri's built-in DMG styling uses AppleScript which hangs in headless CI,
