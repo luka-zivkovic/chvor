@@ -207,18 +207,25 @@ export async function init(opts: InitOptions): Promise<void> {
   }
 
   // 7. Save persona (user name + timezone + template persona)
-  await fetch(`http://localhost:${port}/api/persona`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      name: userName,
-      timezone,
-      onboarded: true,
-    }),
-  });
+  try {
+    const personaRes = await fetch(`http://localhost:${port}/api/persona`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        name: userName,
+        timezone,
+        onboarded: true,
+      }),
+    });
+    if (!personaRes.ok) {
+      console.warn(`  Warning: failed to save persona (${personaRes.status}). You can update it later in Settings.`);
+    }
+  } catch {
+    console.warn("  Warning: could not reach server to save persona. You can update it later in Settings.");
+  }
 
   // 8. Collect template-specific credentials
   await collectCredentials(manifest.credentials ?? [], port, token);

@@ -7,7 +7,7 @@
 if [ "$(id -u)" = "0" ]; then
   mkdir -p /home/node/.chvor/data
   chown -R node:node /home/node/.chvor
-  exec su -s /bin/sh node -c "exec $*"
+  exec su -s /bin/sh node -- -c 'exec "$@"' -- "$@"
 fi
 
 exec "$@"
