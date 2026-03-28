@@ -43,8 +43,7 @@
       }
     },
     "macOS": {
-      "signingIdentity": "Developer ID Application: Luka Zivkovic (8YW274D5TQ)",
-      "providerShortName": "8YW274D5TQ"
+      "signingIdentity": "Developer ID Application: Luka Zivkovic (8YW274D5TQ)"
     }
   },
   "plugins": {}
