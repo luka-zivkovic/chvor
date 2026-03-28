@@ -1,6 +1,6 @@
 {
   "name": "@chvor/cli",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Your own AI — install and run chvor.",
   "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
