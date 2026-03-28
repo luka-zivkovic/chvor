@@ -20,7 +20,7 @@
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4",
     "screenshot-desktop": "^1",
-    "sharp": "^0.33",
+    "sharp": "^0.34",
     "ws": "^8"
   },
   "devDependencies": {
