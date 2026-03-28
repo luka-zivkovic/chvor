@@ -1,5 +1,4 @@
 use tauri::{
-    image::Image,
     menu::{Menu, MenuItem},
     App, Emitter, Manager,
 };
@@ -33,13 +32,9 @@ pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let icon = Image::from_path("icons/icon.png")
-        .or_else(|_| {
-            // Fallback: use the app's default window icon
-            app.default_window_icon()
-                .cloned()
-                .ok_or_else(|| "no icon available".into())
-        })?;
+    let icon = app.default_window_icon()
+        .cloned()
+        .ok_or("no default icon available")?;
 
     let tray = tauri::tray::TrayIconBuilder::with_id("main")
         .icon(icon)
