@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process";
-import { homedir } from "node:os";
 import { validatePort } from "../lib/validate.js";
 
 export async function docker(opts: { port?: string }): Promise<void> {
@@ -13,7 +12,7 @@ export async function docker(opts: { port?: string }): Promise<void> {
   execFileSync("docker", [
     "run", "-d", "--name", "chvor",
     "-p", `${port}:9147`,
-    "-v", `${homedir()}/.chvor:/home/node/.chvor`,
+    "-v", "chvor-data:/data",
     image,
   ], { stdio: "inherit" });
 

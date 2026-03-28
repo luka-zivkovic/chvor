@@ -47,15 +47,13 @@ COPY apps/client/package.json apps/client/
 # Install Playwright for web-agent browser tool
 RUN npx playwright install --with-deps chromium
 
-# Pre-create data directory with correct ownership
-RUN mkdir -p /home/node/.chvor/data && chown -R node:node /home/node/.chvor /app
-
-# Entrypoint fixes bind-mount permissions then drops to 'node' user
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Create data directory inside the container with open permissions.
+# This works reliably across all platforms (Linux, macOS, Windows/WSL2)
+# regardless of bind-mount ownership semantics.
+RUN mkdir -p /data && chmod 777 /data
 
 ENV NODE_ENV=production
-ENV CHVOR_DATA_DIR=/home/node/.chvor/data
+ENV CHVOR_DATA_DIR=/data
 EXPOSE 9147
-ENTRYPOINT ["docker-entrypoint.sh"]
+USER node
 CMD ["node", "--import", "tsx", "apps/server/src/index.ts"]

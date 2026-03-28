@@ -5,7 +5,7 @@ services:
     ports:
       - "${PORT:-9147}:9147"
     volumes:
-      - chvor-data:/home/node/.chvor
+      - chvor-data:/data
     env_file:
       - path: .env
         required: false
