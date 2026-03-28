@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Rocket, Cpu, Key, Zap, CheckCircle, Loader2, ArrowRight, ArrowLeft } from "lucide-react";
+import { Rocket, Cpu, Zap, CheckCircle, Loader2, ArrowRight, ArrowLeft } from "lucide-react";
 import NodeDetector from "../components/NodeDetector";
-import ProviderSelector from "../components/ProviderSelector";
 
 interface DownloadProgress {
   stage: string;
@@ -18,15 +17,8 @@ interface Props {
 const STEPS = [
   { icon: Rocket, title: "Welcome" },
   { icon: Cpu, title: "Environment" },
-  { icon: Key, title: "Provider" },
   { icon: Zap, title: "Launch" },
 ];
-
-const PROVIDER_NAMES: Record<string, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  "google-ai": "Google AI",
-};
 
 function isValidPort(value: string): boolean {
   const num = parseInt(value, 10);
@@ -37,12 +29,8 @@ export default function SetupWizard({ onComplete }: Props) {
   const [step, setStep] = useState(0);
   const [nodeReady, setNodeReady] = useState(false);
 
-  // Provider step state
-  const [provider, setProvider] = useState("");
-  const [apiKey, setApiKey] = useState("");
-
   // Launch step state
-  const [port, setPort] = useState("3001");
+  const [port, setPort] = useState("9147");
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +63,6 @@ export default function SetupWizard({ onComplete }: Props) {
           port,
           token,
           onboarded: false,
-          llmProvider: provider,
         },
         instance: null,
       });
@@ -95,22 +82,6 @@ export default function SetupWizard({ onComplete }: Props) {
         return;
       }
 
-      // Save credentials via Rust backend (keeps API key out of webview fetch)
-      try {
-        await invoke("save_credentials", {
-          port,
-          token,
-          provider,
-          providerName: PROVIDER_NAMES[provider] || provider,
-          apiKey,
-        });
-      } catch {
-        // Non-fatal — user can add later in UI
-      }
-
-      // Clear API key from JS memory as soon as possible
-      setApiKey("");
-
       // Auto-detect timezone and configure persona via Rust backend
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       try {
@@ -125,7 +96,6 @@ export default function SetupWizard({ onComplete }: Props) {
           port,
           token,
           onboarded: true,
-          llmProvider: provider,
           installedVersion: version,
         },
         instance: null,
@@ -241,37 +211,8 @@ export default function SetupWizard({ onComplete }: Props) {
               </div>
             )}
 
-            {/* Step 2: Provider selection */}
+            {/* Step 2: Launch */}
             {step === 2 && (
-              <div className="space-y-6 animate-fade-in">
-                <div>
-                  <h2 className="text-2xl font-semibold tracking-tight">
-                    LLM Provider
-                  </h2>
-                  <p className="text-muted-foreground mt-2 text-sm">
-                    Choose your AI provider and enter your API key.
-                  </p>
-                </div>
-                <ProviderSelector
-                  initialProvider={provider}
-                  onSelect={(p, k) => {
-                    setProvider(p);
-                    setApiKey(k);
-                    setStep(3);
-                  }}
-                />
-                <button
-                  onClick={() => setStep(1)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm hover:opacity-90 transition-opacity"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  Back
-                </button>
-              </div>
-            )}
-
-            {/* Step 3: Launch */}
-            {step === 3 && (
               <div className="space-y-6 animate-fade-in">
                 <div>
                   <h2 className="text-2xl font-semibold tracking-tight">
@@ -279,7 +220,7 @@ export default function SetupWizard({ onComplete }: Props) {
                   </h2>
                   {!done && (
                     <p className="text-muted-foreground mt-2 text-sm">
-                      We'll download Chvor and start the server.
+                      We'll download Chvor and start the server. You can add your API key in Settings once you're in.
                     </p>
                   )}
                 </div>
@@ -306,7 +247,7 @@ export default function SetupWizard({ onComplete }: Props) {
                     </div>
                     <div className="flex gap-3">
                       <button
-                        onClick={() => setStep(2)}
+                        onClick={() => setStep(1)}
                         className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-sm hover:opacity-90 transition-opacity"
                       >
                         <ArrowLeft className="w-4 h-4" />

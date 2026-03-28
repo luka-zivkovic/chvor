@@ -2,8 +2,12 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::{Read as _, Write};
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "windows")]
+use std::io::Read as _;
+use std::io::Write;
+#[cfg(target_os = "windows")]
+use std::path::Path;
+use std::path::PathBuf;
 use crate::platform::silent_command;
 use tauri::{AppHandle, Emitter};
 

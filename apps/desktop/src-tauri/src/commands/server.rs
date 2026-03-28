@@ -1,6 +1,5 @@
 use serde::Serialize;
 use std::path::PathBuf;
-use std::process::Command as StdCommand;
 use std::sync::Mutex;
 use tauri::State;
 
@@ -37,7 +36,7 @@ fn app_dir() -> PathBuf {
 fn is_process_alive(pid: u32) -> bool {
     #[cfg(target_os = "windows")]
     {
-        let output = StdCommand::new("tasklist")
+        let output = silent_command("tasklist")
             .args(["/FI", &format!("PID eq {}", pid)])
             .output();
         match output {
@@ -130,6 +129,14 @@ pub async fn start_server(
         .map_err(|_| format!("Invalid port: {}", port))?;
     if port_num < 1024 {
         return Err(format!("Port {} is in the privileged range (< 1024)", port));
+    }
+
+    // Check if port is available before attempting to start server
+    if std::net::TcpListener::bind(("127.0.0.1", port_num)).is_err() {
+        return Err(format!(
+            "Port {} is already in use. Another instance may be running, or another application is using this port.",
+            port
+        ));
     }
 
     let token = config.token.clone();
@@ -267,7 +274,7 @@ pub fn kill_server_process(pid: u32) {
     #[cfg(target_os = "windows")]
     {
         // First try graceful shutdown (without /F)
-        let _ = StdCommand::new("taskkill")
+        let _ = silent_command("taskkill")
             .args(["/PID", &pid.to_string(), "/T"])
             .output();
 
@@ -280,7 +287,7 @@ pub fn kill_server_process(pid: u32) {
         }
 
         // Force kill if still alive
-        let _ = StdCommand::new("taskkill")
+        let _ = silent_command("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .output();
     }
@@ -296,7 +303,7 @@ pub fn kill_server_process(pid: u32) {
 pub async fn poll_health(port: String, token: Option<String>) -> Result<bool, String> {
     let url = format!("http://localhost:{}/api/health", port);
     let client = reqwest::Client::new();
-    let timeout = std::time::Duration::from_secs(15);
+    let timeout = std::time::Duration::from_secs(30);
     let interval = std::time::Duration::from_millis(500);
     let start = std::time::Instant::now();
 

@@ -299,7 +299,7 @@ const pcAgentToken: string | null = (() => {
   }
   const generated = crypto.randomUUID();
   console.log(`[pc-control] No CHVOR_TOKEN set — generated session token: ${generated}`);
-  console.log(`[pc-control] Use: npx @chvor/pc-agent --server ws://localhost:${process.env.PORT ?? 3001}/ws/pc-agent --token ${generated}`);
+  console.log(`[pc-control] Use: npx @chvor/pc-agent --server ws://localhost:${process.env.PORT ?? 9147}/ws/pc-agent --token ${generated}`);
   return generated;
 })();
 app.get(
@@ -434,7 +434,7 @@ if (process.env.NODE_ENV === "production") {
 }
 
 // --- Start ---
-const port = parseInt(process.env.PORT ?? "3001", 10);
+const port = parseInt(process.env.PORT ?? "9147", 10);
 
 // Warn if no LLM provider is configured
 const hasLLM = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -444,6 +444,15 @@ if (!hasLLM) {
 
 const server = serve({ fetch: app.fetch, port }, () => {
   console.log(`[chvor] server running at http://localhost:${port}`);
+});
+
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`[chvor] Port ${port} is already in use. Another instance may be running, or another application is using this port.`);
+    console.error(`[chvor] Try a different port: PORT=<number> chvor start`);
+    process.exit(1);
+  }
+  throw err;
 });
 
 injectWebSocket(server);

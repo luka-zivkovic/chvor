@@ -55,6 +55,7 @@ pub fn ensure_path() {}
 pub fn silent_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
     ensure_path();
 
+    #[allow(unused_mut)]
     let mut cmd = Command::new(program);
 
     #[cfg(target_os = "windows")]

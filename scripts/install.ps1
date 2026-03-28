@@ -36,13 +36,13 @@ if ($Docker) {
     Write-Host "Starting chvor container..."
     docker run -d `
         --name chvor `
-        -p 3001:3001 `
+        -p 9147:9147 `
         -v "$env:USERPROFILE\.chvor:/home/node/.chvor" `
         ghcr.io/luka-zivkovic/chvor:latest
 
     Write-Host ""
     Write-Host "chvor is running!" -ForegroundColor Green
-    Write-Host "Open http://localhost:3001 in your browser."
+    Write-Host "Open http://localhost:9147 in your browser."
     exit 0
 }
 
@@ -114,5 +114,4 @@ npm install -g @chvor/cli
 
 Write-Host ""
 Write-Host "chvor installed successfully!" -ForegroundColor Green
-Write-Host "Running onboarding..."
-chvor onboard
+Write-Host "Run 'chvor' to complete setup."

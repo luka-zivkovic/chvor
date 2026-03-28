@@ -3,7 +3,7 @@ import { readConfig } from "../lib/config.js";
 
 export async function open(): Promise<void> {
   const config = readConfig();
-  const port = config.port ?? "3001";
+  const port = config.port ?? "9147";
   const url = `http://localhost:${port}`;
 
   switch (process.platform) {

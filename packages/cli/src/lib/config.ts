@@ -13,7 +13,7 @@ export interface ChvorConfig {
 }
 
 const DEFAULTS: ChvorConfig = {
-  port: "3001",
+  port: "9147",
   onboarded: false,
 };
 
@@ -35,5 +35,6 @@ export function writeConfig(config: ChvorConfig): void {
 }
 
 export function isOnboarded(): boolean {
-  return readConfig().onboarded;
+  const config = readConfig();
+  return config.onboarded && !!config.installedVersion;
 }

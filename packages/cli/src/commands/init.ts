@@ -171,20 +171,18 @@ export async function init(opts: InitOptions): Promise<void> {
     ],
   });
 
-  const apiKey = await password({ message: "API key:" });
-
-  const defaultPort = instanceName ? "3002" : "3001";
+  const defaultPort = instanceName ? "9148" : "9147";
   const port = validatePort(
     await input({ message: "Port?", default: defaultPort })
   );
 
   const token = randomBytes(32).toString("hex");
 
-  // 4. Write config
+  // 4. Write config (not yet onboarded — set after download + server start)
   writeConfig({
     port,
     token,
-    onboarded: true,
+    onboarded: false,
     llmProvider: provider,
     instanceName: instanceName || undefined,
     templateName: manifest.name,
@@ -208,27 +206,7 @@ export async function init(opts: InitOptions): Promise<void> {
     return;
   }
 
-  // 7. Save LLM provider credential
-  const providerNames: Record<string, string> = {
-    anthropic: "Anthropic",
-    openai: "OpenAI",
-    "google-ai": "Google AI",
-  };
-
-  await fetch(`http://localhost:${port}/api/credentials`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      name: providerNames[provider],
-      type: provider,
-      data: { apiKey },
-    }),
-  });
-
-  // 8. Save persona (user name + timezone + template persona)
+  // 7. Save persona (user name + timezone + template persona)
   await fetch(`http://localhost:${port}/api/persona`, {
     method: "PATCH",
     headers: {
@@ -242,13 +220,10 @@ export async function init(opts: InitOptions): Promise<void> {
     }),
   });
 
-  // 9. Collect template-specific credentials
-  const templateCredentials = (manifest.credentials ?? []).filter(
-    (c: TemplateCredentialDef) => c.type !== provider // Skip if already collected as LLM provider
-  );
-  await collectCredentials(templateCredentials, port, token);
+  // 8. Collect template-specific credentials
+  await collectCredentials(manifest.credentials ?? [], port, token);
 
-  // 10. Provision template
+  // 9. Provision template
   await provision({
     port,
     token,
@@ -260,6 +235,17 @@ export async function init(opts: InitOptions): Promise<void> {
   if (isRegistryTemplate) {
     try { rmSync(templatePath, { recursive: true, force: true }); } catch { /* non-critical */ }
   }
+
+  // 10. Mark as onboarded now that everything succeeded
+  writeConfig({
+    port,
+    token,
+    onboarded: true,
+    llmProvider: provider,
+    instanceName: instanceName || undefined,
+    templateName: manifest.name,
+    installedVersion: version,
+  });
 
   // 11. Done
   const label = instanceName ? ` (instance: ${instanceName})` : "";
