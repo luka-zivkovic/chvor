@@ -62,7 +62,7 @@ jobs:
           NAME="chvor-v${VERSION}-${{ matrix.target_os }}-${{ matrix.target_arch }}"
           STAGING="staging/${NAME}"
 
-          mkdir -p "${STAGING}/apps/server" "${STAGING}/apps/client" "${STAGING}/packages/shared"
+          mkdir -p "${STAGING}/apps/server" "${STAGING}/apps/client" "${STAGING}/packages/shared" "${STAGING}/packages/pc-agent"
 
           # Root workspace files
           cp package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc "${STAGING}/"
@@ -83,6 +83,10 @@ jobs:
           cp packages/shared/package.json packages/shared/tsconfig.json "${STAGING}/packages/shared/"
           cp -r packages/shared/src "${STAGING}/packages/shared/src"
           cp -r packages/shared/dist "${STAGING}/packages/shared/dist"
+
+          # PC-agent package (server imports it at runtime via workspace link)
+          cp packages/pc-agent/package.json "${STAGING}/packages/pc-agent/"
+          cp -r packages/pc-agent/src "${STAGING}/packages/pc-agent/src"
 
           # Install production deps in staging
           cd "${STAGING}"
