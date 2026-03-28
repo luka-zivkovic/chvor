@@ -87,7 +87,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ "${{ matrix.target }}" = "macos" ]; then
-            pnpm tauri build --target universal-apple-darwin --bundles app,updater
+            pnpm tauri build --target universal-apple-darwin --bundles app
           else
             pnpm tauri build
           fi
@@ -104,6 +104,7 @@ jobs:
           BUNDLE_DIR="apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle"
           APP_PATH="$BUNDLE_DIR/macos/Chvor.app"
           DMG_DIR="$BUNDLE_DIR/dmg"
+          mkdir -p "$DMG_DIR"
           rm -f "$DMG_DIR"/*.dmg
           # create-dmg exits 2 when DMG is created but icon positioning fails (expected in headless CI)
           create-dmg \
