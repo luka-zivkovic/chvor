@@ -74,7 +74,7 @@ if [ "${1:-}" = "--docker" ]; then
   docker run -d \
     --name chvor \
     -p 9147:9147 \
-    -v ~/.chvor:/home/node/.chvor \
+    -v chvor-data:/data \
     ghcr.io/luka-zivkovic/chvor:latest
 
   echo ""

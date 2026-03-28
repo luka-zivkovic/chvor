@@ -19,8 +19,19 @@ export default function App() {
 
   useEffect(() => {
     invoke<ChvorConfig>("read_config", { instance: null })
-      .then((config) => {
-        setOnboarded(config.onboarded && !!config.installedVersion);
+      .then(async (config) => {
+        const isConfigured = config.onboarded && !!config.installedVersion;
+
+        if (isConfigured) {
+          // Verify the install actually exists — stale config from a previous
+          // version could claim onboarded but have no binary.
+          const installed = await invoke<boolean>("is_installed", {
+            version: config.installedVersion,
+          });
+          setOnboarded(installed);
+        } else {
+          setOnboarded(false);
+        }
       })
       .catch(() => setOnboarded(false))
       .finally(() => setLoading(false));

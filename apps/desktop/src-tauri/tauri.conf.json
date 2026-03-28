@@ -23,10 +23,6 @@
         "resizable": true
       }
     ],
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true
-    },
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http://localhost:* https://api.github.com; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     }

@@ -37,7 +37,7 @@ if ($Docker) {
     docker run -d `
         --name chvor `
         -p 9147:9147 `
-        -v "$env:USERPROFILE\.chvor:/home/node/.chvor" `
+        -v "chvor-data:/data" `
         ghcr.io/luka-zivkovic/chvor:latest
 
     Write-Host ""
