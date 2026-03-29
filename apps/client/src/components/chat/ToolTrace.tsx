@@ -45,7 +45,7 @@ function TraceRow({ entry }: { entry: ToolTraceEntry }) {
       )}
       {showOutput && entry.output && (
         <pre className="mt-1 max-h-24 overflow-auto rounded bg-background/50 p-1.5 text-[9px] text-muted-foreground/50 font-mono whitespace-pre-wrap break-all">
-          {entry.output}
+          {entry.output}{entry.truncated && <span className="text-muted-foreground/30"> …(truncated)</span>}
         </pre>
       )}
       {showOutput && entry.error && (

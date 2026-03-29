@@ -43,6 +43,7 @@ export interface ToolTraceEntry {
   reason?: string;
   status: "running" | "completed" | "failed";
   output?: string;
+  truncated?: boolean;
   error?: string;
   media?: MediaArtifact[];
 }
@@ -376,9 +377,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             const alreadyRunning = s.streamingTools.some(
               (t) => t.name === toolName && t.status === "running"
             );
-            if (alreadyRunning) return s;
             return {
-              streamingTools: [...s.streamingTools, { name: toolName, status: "running" }],
+              streamingTools: alreadyRunning ? s.streamingTools : [...s.streamingTools, { name: toolName, status: "running" }],
               toolTrace: [...s.toolTrace, { name: toolName, reason, status: "running" }],
             };
           });
@@ -395,7 +395,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             ),
             toolTrace: s.toolTrace.map((t) =>
               t.name === skillId && t.status === "running"
-                ? { ...t, status: "completed" as const, output: outputStr?.slice(0, 500), ...(skillMedia?.length ? { media: skillMedia } : {}) }
+                ? { ...t, status: "completed" as const, output: outputStr?.slice(0, 500), truncated: (outputStr?.length ?? 0) > 500, ...(skillMedia?.length ? { media: skillMedia } : {}) }
                 : t
             ),
           }));
@@ -423,9 +423,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             const alreadyRunning = s.streamingTools.some(
               (t) => t.name === toolName && t.status === "running"
             );
-            if (alreadyRunning) return s;
             return {
-              streamingTools: [...s.streamingTools, { name: toolName, status: "running" }],
+              streamingTools: alreadyRunning ? s.streamingTools : [...s.streamingTools, { name: toolName, status: "running" }],
               toolTrace: [...s.toolTrace, { name: toolName, reason, status: "running" }],
             };
           });
@@ -442,7 +441,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             ),
             toolTrace: s.toolTrace.map((t) =>
               t.name === toolId && t.status === "running"
-                ? { ...t, status: "completed" as const, output: outputStr?.slice(0, 500), ...(toolMedia?.length ? { media: toolMedia } : {}) }
+                ? { ...t, status: "completed" as const, output: outputStr?.slice(0, 500), truncated: (outputStr?.length ?? 0) > 500, ...(toolMedia?.length ? { media: toolMedia } : {}) }
                 : t
             ),
           }));
