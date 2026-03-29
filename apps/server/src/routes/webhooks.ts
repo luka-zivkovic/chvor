@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { timingSafeEqual } from "node:crypto";
 import type { CreateWebhookRequest, UpdateWebhookRequest } from "@chvor/shared";
 import {
   listWebhookSubscriptions,
@@ -9,7 +10,7 @@ import {
   listWebhookEvents,
 } from "../db/webhook-store.ts";
 import { getWSInstance } from "../gateway/ws-instance.ts";
-import { parseWebhookPayload, verifyGitHubSignature, verifyGenericSignature } from "../lib/webhook-parsers.ts";
+import { parseWebhookPayload, verifyGitHubSignature, verifyGenericSignature, verifyNotionSignature } from "../lib/webhook-parsers.ts";
 import { executeWebhook, matchesFilters } from "../lib/webhook-executor.ts";
 
 const webhooks = new Hono();
@@ -119,9 +120,15 @@ webhooks.post("/:id/receive", async (c) => {
       if (typeof body === "object" && body !== null && (body as Record<string, unknown>).type === "url_verification") {
         return c.json({ challenge: (body as Record<string, unknown>).challenge });
       }
-      // TODO: Notion doesn't provide standard HMAC signatures yet.
-      // When x-notion-signature is available, verify it here.
-      // For now, the unique subscription UUID in the URL acts as the auth token.
+      // Notion sends HMAC-SHA256 in x-notion-signature header when a secret is configured.
+      // If the subscription has a secret and the header is present, verify it.
+      // Otherwise, fall back to the unique subscription UUID in the URL as baseline auth.
+      if (sub.secret) {
+        const notionSig = c.req.header("x-notion-signature");
+        if (!notionSig || !verifyNotionSignature(sub.secret, rawBody, notionSig)) {
+          return c.json({ error: "invalid signature" }, 401);
+        }
+      }
       break;
     }
     case "generic": {
@@ -131,11 +138,20 @@ webhooks.post("/:id/receive", async (c) => {
       }
       break;
     }
-    // TODO: Gmail Pub/Sub sends a JWT in the Authorization header.
-    // Verify it with google-auth-library once that dependency is added.
-    // The unique subscription UUID in the URL provides baseline auth.
-    case "gmail":
+    case "gmail": {
+      // Gmail Pub/Sub sends base64-encoded JSON in message.data.
+      // Verify the Bearer token in Authorization header matches the subscription secret.
+      // This is the standard approach for Google Cloud Pub/Sub push subscriptions
+      // when an audience/token is configured on the push endpoint.
+      if (sub.secret) {
+        const authHeader = c.req.header("authorization");
+        const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+        if (!token || token.length !== sub.secret.length || !timingSafeEqual(Buffer.from(token), Buffer.from(sub.secret))) {
+          return c.json({ error: "invalid authorization" }, 401);
+        }
+      }
       break;
+    }
   }
 
   // Parse payload

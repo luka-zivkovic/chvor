@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAppStore } from "../../stores/app-store";
 
 import { cn } from "@/lib/utils";
@@ -10,6 +10,9 @@ import { AudioPlayback } from "./AudioPlayback";
 import { useVoiceStore } from "@/stores/voice-store";
 import { CommandApproval } from "./CommandApproval";
 import { ConversationSwitcher } from "./ConversationSwitcher";
+import { usePersonaStore } from "@/stores/persona-store";
+import { useCredentialStore } from "@/stores/credential-store";
+import { useScheduleStore } from "@/stores/schedule-store";
 import type { LayoutMode } from "../../stores/ui-store";
 import type { ConversationSummary } from "@chvor/shared";
 
@@ -28,24 +31,73 @@ function ThinkingIndicator() {
   );
 }
 
-const STARTER_PROMPTS = [
+const FALLBACK_PROMPTS = [
   "What can you do?",
   "Search the web for...",
   "Help me brainstorm",
   "Tell me a joke",
 ];
 
+const CHANNEL_CRED_TYPES = new Set(["telegram", "discord", "slack", "whatsapp", "matrix"]);
+
+function useStarterPrompts(): string[] {
+  const persona = usePersonaStore((s) => s.persona);
+  const credentials = useCredentialStore((s) => s.credentials);
+  const schedules = useScheduleStore((s) => s.schedules);
+
+  return useMemo(() => {
+    if (!persona) return FALLBACK_PROMPTS;
+
+    const prompts: string[] = [];
+    const name = persona.userNickname || persona.name || "";
+    const tz = persona.timezone;
+    const hasChannel = credentials.some((c) => CHANNEL_CRED_TYPES.has(c.type));
+
+    // Always lead with capability discovery
+    prompts.push("What can you do?");
+
+    // Personalized prompts based on what's configured
+    if (tz) {
+      prompts.push("Set up a daily morning briefing");
+    }
+    if (hasChannel) {
+      const channelName = credentials.find((c) => CHANNEL_CRED_TYPES.has(c.type))?.type ?? "Telegram";
+      prompts.push(`Send me a reminder on ${channelName[0].toUpperCase() + channelName.slice(1)} in 1 hour`);
+    }
+    if (schedules.length === 0) {
+      prompts.push("Create a scheduled task for me");
+    }
+
+    // Memory demonstration
+    if (name) {
+      prompts.push("Remember that I prefer concise answers");
+    } else {
+      prompts.push("Get to know me");
+    }
+
+    // Fill remaining slots
+    if (prompts.length < 4) prompts.push("Help me brainstorm");
+    if (prompts.length < 4) prompts.push("Search the web for...");
+
+    return prompts.slice(0, 4);
+  }, [persona, credentials, schedules]);
+}
+
 function EmptyState({ onSend }: { onSend: (text: string) => void }) {
+  const prompts = useStarterPrompts();
+  const persona = usePersonaStore((s) => s.persona);
+  const aiName = persona?.aiName || "Chvor";
+
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-4">
       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 overflow-hidden">
         <img src="/chvor_logo.svg" alt="Chvor" className="h-6 w-6 object-contain" />
       </div>
       <p className="text-xs text-muted-foreground">
-        Start a conversation
+        Ask {aiName} anything
       </p>
       <div className="flex max-w-sm flex-wrap items-center justify-center gap-2">
-        {STARTER_PROMPTS.map((prompt) => (
+        {prompts.map((prompt) => (
           <button
             key={prompt}
             onClick={() => onSend(prompt)}

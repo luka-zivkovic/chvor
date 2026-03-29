@@ -9,7 +9,9 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "start": "node --import tsx src/index.ts"
+    "start": "node --import tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1",
@@ -55,6 +57,7 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/qrcode": "^1",
     "@types/yauzl": "^2",
-    "typescript": "^5.7"
+    "typescript": "^5.7",
+    "vitest": "^4.1.0"
   }
 }

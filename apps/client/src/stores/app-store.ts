@@ -301,6 +301,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           set({ streamingContent: null, streamingTools: [], streamingStopped: true, pendingModelInfo: null });
         }
         break;
+      case "chat.welcome":
+        // Welcome message after onboarding — display as assistant message
+        get().addMessage({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: event.data.content,
+          channelType: "web",
+          timestamp: new Date().toISOString(),
+        });
+        break;
       case "execution.event": {
         get().addExecutionEvent(event.data);
         const execEvent = event.data;

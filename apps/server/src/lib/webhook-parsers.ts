@@ -126,6 +126,26 @@ function parseGmailPayload(_headers: Headers, body: Record<string, unknown>): Pa
   };
 }
 
+// ── Notion ──────────────────────────────────────────────
+
+export function verifyNotionSignature(
+  secret: string,
+  rawBody: string,
+  signatureHeader: string | undefined
+): boolean {
+  if (!signatureHeader) return false;
+  // Notion uses HMAC-SHA256 and sends the hex digest in x-notion-signature
+  const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+  try {
+    return timingSafeEqual(
+      Buffer.from(expected, "hex"),
+      Buffer.from(signatureHeader, "hex")
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ── Generic ─────────────────────────────────────────────
 
 export function verifyGenericSignature(

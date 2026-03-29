@@ -68,6 +68,7 @@ export type GatewayServerEvent =
   | { type: "voice.status"; data: { state: "transcribing" | "synthesizing" | "ready" } }
   | { type: "command.confirm"; data: CommandApprovalRequest }
   | { type: "chat.stopped"; data: Record<string, never> }
+  | { type: "chat.welcome"; data: { content: string; aiName: string } }
   | { type: "chat.modelInfo"; data: { providerId: string; model: string; wasFallback: boolean } }
   | { type: "error"; data: { message: string } }
   | { type: "session.titleUpdate"; data: { sessionId: string; title: string } }
