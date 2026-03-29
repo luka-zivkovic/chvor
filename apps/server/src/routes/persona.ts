@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import type { UpdatePersonaRequest } from "@chvor/shared";
 import { getPersona, updatePersona } from "../db/config-store.ts";
-import { getGatewayInstance } from "../gateway/gateway-instance.ts";
 import { getWSInstance } from "../gateway/ws-instance.ts";
 
 const persona = new Hono();
@@ -41,9 +40,8 @@ persona.patch("/", async (c) => {
 });
 
 function triggerWelcomeMessage(persona: ReturnType<typeof getPersona>): void {
-  const gateway = getGatewayInstance();
   const ws = getWSInstance();
-  if (!gateway || !ws) return;
+  if (!ws) return;
 
   const aiName = persona.aiName || "Chvor";
   const userName = persona.userNickname || persona.name || "";
