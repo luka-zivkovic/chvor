@@ -35,6 +35,7 @@
     },
     "process:default",
     "dialog:default",
-    "notification:default"
+    "notification:default",
+    "updater:default"
   ]
 }

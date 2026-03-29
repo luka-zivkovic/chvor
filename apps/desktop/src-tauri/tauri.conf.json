@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:* https://api.github.com; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:* https://api.github.com https://github.com https://objects.githubusercontent.com; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     }
   },
   "bundle": {
@@ -47,5 +47,11 @@
       "providerShortName": "8YW274D5TQ"
     }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/luka-zivkovic/chvor/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

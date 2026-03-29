@@ -21,12 +21,12 @@ export function SlideOverPanel({
   return (
     <div
       className={cn(
-        "animate-slide-in-left relative h-full z-30",
-        "flex flex-col rounded-r-2xl",
+        "animate-slide-in-left relative h-full z-30 w-full",
+        "flex flex-col md:rounded-r-2xl",
         "border-r border-border/50 backdrop-blur-xl"
       )}
       style={{
-        width: width ?? 520,
+        maxWidth: width ?? 520,
         background: "var(--glass-bg-strong)",
       }}
     >

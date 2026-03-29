@@ -75,6 +75,7 @@ import { startSkillWatcher, stopSkillWatcher } from "./lib/skill-watcher.ts";
 import { startAutoUpdate, stopAutoUpdate } from "./lib/registry-updater.ts";
 import { startMemoryDecay, stopMemoryDecay } from "./lib/memory-decay.ts";
 import { startConsolidation, stopConsolidation } from "./lib/memory-consolidation.ts";
+import { initJobRunner, stopAllPeriodicJobs } from "./lib/job-runner.ts";
 import { reloadAll } from "./lib/capability-loader.ts";
 import { homedir } from "node:os";
 
@@ -510,6 +511,9 @@ initLocalBackend().catch((err) => console.error("[pc-control] local backend init
 startBrowserSweep();
 startAudioCleanup();
 startMediaCleanup();
+
+// Initialize persistent job runner (resets stuck jobs from previous crash)
+initJobRunner();
 startMemoryDecay();
 startConsolidation();
 initManifest();
@@ -542,9 +546,7 @@ process.on("SIGINT", async () => {
   stopSkillWatcher();
   stopAutoUpdate();
   stopMediaCleanup();
-  stopMemoryDecay();
-  stopConsolidation();
-  stopBackupScheduler();
+  stopAllPeriodicJobs();
   await shutdownAllBrowsers();
   shutdownPcAgents();
   await gateway.stopAll();
@@ -566,9 +568,7 @@ process.on("SIGTERM", async () => {
   stopSkillWatcher();
   stopAutoUpdate();
   stopMediaCleanup();
-  stopMemoryDecay();
-  stopConsolidation();
-  stopBackupScheduler();
+  stopAllPeriodicJobs();
   await shutdownAllBrowsers();
   shutdownPcAgents();
   await gateway.stopAll();

@@ -3,6 +3,7 @@ import type { ChatMessage } from "@chvor/shared";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { MediaRenderer } from "./MediaRenderer";
 import { sanitizeMessageContent } from "@/lib/chat-utils";
+import { useEmotionStore } from "@/stores/emotion-store";
 
 interface Props {
   message: ChatMessage;
@@ -91,8 +92,30 @@ export function MessageBubble({ message }: Props) {
   return <AssistantBubble message={message} />;
 }
 
+function useEmotionForMessage(timestamp: string): { label: string; color: string } | null {
+  const history = useEmotionStore((s) => s.sessionHistory);
+  return useMemo(() => {
+    if (!history.length) return null;
+    const msgTime = new Date(timestamp).getTime();
+    let closest = history[0];
+    let minDiff = Infinity;
+    for (const snap of history) {
+      const diff = Math.abs(new Date(snap.timestamp).getTime() - msgTime);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = snap;
+      }
+    }
+    // Only show if within 30 seconds of the message
+    if (minDiff > 30_000) return null;
+    if (!closest.displayLabel || !closest.color) return null;
+    return { label: closest.displayLabel, color: closest.color };
+  }, [history, timestamp]);
+}
+
 function AssistantBubble({ message }: Props) {
   const [copied, setCopied] = useState(false);
+  const emotion = useEmotionForMessage(message.timestamp);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(sanitizeMessageContent(message.content)).then(() => {
@@ -137,6 +160,12 @@ function AssistantBubble({ message }: Props) {
           <span className="font-mono text-[10px] text-muted-foreground/40" title={new Date(message.timestamp).toLocaleString()}>
             {formatTime(message.timestamp)}
           </span>
+          {emotion && (
+            <span className="flex items-center gap-1 text-[10px] text-muted-foreground/50">
+              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: emotion.color }} />
+              {emotion.label}
+            </span>
+          )}
           {message.modelUsed?.wasFallback && (
             <span className="text-[10px] text-status-warning/70" title={`${message.modelUsed.providerId}/${message.modelUsed.model}`}>
               Responded using {message.modelUsed.model} (primary unavailable)

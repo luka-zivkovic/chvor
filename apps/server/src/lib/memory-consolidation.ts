@@ -26,7 +26,8 @@ import { containsSensitiveData } from "./sensitive-filter.ts";
 import { getCognitiveMemoryConfig, getBrainConfig, getConfig, setConfig } from "../db/config-store.ts";
 import type { Memory } from "@chvor/shared";
 
-let consolidationTimer: ReturnType<typeof setInterval> | null = null;
+import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
+
 let lastConsolidationAt: string | null = getConfig("memory.lastConsolidationAt") ?? null;
 let consolidationInProgress: Promise<unknown> | null = null; // concurrency lock
 
@@ -415,21 +416,16 @@ async function doConsolidation(): Promise<{
   return { merged, insights, narratives, pruned };
 }
 
-/** Start periodic consolidation. */
+/** Start periodic consolidation via persistent job runner. */
 export function startConsolidation(): void {
-  if (consolidationTimer) return;
-  consolidationTimer = setInterval(() => {
-    runConsolidation().catch((err) =>
-      console.error("[consolidation] periodic run failed:", err)
-    );
-  }, CONSOLIDATION_INTERVAL_MS);
-  consolidationTimer.unref();
+  startPeriodicJob({
+    id: "memory-consolidation",
+    intervalMs: CONSOLIDATION_INTERVAL_MS,
+    run: async () => { await runConsolidation(); },
+  });
 }
 
 /** Stop periodic consolidation. */
 export function stopConsolidation(): void {
-  if (consolidationTimer) {
-    clearInterval(consolidationTimer);
-    consolidationTimer = null;
-  }
+  stopPeriodicJob("memory-consolidation");
 }

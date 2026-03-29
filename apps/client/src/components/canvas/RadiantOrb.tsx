@@ -9,12 +9,14 @@ export function RadiantOrb({
   size = 72,
   intensity = 0.5,
   animate = true,
+  emotionTint,
   children,
 }: {
   color: string;
   size?: number;
   intensity?: number;
   animate?: boolean;
+  emotionTint?: string | null;
   children?: React.ReactNode;
 }) {
   const glowAlpha = 0.12 + intensity * 0.1;
@@ -63,6 +65,17 @@ export function RadiantOrb({
           filter: "blur(3px)",
         }}
       />
+      {/* Emotion tint — subtle outer glow in current emotion color */}
+      {emotionTint && (
+        <div
+          className="absolute inset-[-10%] rounded-full"
+          style={{
+            background: `radial-gradient(circle, ${withOpacity(emotionTint, 0.08)} 0%, transparent 70%)`,
+            filter: "blur(8px)",
+            transition: "background 2s ease",
+          }}
+        />
+      )}
       {/* Icon overlay */}
       {children && (
         <div className="relative z-10 flex items-center justify-center" style={{ width: size * 0.45, height: size * 0.45 }}>

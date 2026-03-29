@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import ServerStatus from "../components/ServerStatus";
 import LogViewer from "../components/LogViewer";
+import { UpdateBanner } from "../components/UpdateBanner";
 import { useServerStatus } from "../hooks/useServerStatus";
 
 interface UpdateInfo {
@@ -121,6 +122,8 @@ export default function Dashboard() {
 
   return (
     <div className="flex flex-col h-screen">
+      {/* Desktop app auto-update banner */}
+      <div className="px-6 pt-3"><UpdateBanner /></div>
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border">
         <div className="flex items-center gap-4">

@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { getBezierPath } from "@xyflow/react";
 import type { EdgeProps } from "@xyflow/react";
+import { useEmotionStore } from "../../stores/emotion-store";
 
 function AnimatedEdgeInner({
   id,
@@ -15,6 +16,8 @@ function AnimatedEdgeInner({
   const edgeData = data as { active?: boolean; ghost?: boolean } | undefined;
   const active = edgeData?.active ?? false;
   const ghost = edgeData?.ghost ?? false;
+  const emotionColor = useEmotionStore((s) => s.displayColor);
+  const arousal = useEmotionStore((s) => s.currentSnapshot?.vad.arousal ?? 0);
 
   const [edgePath] = getBezierPath({
     sourceX,
@@ -44,9 +47,15 @@ function AnimatedEdgeInner({
     );
   }
 
+  // Emotion-aware: tint edges when emotion is active
+  const edgeColor = emotionColor ?? "var(--edge-active)";
+  const idleColor = emotionColor ?? "var(--edge-idle)";
+  // Higher arousal = faster flow animation
+  const flowSpeed = Math.max(0.6, 1.5 - ((arousal + 1) / 2) * 0.9);
+
   return (
     <g>
-      {/* Per-edge gradient — glass conduit style */}
+      {/* Per-edge gradient — glass conduit style, emotion-tinted */}
       <defs>
         <linearGradient
           id={gradientId}
@@ -56,8 +65,8 @@ function AnimatedEdgeInner({
           x2={targetX}
           y2={targetY}
         >
-          <stop offset="0%" stopColor="var(--edge-active)" stopOpacity={active ? 0.7 : 0.3} />
-          <stop offset="100%" stopColor="var(--edge-idle)" stopOpacity={active ? 0.4 : 0.12} />
+          <stop offset="0%" stopColor={edgeColor} stopOpacity={active ? 0.7 : 0.3} />
+          <stop offset="100%" stopColor={idleColor} stopOpacity={active ? 0.4 : 0.12} />
         </linearGradient>
       </defs>
 
@@ -66,7 +75,7 @@ function AnimatedEdgeInner({
         <path
           d={edgePath}
           fill="none"
-          stroke="var(--edge-active)"
+          stroke={edgeColor}
           strokeWidth={8}
           opacity={0.06}
           style={{ filter: "blur(6px)" }}
@@ -91,7 +100,7 @@ function AnimatedEdgeInner({
       <path
         d={edgePath}
         fill="none"
-        stroke={active ? "var(--edge-active)" : "var(--edge-idle)"}
+        stroke={active ? edgeColor : idleColor}
         strokeWidth={active ? 0.8 : 0.4}
         strokeLinecap="round"
         opacity={active ? 0.5 : 0.2}
@@ -100,18 +109,21 @@ function AnimatedEdgeInner({
         }}
       />
 
-      {/* Flowing light pulse (active only) */}
+      {/* Flowing light pulse (active only), speed varies with arousal */}
       {active && (
         <path
           d={edgePath}
           fill="none"
-          stroke="var(--edge-active)"
+          stroke={edgeColor}
           strokeWidth={1}
           strokeDasharray="4 20"
           strokeLinecap="round"
           opacity={0.5}
           className="energy-flow"
-          style={{ animationDirection: sourceX > targetX ? "reverse" : "normal" }}
+          style={{
+            animationDirection: sourceX > targetX ? "reverse" : "normal",
+            animationDuration: `${flowSpeed}s`,
+          }}
         />
       )}
     </g>

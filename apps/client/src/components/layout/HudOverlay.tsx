@@ -87,29 +87,43 @@ export function TopBar({ layoutMode }: { layoutMode?: LayoutMode }) {
   const unreadCount = useActivityStore((s) => s.unreadCount);
   const fetchUnread = useActivityStore((s) => s.fetchUnread);
   const togglePanel = useUIStore((s) => s.togglePanel);
+  const toggleMobileMenu = useUIStore((s) => s.toggleMobileMenu);
 
   useEffect(() => { fetchUnread(); }, [fetchUnread]);
 
   return (
     <div
       className={cn(
-        "flex h-full items-center justify-between px-5 transition-opacity duration-300",
+        "flex h-full items-center justify-between px-2 md:px-5 transition-opacity duration-300",
         isExpanded && "opacity-40 hover:opacity-100"
       )}
     >
-      {/* Left: Logo */}
-      <div className="flex items-center gap-2.5">
+      {/* Left: Hamburger (mobile) + Logo */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={toggleMobileMenu}
+          className="flex md:hidden h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
+          title="Menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
         <div className="glass flex h-6 w-6 items-center justify-center rounded-md overflow-hidden">
           <img src="/chvor_logo.svg" alt="Chvor" className="h-4 w-4 object-contain" />
         </div>
-        <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-node-label">Chvor</span>
+        <span className="hidden md:inline font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-node-label">Chvor</span>
       </div>
 
-      {/* Center: Token counter */}
-      <TokenCounter />
+      {/* Center: Token counter (hidden on mobile) */}
+      <div className="hidden md:block">
+        <TokenCounter />
+      </div>
 
       {/* Right: status + clock + chat toggle */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 md:gap-4">
         <button
           onClick={() => togglePanel("activity")}
           className="relative flex items-center justify-center w-7 h-7 rounded-md hover:bg-white/10 transition-colors"
@@ -125,8 +139,8 @@ export function TopBar({ layoutMode }: { layoutMode?: LayoutMode }) {
             </span>
           )}
         </button>
-        <ConnectionStatus />
-        <HudClock />
+        <div className="hidden md:block"><ConnectionStatus /></div>
+        <div className="hidden md:block"><HudClock /></div>
         <ChatToggle />
       </div>
     </div>
