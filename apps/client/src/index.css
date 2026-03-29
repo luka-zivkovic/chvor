@@ -466,6 +466,15 @@
 }
 .animate-ghost-pulse { animation: ghost-pulse 4s ease-in-out infinite; }
 
+/* ─── Onboarding orb seed flicker ─── */
+@keyframes onboard-ember {
+  0%, 100% { opacity: 0.3; filter: brightness(0.8); }
+  30% { opacity: 0.5; filter: brightness(1.1); }
+  50% { opacity: 0.35; filter: brightness(0.9); }
+  70% { opacity: 0.55; filter: brightness(1.05); }
+}
+.animate-onboard-ember { animation: onboard-ember 8s ease-in-out infinite; }
+
 /* ─── Whimsical emotion particle animations ─── */
 @keyframes emotion-wander {
   0%, 100% { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }

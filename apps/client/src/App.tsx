@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { WorkspacePage } from "./pages/WorkspacePage";
-import { OnboardingModal } from "./components/onboarding/OnboardingModal";
+import { OnboardingExperience } from "./components/onboarding/OnboardingExperience";
 import { usePersonaStore } from "./stores/persona-store";
 import { useAuthStore } from "./stores/auth-store";
 import { LoginPage } from "./pages/LoginPage";
@@ -50,7 +50,7 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
   return (
     <>
       {showOnboarding && (
-        <OnboardingModal onComplete={() => setShowOnboarding(false)} />
+        <OnboardingExperience onComplete={() => setShowOnboarding(false)} />
       )}
       {children}
     </>
