@@ -3,6 +3,7 @@ import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import type { IntegrationsHubNodeData } from "../../stores/canvas-store";
 import { RadiantOrb } from "./RadiantOrb";
+import { useEmotionStore } from "../../stores/emotion-store";
 
 const ACCENT = "var(--skill-automation)";
 
@@ -16,6 +17,7 @@ export const IntegrationsHubNode = memo(function IntegrationsHubNode({ data }: N
   else if (isCompleted) orbColor = "var(--status-completed)";
 
   const intensity = isRunning ? 0.8 : isCompleted ? 0.7 : 0.5;
+  const emotionTint = useEmotionStore((s) => s.displayColor);
 
   return (
     <>
@@ -25,7 +27,7 @@ export const IntegrationsHubNode = memo(function IntegrationsHubNode({ data }: N
           className={`flex items-center justify-center transition-all duration-300 ease-out ${isCompleted ? "animate-field-intensify" : ""}`}
           style={{ width: 72, height: 72 }}
         >
-          <RadiantOrb color={orbColor} intensity={intensity}>
+          <RadiantOrb color={orbColor} intensity={intensity} emotionTint={emotionTint}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={orbColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
               <rect x="2" y="2" width="8" height="8" rx="1" />
               <rect x="14" y="2" width="8" height="8" rx="1" />

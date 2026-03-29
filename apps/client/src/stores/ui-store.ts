@@ -9,6 +9,8 @@ interface UIState {
   brainTab: BrainTab;
   layoutMode: LayoutMode;
   chatCollapsed: boolean;
+  /** Mobile navigation drawer */
+  mobileMenuOpen: boolean;
   /** Node ID for detail panels (skill-detail, integration-detail) */
   detailNodeId: string | null;
   openPanel: (panel: PanelId) => void;
@@ -19,6 +21,8 @@ interface UIState {
   setLayoutMode: (mode: LayoutMode) => void;
   toggleCanvasExpand: () => void;
   toggleChat: () => void;
+  toggleMobileMenu: () => void;
+  closeMobileMenu: () => void;
   openCanvas: () => void;
   exitCanvas: () => void;
 }
@@ -28,6 +32,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   brainTab: "overview",
   layoutMode: "default",
   chatCollapsed: false,
+  mobileMenuOpen: false,
   detailNodeId: null,
   openPanel: (panel) => set({ activePanel: panel, detailNodeId: null }),
   closePanel: () => set({ activePanel: null, detailNodeId: null }),
@@ -44,6 +49,8 @@ export const useUIStore = create<UIState>((set, get) => ({
     });
   },
   toggleChat: () => set({ chatCollapsed: !get().chatCollapsed }),
+  toggleMobileMenu: () => set({ mobileMenuOpen: !get().mobileMenuOpen }),
+  closeMobileMenu: () => set({ mobileMenuOpen: false }),
   openCanvas: () => set({ layoutMode: "canvas", activePanel: null }),
   exitCanvas: () => set({ layoutMode: "default" }),
 }));

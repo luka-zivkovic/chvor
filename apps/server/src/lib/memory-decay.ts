@@ -8,10 +8,9 @@
  */
 
 import { applyDecayPass } from "../db/memory-store.ts";
+import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
 
 const DECAY_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
-
-let decayTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Calculate initial memory strength based on emotional context.
@@ -33,28 +32,18 @@ export function calculateInitialStrength(
  * Run a decay pass on all memories. Called periodically.
  */
 function runDecay(): void {
-  try {
-    const { decayed, invisible } = applyDecayPass();
-    if (decayed > 0) {
-      console.log(`[memory-decay] decayed ${decayed} memories (${invisible} now invisible)`);
-    }
-  } catch (err) {
-    console.error("[memory-decay] decay pass failed:", err);
+  const { decayed, invisible } = applyDecayPass();
+  if (decayed > 0) {
+    console.log(`[memory-decay] decayed ${decayed} memories (${invisible} now invisible)`);
   }
 }
 
-/** Start periodic memory decay. Also runs immediately. */
+/** Start periodic memory decay via persistent job runner. */
 export function startMemoryDecay(): void {
-  if (decayTimer) return;
-  runDecay();
-  decayTimer = setInterval(runDecay, DECAY_INTERVAL_MS);
-  decayTimer.unref();
+  startPeriodicJob({ id: "memory-decay", intervalMs: DECAY_INTERVAL_MS, run: runDecay });
 }
 
 /** Stop periodic memory decay. */
 export function stopMemoryDecay(): void {
-  if (decayTimer) {
-    clearInterval(decayTimer);
-    decayTimer = null;
-  }
+  stopPeriodicJob("memory-decay");
 }

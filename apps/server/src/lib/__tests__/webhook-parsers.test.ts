@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createHmac } from "node:crypto";
-import { verifyGitHubSignature, verifyGenericSignature, verifyNotionSignature } from "../webhook-parsers.ts";
+import { verifyGitHubSignature, verifyGenericSignature, verifyNotionSignature, verifyBearerToken } from "../webhook-parsers.ts";
 
 // ── GitHub signature verification ───────────────────────
 
@@ -74,5 +74,31 @@ describe("verifyGenericSignature", () => {
 
   it("returns false for missing signature", () => {
     expect(verifyGenericSignature(secret, "body", undefined)).toBe(false);
+  });
+});
+
+// ── Bearer token verification (Gmail Pub/Sub) ───────────
+
+describe("verifyBearerToken", () => {
+  const token = "my-push-endpoint-token";
+
+  it("returns true for valid Bearer token", () => {
+    expect(verifyBearerToken(token, `Bearer ${token}`)).toBe(true);
+  });
+
+  it("returns false for wrong token", () => {
+    expect(verifyBearerToken(token, "Bearer wrong-token")).toBe(false);
+  });
+
+  it("returns false for missing header", () => {
+    expect(verifyBearerToken(token, undefined)).toBe(false);
+  });
+
+  it("returns false for non-Bearer auth", () => {
+    expect(verifyBearerToken(token, `Basic ${token}`)).toBe(false);
+  });
+
+  it("returns false for empty Bearer value", () => {
+    expect(verifyBearerToken(token, "Bearer ")).toBe(false);
   });
 });

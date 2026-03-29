@@ -635,6 +635,32 @@ export function getDb(): Database.Database {
     console.log("[db] migration v13 applied: knowledge_resources table + memory_nodes.source_resource_id");
   }
 
+  if (currentVersion < 14) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS system_jobs (
+        job_id TEXT PRIMARY KEY,
+        interval_ms INTEGER NOT NULL,
+        last_run_at TEXT,
+        next_run_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'idle',
+        last_error TEXT
+      )
+    `);
+    // Seed default system jobs (won't duplicate on re-run due to INSERT OR IGNORE)
+    const now = new Date().toISOString();
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    const seedJob = db.prepare(
+      "INSERT OR IGNORE INTO system_jobs (job_id, interval_ms, next_run_at, status) VALUES (?, ?, ?, 'idle')"
+    );
+    seedJob.run("memory-decay", SIX_HOURS, now);
+    seedJob.run("memory-consolidation", SIX_HOURS, now);
+    seedJob.run("backup", TWENTY_FOUR_HOURS, now);
+
+    db.pragma("user_version = 14");
+    console.log("[db] migration v14 applied: system_jobs table for persistent periodic jobs");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }

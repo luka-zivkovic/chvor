@@ -22,10 +22,52 @@ import { CanvasPage } from "../canvas-page/CanvasPage";
 import { KnowledgePanel } from "../panels/KnowledgePanel";
 import { PcViewer } from "../pc-viewer/PcViewer";
 import { useUIStore } from "../../stores/ui-store";
+import type { PanelId } from "../../stores/ui-store";
 import { useAppStore } from "../../stores/app-store";
 import { useExecution } from "../../hooks/use-execution";
 import { useGateway } from "../../hooks/use-gateway";
 import { cn } from "@/lib/utils";
+
+const MOBILE_NAV_ITEMS: Array<{ panel: PanelId; label: string }> = [
+  { panel: "brain", label: "Brain" },
+  { panel: "persona", label: "Persona" },
+  { panel: "memory", label: "Memory" },
+  { panel: "knowledge", label: "Knowledge" },
+  { panel: "skills", label: "Skills" },
+  { panel: "tools", label: "Tools" },
+  { panel: "schedules", label: "Schedules" },
+  { panel: "webhooks", label: "Webhooks" },
+  { panel: "conversations", label: "Conversations" },
+  { panel: "settings", label: "Settings" },
+];
+
+function MobileMenu() {
+  const mobileMenuOpen = useUIStore((s) => s.mobileMenuOpen);
+  const closeMobileMenu = useUIStore((s) => s.closeMobileMenu);
+  const openPanel = useUIStore((s) => s.openPanel);
+
+  if (!mobileMenuOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 md:hidden">
+      <div className="absolute inset-0 bg-background/60 backdrop-blur-sm" onClick={closeMobileMenu} />
+      <nav
+        className="absolute left-0 top-0 bottom-0 w-64 animate-slide-in-left flex flex-col gap-1 p-4 pt-14"
+        style={{ background: "var(--glass-bg-strong)", borderRight: "1px solid var(--glass-border)" }}
+      >
+        {MOBILE_NAV_ITEMS.map(({ panel, label }) => (
+          <button
+            key={panel}
+            onClick={() => { openPanel(panel); closeMobileMenu(); }}
+            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground text-left"
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
 
 const PANEL_META: Record<string, { title: string; subtitle: string; width?: number }> = {
   brain: { title: "Brain", subtitle: "LLM, persona & memory" },
@@ -233,12 +275,15 @@ export function MainLayout() {
           isExpanded
             ? "bottom-4 right-4"
             : chatCollapsed
-              ? "bottom-5 right-16"
-              : "bottom-5 right-4 md:right-[474px]"
+              ? "bottom-5 right-4 md:right-16"
+              : "bottom-5 hidden md:block md:right-[474px]"
         )}
       >
         <ExpandFab />
       </div>
+
+      {/* ─── Mobile navigation menu ─── */}
+      <MobileMenu />
 
       {/* ─── PC Viewer overlay ─── */}
       <PcViewer />
