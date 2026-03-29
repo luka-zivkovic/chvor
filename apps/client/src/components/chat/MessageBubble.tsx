@@ -2,8 +2,11 @@ import { useState, useCallback, useMemo } from "react";
 import type { ChatMessage } from "@chvor/shared";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { MediaRenderer } from "./MediaRenderer";
+import { MemoryTrace } from "./MemoryTrace";
+import { ToolTrace } from "./ToolTrace";
 import { sanitizeMessageContent } from "@/lib/chat-utils";
 import { useEmotionStore } from "@/stores/emotion-store";
+import { useAppStore } from "@/stores/app-store";
 
 interface Props {
   message: ChatMessage;
@@ -116,6 +119,8 @@ function useEmotionForMessage(timestamp: string): { label: string; color: string
 function AssistantBubble({ message }: Props) {
   const [copied, setCopied] = useState(false);
   const emotion = useEmotionForMessage(message.timestamp);
+  const trace = useAppStore((s) => s.messageTraces[message.id]);
+  const toolTraceEntries = useAppStore((s) => s.messageToolTraces[message.id]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(sanitizeMessageContent(message.content)).then(() => {
@@ -172,6 +177,12 @@ function AssistantBubble({ message }: Props) {
             </span>
           )}
         </div>
+        {(toolTraceEntries || trace) && (
+          <div className="mt-1 space-y-0.5">
+            {toolTraceEntries && <ToolTrace tools={toolTraceEntries} />}
+            {trace && <MemoryTrace trace={trace} />}
+          </div>
+        )}
       </div>
     </div>
   );

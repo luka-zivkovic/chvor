@@ -775,15 +775,21 @@ export async function executeConversation(
     messageBudget
   );
 
-  if (budgetedMessages.length < messages.length) {
+  const messagesTruncated = messages.length - budgetedMessages.length;
+  if (messagesTruncated > 0) {
     console.log(
-      `[orchestrator] token budget: truncated ${messages.length - budgetedMessages.length} messages (budget: ${messageBudget}, context: ${contextWindow}, system: ${systemTokens} [stable: ${estimateTokens(stablePrompt)}], tools: ${toolTokens})`
+      `[orchestrator] token budget: truncated ${messagesTruncated} messages (budget: ${messageBudget}, context: ${contextWindow}, system: ${systemTokens} [stable: ${estimateTokens(stablePrompt)}], tools: ${toolTokens})`
     );
   } else {
     console.log(
       `[orchestrator] token budget: all ${messages.length} messages fit (budget: ${messageBudget})`
     );
   }
+
+  emit({
+    type: "execution.tokenBudget",
+    data: { contextWindow, systemTokens, toolTokens, messageBudget, messagesTotal: messages.length, messagesTruncated },
+  });
 
   let currentMessages: CoreMessage[] = sessionToMessages(budgetedMessages as ChatMessage[]);
 
