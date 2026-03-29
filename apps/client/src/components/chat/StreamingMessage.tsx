@@ -1,6 +1,7 @@
 import type { MediaArtifact } from "@chvor/shared";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { prettifyToolName, sanitizeMessageContent } from "@/lib/chat-utils";
+import { useAppStore } from "@/stores/app-store";
 
 interface StreamingTool {
   name: string;
@@ -15,6 +16,8 @@ interface Props {
 }
 
 export function StreamingMessage({ content, tools }: Props) {
+  const decisionReason = useAppStore((s) => s.streamingDecisionReason);
+
   return (
     <div className="animate-fade-in">
       <div className="flex items-center gap-1.5 mb-1">
@@ -27,6 +30,12 @@ export function StreamingMessage({ content, tools }: Props) {
       {/* Tool indicators */}
       {tools.length > 0 && (
         <div className="ml-5 mb-2 flex flex-col gap-1">
+          {/* Decision reasoning — WHY the AI chose this tool */}
+          {decisionReason && (
+            <p className="text-[10px] text-muted-foreground/50 italic mb-0.5">
+              {decisionReason}
+            </p>
+          )}
           {tools.map((tool) => (
             <div key={tool.name}>
               <div className="flex items-center gap-1.5">

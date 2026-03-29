@@ -9,6 +9,8 @@ import type {
   ModelUsedInfo,
   CommandApprovalRequest,
   ConversationSummary,
+  MemoryRetrievalTrace,
+  TokenBudgetInfo,
 } from "@chvor/shared";
 import { useScheduleStore } from "./schedule-store";
 import { useWebhookStore } from "./webhook-store";
@@ -33,6 +35,16 @@ interface StreamingTool {
   name: string;
   status: "running" | "done";
   result?: string;
+  media?: MediaArtifact[];
+}
+
+export interface ToolTraceEntry {
+  name: string;
+  reason?: string;
+  status: "running" | "completed" | "failed";
+  output?: string;
+  truncated?: boolean;
+  error?: string;
   media?: MediaArtifact[];
 }
 
@@ -80,6 +92,18 @@ interface AppState {
   clearStreaming: () => void;
 
   currentEmotion: EmotionState | null;
+
+  // Transparency state (per-execution, cleared on execution.started)
+  streamingThought: string | null;
+  streamingDecisionReason: string | null;
+  memoryTrace: MemoryRetrievalTrace | null;
+  tokenBudget: TokenBudgetInfo | null;
+  /** Memory traces keyed by message ID — persisted across messages in a session */
+  messageTraces: Record<string, MemoryRetrievalTrace>;
+  /** Tool execution trace accumulated during current execution */
+  toolTrace: ToolTraceEntry[];
+  /** Tool traces keyed by message ID — persisted across messages in a session */
+  messageToolTraces: Record<string, ToolTraceEntry[]>;
 
   executionEvents: ExecutionEvent[];
   addExecutionEvent: (event: ExecutionEvent) => void;
@@ -130,6 +154,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       pendingApprovals: [],
       currentEmotion: null,
       messagesLoading: false,
+      messageTraces: {},
+      messageToolTraces: {},
+      toolTrace: [],
+      streamingThought: null,
+      streamingDecisionReason: null,
+      memoryTrace: null,
+      tokenBudget: null,
     });
     // Re-init WS session with new ID
     const reinit = get()._reinitSession;
@@ -244,6 +275,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   currentEmotion: null,
 
+  streamingThought: null,
+  streamingDecisionReason: null,
+  memoryTrace: null,
+  tokenBudget: null,
+  messageTraces: {},
+  toolTrace: [],
+  messageToolTraces: {},
+
   executionEvents: [],
   addExecutionEvent: (event) =>
     set((s) => {
@@ -267,8 +306,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         chunkBuffer = [];
         const modelInfo = get().pendingModelInfo;
         set({ streamingContent: null, streamingTools: [], pendingModelInfo: null });
+        const messageId = event.data.messageId ?? crypto.randomUUID();
+        const trace = get().memoryTrace;
         get().addMessage({
-          id: event.data.messageId ?? crypto.randomUUID(),
+          id: messageId,
           role: event.data.role,
           content: event.data.content,
           channelType: "web",
@@ -276,6 +317,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...(event.data.media?.length ? { media: event.data.media } : {}),
           ...(modelInfo ? { modelUsed: modelInfo } : {}),
         });
+        // Persist memory retrieval trace and tool trace for this message
+        const toolTraceSnapshot = get().toolTrace;
+        set((s) => ({
+          ...(trace ? { messageTraces: { ...s.messageTraces, [messageId]: trace } } : {}),
+          ...(toolTraceSnapshot.length ? { messageToolTraces: { ...s.messageToolTraces, [messageId]: toolTraceSnapshot } } : {}),
+        }));
         break;
       }
       case "chat.chunk":
@@ -317,28 +364,38 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Reset streaming state when a new execution begins
         if (execEvent.type === "execution.started") {
           chunkBuffer = [];
-          set({ streamingContent: null, streamingTools: [], streamingStopped: false, pendingModelInfo: null });
+          set({
+            streamingContent: null, streamingTools: [], streamingStopped: false, pendingModelInfo: null,
+            streamingThought: null, streamingDecisionReason: null, memoryTrace: null, tokenBudget: null, toolTrace: [],
+          });
         }
         // Track tool invocations in streaming tools (deduplicate same skill)
         if (execEvent.type === "skill.invoked") {
           const toolName = execEvent.data.skillId;
+          const reason = get().streamingDecisionReason ?? undefined;
           set((s) => {
             const alreadyRunning = s.streamingTools.some(
               (t) => t.name === toolName && t.status === "running"
             );
-            if (alreadyRunning) return s;
             return {
-              streamingTools: [...s.streamingTools, { name: toolName, status: "running" }],
+              streamingTools: alreadyRunning ? s.streamingTools : [...s.streamingTools, { name: toolName, status: "running" }],
+              toolTrace: [...s.toolTrace, { name: toolName, reason, status: "running" }],
             };
           });
         } else if (execEvent.type === "skill.completed") {
           const nodeId = execEvent.data.nodeId;
           const skillId = nodeId.replace("skill-", "");
           const skillMedia = execEvent.data.media;
+          const outputStr = typeof execEvent.data.output === "string" ? execEvent.data.output : JSON.stringify(execEvent.data.output);
           set((s) => ({
             streamingTools: s.streamingTools.map((t) =>
               t.name === skillId && t.status === "running"
                 ? { ...t, status: "done" as const, ...(skillMedia?.length ? { media: skillMedia } : {}) }
+                : t
+            ),
+            toolTrace: s.toolTrace.map((t) =>
+              t.name === skillId && t.status === "running"
+                ? { ...t, status: "completed" as const, output: outputStr?.slice(0, 500), truncated: (outputStr?.length ?? 0) > 500, ...(skillMedia?.length ? { media: skillMedia } : {}) }
                 : t
             ),
           }));
@@ -351,28 +408,40 @@ export const useAppStore = create<AppState>((set, get) => ({
                 ? { ...t, status: "done" as const, result: execEvent.data.error }
                 : t
             ),
+            toolTrace: s.toolTrace.map((t) =>
+              t.name === skillId && t.status === "running"
+                ? { ...t, status: "failed" as const, error: execEvent.data.error }
+                : t
+            ),
           }));
         }
         // Tool execution tracking
         else if (execEvent.type === "tool.invoked") {
           const toolName = execEvent.data.toolId;
+          const reason = get().streamingDecisionReason ?? undefined;
           set((s) => {
             const alreadyRunning = s.streamingTools.some(
               (t) => t.name === toolName && t.status === "running"
             );
-            if (alreadyRunning) return s;
             return {
-              streamingTools: [...s.streamingTools, { name: toolName, status: "running" }],
+              streamingTools: alreadyRunning ? s.streamingTools : [...s.streamingTools, { name: toolName, status: "running" }],
+              toolTrace: [...s.toolTrace, { name: toolName, reason, status: "running" }],
             };
           });
         } else if (execEvent.type === "tool.completed") {
           const nodeId = execEvent.data.nodeId;
           const toolId = nodeId.replace("tool-", "");
           const toolMedia = execEvent.data.media;
+          const outputStr = typeof execEvent.data.output === "string" ? execEvent.data.output : JSON.stringify(execEvent.data.output);
           set((s) => ({
             streamingTools: s.streamingTools.map((t) =>
               t.name === toolId && t.status === "running"
                 ? { ...t, status: "done" as const, ...(toolMedia?.length ? { media: toolMedia } : {}) }
+                : t
+            ),
+            toolTrace: s.toolTrace.map((t) =>
+              t.name === toolId && t.status === "running"
+                ? { ...t, status: "completed" as const, output: outputStr?.slice(0, 500), truncated: (outputStr?.length ?? 0) > 500, ...(toolMedia?.length ? { media: toolMedia } : {}) }
                 : t
             ),
           }));
@@ -385,11 +454,26 @@ export const useAppStore = create<AppState>((set, get) => ({
                 ? { ...t, status: "done" as const, result: execEvent.data.error }
                 : t
             ),
+            toolTrace: s.toolTrace.map((t) =>
+              t.name === toolId && t.status === "running"
+                ? { ...t, status: "failed" as const, error: execEvent.data.error }
+                : t
+            ),
           }));
         } else if (execEvent.type === "brain.emotion") {
           const d = execEvent.data;
           if ("emotion" in d && "intensity" in d) set({ currentEmotion: d });
           useEmotionStore.getState().handleEmotionEvent(d);
+        } else if (execEvent.type === "brain.thinking") {
+          set({ streamingThought: execEvent.data.thought });
+        } else if (execEvent.type === "brain.decision") {
+          set({ streamingDecisionReason: execEvent.data.reason });
+        } else if (execEvent.type === "memory.retrieval_trace") {
+          set({ memoryTrace: execEvent.data });
+        } else if (execEvent.type === "execution.tokenBudget") {
+          set({ tokenBudget: execEvent.data });
+        } else if (execEvent.type === "execution.completed") {
+          set({ streamingThought: null });
         }
         break;
       }

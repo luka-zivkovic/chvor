@@ -93,5 +93,15 @@ export type ExecutionEvent =
   | { type: "pc.pipeline.start"; data: { targetId: string; task: string } }
   | { type: "pc.pipeline.layer"; data: { targetId: string; layer: import("./pc-control.js").PipelineLayer; status: "trying" | "success" | "fallthrough" } }
   | { type: "pc.pipeline.complete"; data: { targetId: string; layer: import("./pc-control.js").PipelineLayer; success: boolean } }
+  | { type: "execution.tokenBudget"; data: TokenBudgetInfo }
   | { type: "execution.completed"; data: { output: unknown } }
   | { type: "execution.failed"; data: { error: string } };
+
+export interface TokenBudgetInfo {
+  contextWindow: number;
+  systemTokens: number;
+  toolTokens: number;
+  messageBudget: number;
+  messagesTotal: number;
+  messagesTruncated: number;
+}

@@ -22,6 +22,19 @@ interface Props {
 }
 
 function ThinkingIndicator() {
+  const thought = useAppStore((s) => s.streamingThought);
+
+  if (thought && thought !== "Processing...") {
+    return (
+      <div className="animate-fade-in flex items-center gap-1.5 px-3 py-2">
+        <span className="thinking-dot h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60 animate-pulse" />
+        <span className="text-[10px] text-muted-foreground/60 italic truncate max-w-[320px]">
+          {thought}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="animate-fade-in flex items-center justify-start gap-1.5 px-3 py-2">
       <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-primary/60" />
