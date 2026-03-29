@@ -88,10 +88,9 @@ function armTimer(config: PeriodicJobConfig, delayMs: number): void {
 }
 
 async function executeAndReschedule(config: PeriodicJobConfig): Promise<void> {
-  timers.delete(config.id);
-
-  // Mark as running
+  // Mark as running in DB first so crash detection works if process dies here
   updateJobRun(config.id, { status: "running" });
+  timers.delete(config.id);
 
   try {
     await config.run();

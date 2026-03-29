@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { timingSafeEqual } from "node:crypto";
 import type { CreateWebhookRequest, UpdateWebhookRequest } from "@chvor/shared";
 import {
   listWebhookSubscriptions,
@@ -10,7 +9,7 @@ import {
   listWebhookEvents,
 } from "../db/webhook-store.ts";
 import { getWSInstance } from "../gateway/ws-instance.ts";
-import { parseWebhookPayload, verifyGitHubSignature, verifyGenericSignature, verifyNotionSignature } from "../lib/webhook-parsers.ts";
+import { parseWebhookPayload, verifyGitHubSignature, verifyGenericSignature, verifyNotionSignature, verifyBearerToken } from "../lib/webhook-parsers.ts";
 import { executeWebhook, matchesFilters } from "../lib/webhook-executor.ts";
 
 const webhooks = new Hono();
@@ -121,7 +120,7 @@ webhooks.post("/:id/receive", async (c) => {
         return c.json({ challenge: (body as Record<string, unknown>).challenge });
       }
       // Notion sends HMAC-SHA256 in x-notion-signature header when a secret is configured.
-      // If the subscription has a secret and the header is present, verify it.
+      // When a secret is set, require and verify the signature header.
       // Otherwise, fall back to the unique subscription UUID in the URL as baseline auth.
       if (sub.secret) {
         const notionSig = c.req.header("x-notion-signature");
@@ -141,12 +140,9 @@ webhooks.post("/:id/receive", async (c) => {
     case "gmail": {
       // Gmail Pub/Sub sends base64-encoded JSON in message.data.
       // Verify the Bearer token in Authorization header matches the subscription secret.
-      // This is the standard approach for Google Cloud Pub/Sub push subscriptions
-      // when an audience/token is configured on the push endpoint.
+      // Uses timing-safe comparison to prevent token leakage via timing attacks.
       if (sub.secret) {
-        const authHeader = c.req.header("authorization");
-        const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
-        if (!token || token.length !== sub.secret.length || !timingSafeEqual(Buffer.from(token), Buffer.from(sub.secret))) {
+        if (!verifyBearerToken(sub.secret, c.req.header("authorization"))) {
           return c.json({ error: "invalid authorization" }, 401);
         }
       }

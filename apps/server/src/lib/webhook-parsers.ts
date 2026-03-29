@@ -146,6 +146,22 @@ export function verifyNotionSignature(
   }
 }
 
+// ── Bearer token (Gmail Pub/Sub) ────────────────────────
+
+export function verifyBearerToken(
+  expectedToken: string,
+  authHeader: string | undefined
+): boolean {
+  if (!authHeader) return false;
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (!token) return false;
+  try {
+    return timingSafeEqual(Buffer.from(expectedToken), Buffer.from(token));
+  } catch {
+    return false;
+  }
+}
+
 // ── Generic ─────────────────────────────────────────────
 
 export function verifyGenericSignature(
