@@ -217,7 +217,6 @@ export async function init(opts: InitOptions): Promise<void> {
       body: JSON.stringify({
         name: userName,
         timezone,
-        onboarded: true,
       }),
     });
     if (!personaRes.ok) {

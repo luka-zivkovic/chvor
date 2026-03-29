@@ -115,7 +115,6 @@ pub async fn configure_persona(
 
     let body = serde_json::json!({
         "timezone": timezone,
-        "onboarded": true,
     });
 
     let resp = client

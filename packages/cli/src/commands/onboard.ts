@@ -69,7 +69,6 @@ export async function onboard(): Promise<void> {
         body: JSON.stringify({
           name: userName,
           timezone,
-          onboarded: true,
         }),
       });
       if (!personaRes.ok) {
