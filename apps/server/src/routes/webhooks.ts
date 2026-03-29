@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { timingSafeEqual } from "node:crypto";
 import type { CreateWebhookRequest, UpdateWebhookRequest } from "@chvor/shared";
 import {
   listWebhookSubscriptions,
@@ -124,7 +125,7 @@ webhooks.post("/:id/receive", async (c) => {
       // Otherwise, fall back to the unique subscription UUID in the URL as baseline auth.
       if (sub.secret) {
         const notionSig = c.req.header("x-notion-signature");
-        if (notionSig && !verifyNotionSignature(sub.secret, rawBody, notionSig)) {
+        if (!notionSig || !verifyNotionSignature(sub.secret, rawBody, notionSig)) {
           return c.json({ error: "invalid signature" }, 401);
         }
       }
@@ -145,7 +146,7 @@ webhooks.post("/:id/receive", async (c) => {
       if (sub.secret) {
         const authHeader = c.req.header("authorization");
         const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
-        if (!token || token !== sub.secret) {
+        if (!token || token.length !== sub.secret.length || !timingSafeEqual(Buffer.from(token), Buffer.from(sub.secret))) {
           return c.json({ error: "invalid authorization" }, 401);
         }
       }
