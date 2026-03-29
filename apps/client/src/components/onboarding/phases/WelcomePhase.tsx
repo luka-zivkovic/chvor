@@ -52,10 +52,11 @@ export function WelcomePhase({
         </motion.div>
 
         <motion.div variants={staggerItem}>
-          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+          <label htmlFor="onboard-name" className="mb-1.5 block text-xs font-medium text-muted-foreground">
             What should I call you?
           </label>
           <Input
+            id="onboard-name"
             value={name}
             onChange={(e) => onChangeName(e.target.value)}
             placeholder="Your name"
@@ -65,10 +66,11 @@ export function WelcomePhase({
         </motion.div>
 
         <motion.div variants={staggerItem}>
-          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+          <label htmlFor="onboard-timezone" className="mb-1.5 block text-xs font-medium text-muted-foreground">
             Your timezone
           </label>
           <select
+            id="onboard-timezone"
             value={timezone}
             onChange={(e) => onChangeTimezone(e.target.value)}
             className="w-full rounded-md border border-border bg-input/50 backdrop-blur-sm px-3 py-2 text-sm text-foreground"
@@ -82,10 +84,11 @@ export function WelcomePhase({
         </motion.div>
 
         <motion.div variants={staggerItem}>
-          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+          <label htmlFor="onboard-language" className="mb-1.5 block text-xs font-medium text-muted-foreground">
             Preferred language
           </label>
           <select
+            id="onboard-language"
             value={language}
             onChange={(e) => onChangeLanguage(e.target.value)}
             className="w-full rounded-md border border-border bg-input/50 backdrop-blur-sm px-3 py-2 text-sm text-foreground"

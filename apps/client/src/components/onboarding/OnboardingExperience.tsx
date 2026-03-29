@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import { usePersonaStore } from "@/stores/persona-store";
@@ -23,6 +23,14 @@ export function OnboardingExperience({ onComplete }: Props) {
   const [phase, setPhase] = useState(0); // 0 = intro, 1-5 = phases
   const [direction, setDirection] = useState(1);
   const [launching, setLaunching] = useState(false);
+  const launchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup launch timer on unmount
+  useEffect(() => {
+    return () => {
+      if (launchTimerRef.current) clearTimeout(launchTimerRef.current);
+    };
+  }, []);
 
   // Phase 1: Identity
   const [name, setName] = useState("");
@@ -61,9 +69,11 @@ export function OnboardingExperience({ onComplete }: Props) {
   }, [phase]);
 
   const goTo = useCallback((target: number) => {
-    setDirection(target > phase ? 1 : -1);
-    setPhase(target);
-  }, [phase]);
+    setPhase((prev) => {
+      setDirection(target > prev ? 1 : -1);
+      return target;
+    });
+  }, []);
 
   const resolvedProfile = showCustom
     ? customProfile
@@ -74,27 +84,27 @@ export function OnboardingExperience({ onComplete }: Props) {
     try {
       await updatePersona({
         profile: resolvedProfile,
-        directives: "",
         onboarded: true,
         name: name.trim() || undefined,
         timezone,
         language,
         aiName: aiName.trim() || undefined,
         userNickname: userNickname.trim() || undefined,
+        personalityPresetId: selectedPreset ?? undefined,
         tone: selectedPresetObj?.tone ?? undefined,
         boundaries: selectedPresetObj?.boundaries ?? undefined,
         communicationStyle: selectedPresetObj?.communicationStyle ?? undefined,
         exampleResponses: selectedPresetObj?.exampleResponses ?? undefined,
       });
       // Wait for launch burst animation to complete
-      setTimeout(() => onComplete(), 800);
+      launchTimerRef.current = setTimeout(() => onComplete(), 800);
     } catch {
       toast.error("Failed to save — please try again");
       setLaunching(false);
     }
   }, [
     updatePersona, resolvedProfile, name, timezone, language,
-    aiName, userNickname, selectedPresetObj, onComplete,
+    aiName, userNickname, selectedPreset, selectedPresetObj, onComplete,
   ]);
 
   // Compute orb evolution level
