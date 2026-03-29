@@ -5,6 +5,7 @@ import { OnboardingModal } from "./components/onboarding/OnboardingModal";
 import { usePersonaStore } from "./stores/persona-store";
 import { useAuthStore } from "./stores/auth-store";
 import { LoginPage } from "./pages/LoginPage";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { authEnabled, authenticated, checkStatus } = useAuthStore();
@@ -58,19 +59,21 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
 
 export function App() {
   return (
-    <AuthGate>
-      <OnboardingGate>
-        <WorkspacePage />
-        <Toaster
-          theme="dark"
-          position="bottom-right"
-          richColors
-          toastOptions={{
-            className:
-              "!backdrop-blur-xl !bg-card/80 !border-border !text-foreground",
-          }}
-        />
-      </OnboardingGate>
-    </AuthGate>
+    <ErrorBoundary>
+      <AuthGate>
+        <OnboardingGate>
+          <WorkspacePage />
+          <Toaster
+            theme="dark"
+            position="bottom-right"
+            richColors
+            toastOptions={{
+              className:
+                "!backdrop-blur-xl !bg-card/80 !border-border !text-foreground",
+            }}
+          />
+        </OnboardingGate>
+      </AuthGate>
+    </ErrorBoundary>
   );
 }

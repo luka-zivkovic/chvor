@@ -39,8 +39,6 @@ interface SkillEntry {
   icon?: string;
   /** Credential type needed — if undefined, skill is always active (bundled). */
   credType?: CredentialType;
-  /** True = not yet available, shown as "Coming soon". */
-  comingSoon?: boolean;
   /** Show in the featured / popular row at the top. */
   featured?: boolean;
 }
@@ -65,44 +63,21 @@ const SKILL_CATALOG: SkillEntry[] = [
   { id: "slack", label: "Slack", description: "Connect via Slack Socket Mode", category: "communication", credType: "slack" },
   { id: "whatsapp", label: "WhatsApp", description: "Chat with your AI from WhatsApp", category: "communication", credType: "whatsapp", featured: true },
   { id: "matrix", label: "Matrix", description: "Connect via Matrix/Element", category: "communication", credType: "matrix" },
-  { id: "signal", label: "Signal", description: "Private messaging with Signal", category: "communication", comingSoon: true },
-  { id: "teams", label: "Microsoft Teams", description: "Integrate with Teams workspaces", category: "communication", comingSoon: true },
-  { id: "imessage", label: "iMessage", description: "Chat via Apple iMessage", category: "communication", comingSoon: true },
 
   // --- Knowledge & Docs ---
   { id: "obsidian", label: "Obsidian", description: "Read and write notes in your vault", category: "knowledge", credType: "obsidian", featured: true },
   { id: "notion", label: "Notion", description: "Query and update Notion pages and databases", category: "knowledge", icon: "notion", credType: "notion", featured: true },
-  { id: "confluence", label: "Confluence", description: "Search and read Confluence spaces", category: "knowledge", comingSoon: true },
-  { id: "readwise", label: "Readwise", description: "Access highlights and annotations", category: "knowledge", comingSoon: true },
-  { id: "evernote", label: "Evernote", description: "Search and manage Evernote notes", category: "knowledge", comingSoon: true },
-  { id: "pocket", label: "Pocket", description: "Access saved articles and bookmarks", category: "knowledge", comingSoon: true },
 
   // --- Developer Tools ---
   { id: "github", label: "GitHub", description: "Repos, issues, PRs, and code search", category: "devtools", icon: "github", credType: "github", featured: true },
   { id: "gitlab", label: "GitLab", description: "Projects, issues, MRs, and code search", category: "devtools", credType: "gitlab" },
   { id: "jira", label: "Jira", description: "Search, create, and manage issues", category: "devtools", credType: "jira" },
   { id: "context7", label: "Context7", description: "Real-time library docs and code examples", category: "devtools", icon: "context7" },
-  { id: "git", label: "Git", description: "Read git history, diffs, and branches", category: "devtools", comingSoon: true },
-  { id: "sentry", label: "Sentry", description: "Query errors and performance issues", category: "devtools", comingSoon: true },
-  { id: "postgres", label: "PostgreSQL", description: "Query and manage Postgres databases", category: "devtools", comingSoon: true },
-  { id: "bitbucket", label: "Bitbucket", description: "Repos, PRs, and pipelines", category: "devtools", comingSoon: true },
-  { id: "vercel", label: "Vercel", description: "Deployments, domains, and logs", category: "devtools", comingSoon: true },
 
   // --- Productivity ---
-  { id: "gmail", label: "Gmail", description: "Read, search, and send emails", category: "productivity", comingSoon: true },
-  { id: "google-calendar", label: "Google Calendar", description: "View, create, and manage events", category: "productivity", comingSoon: true },
-  { id: "google-drive", label: "Google Drive", description: "Search, read, and organize files", category: "productivity", comingSoon: true },
-  { id: "linear", label: "Linear", description: "Create and manage issues and projects", category: "productivity", comingSoon: true },
-  { id: "todoist", label: "Todoist", description: "Manage tasks and to-do lists", category: "productivity", comingSoon: true },
-  { id: "dropbox", label: "Dropbox", description: "Access and manage cloud files", category: "productivity", comingSoon: true },
-  { id: "onedrive", label: "OneDrive", description: "Access Microsoft cloud storage", category: "productivity", comingSoon: true },
 
   // --- Smart Home & Life ---
   { id: "homeassistant", label: "Home Assistant", description: "Control smart home devices and automations", category: "life", credType: "homeassistant", featured: true },
-  { id: "spotify", label: "Spotify", description: "Control playback and browse music", category: "life", comingSoon: true },
-  { id: "apple-health", label: "Apple Health", description: "Access health and fitness data", category: "life", comingSoon: true },
-  { id: "fitbit", label: "Fitbit", description: "Track fitness and sleep data", category: "life", comingSoon: true },
-  { id: "weather", label: "Weather", description: "Current and forecast weather data", category: "life", comingSoon: true },
 
   // --- Built-in Tools (always active) ---
   { id: "filesystem", label: "Filesystem", description: "Read, write, and search local files", category: "builtin" },
@@ -192,12 +167,11 @@ export function OnboardingModal({ onComplete }: Props) {
 
   /** Check if a skill from the catalog is connected/active. */
   const isSkillActive = (skill: SkillEntry): boolean => {
-    if (skill.comingSoon) return false;
     if (!skill.credType) return true; // bundled, always active
     return credTypeSet.has(skill.credType);
   };
 
-  const configurableSkills = SKILL_CATALOG.filter((s) => !s.comingSoon);
+  const configurableSkills = SKILL_CATALOG;
   const activeSkillCount = configurableSkills.filter(isSkillActive).length;
 
   const selectedPresetObj = PRESETS.find((p) => p.id === selectedPreset);
@@ -855,20 +829,17 @@ export function OnboardingModal({ onComplete }: Props) {
                       <div className="space-y-1.5">
                         {skills.map((skill) => {
                           const active = isSkillActive(skill);
-                          const soon = skill.comingSoon;
                           return (
                             <button
                               key={skill.id}
                               onClick={() =>
-                                !active && !soon && skill.credType && setSetupCredType(skill.credType)
+                                !active && skill.credType && setSetupCredType(skill.credType)
                               }
-                              disabled={active || soon}
+                              disabled={active}
                               className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-all ${
-                                soon
-                                  ? "border-border/50 opacity-50"
-                                  : active
-                                    ? "border-green-500/20 bg-green-500/5"
-                                    : "border-border hover:border-muted-foreground/30 hover:bg-muted/30"
+                                active
+                                  ? "border-green-500/20 bg-green-500/5"
+                                  : "border-border hover:border-muted-foreground/30 hover:bg-muted/30"
                               }`}
                             >
                               <div className="flex items-center gap-2.5">
@@ -882,11 +853,7 @@ export function OnboardingModal({ onComplete }: Props) {
                                   </p>
                                 </div>
                               </div>
-                              {soon ? (
-                                <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[9px] text-muted-foreground">
-                                  Soon
-                                </span>
-                              ) : active ? (
+                              {active ? (
                                 <span className="shrink-0 text-[10px] text-green-400">
                                   Active
                                 </span>
