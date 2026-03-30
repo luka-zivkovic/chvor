@@ -13,30 +13,6 @@ import type { RegistryEntry, RegistryEntryKind } from "@chvor/shared";
 
 const registry = new Hono();
 
-// GET /api/registry/featured — featured entries for onboarding / first-run
-registry.get("/featured", async (c) => {
-  try {
-    let index = readCachedIndex();
-    if (!index) {
-      index = await fetchRegistryIndex();
-    }
-
-    const featured = index.entries.filter((e) => e.featured);
-    const lock = readLock();
-
-    return c.json({
-      data: featured.map((e) => ({
-        ...e,
-        installed: !!lock.installed[e.id],
-        installedVersion: lock.installed[e.id]?.version ?? null,
-      })),
-    });
-  } catch (err) {
-    console.error("[api] GET /registry/featured error:", err);
-    return c.json({ error: String(err) }, 500);
-  }
-});
-
 // GET /api/registry/search?q=&category=&tags=&kind=
 registry.get("/search", async (c) => {
   try {

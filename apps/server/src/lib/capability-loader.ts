@@ -2,11 +2,10 @@ import { readdirSync, readFileSync, existsSync, mkdirSync, unlinkSync } from "no
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import type { Skill, Tool, Capability, RegistryEntryKind } from "@chvor/shared";
+import type { Skill, Tool, Capability } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
 import { parseCapabilityMd } from "./capability-parser.ts";
-import { getInstalledRegistryIds, installEntry } from "./registry-manager.ts";
-import { getConfig, setConfig } from "../db/config-store.ts";
+import { getInstalledRegistryIds } from "./registry-manager.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -120,73 +119,3 @@ export function reloadSkills(): Skill[] {
   return loadSkills(true);
 }
 
-// --- Bundled → Registry migration ---
-// These entries were moved from bundled to the chvor-registry in v0.1.15.
-// For existing users, auto-install from registry so they don't lose access.
-const MIGRATED_ENTRIES: { id: string; kind: RegistryEntryKind }[] = [
-  { id: "brainstorming", kind: "skill" },
-  { id: "code-review", kind: "skill" },
-  { id: "writing-helper", kind: "skill" },
-  { id: "claude-code", kind: "tool" },
-  { id: "composio", kind: "tool" },
-  { id: "context7", kind: "tool" },
-  { id: "github", kind: "tool" },
-  { id: "notion", kind: "tool" },
-];
-
-const MIGRATION_KEY = "migration.bundled-to-registry-v1";
-
-/**
- * One-time migration: install formerly-bundled entries from registry.
- * Runs at startup, fire-and-forget. Per-entry tracking so partial failures
- * retry on next startup.
- */
-export async function runBundledMigration(): Promise<void> {
-  try {
-    if (getConfig(MIGRATION_KEY) === "done") return;
-
-    const registryIds = getInstalledRegistryIds();
-    const pending: typeof MIGRATED_ENTRIES = [];
-
-    for (const entry of MIGRATED_ENTRIES) {
-      const entryKey = `${MIGRATION_KEY}.${entry.id}`;
-      if (getConfig(entryKey) === "done") continue;
-      if (registryIds.has(entry.id)) {
-        // Already installed (user installed manually) — mark done
-        setConfig(entryKey, "done");
-        continue;
-      }
-      pending.push(entry);
-    }
-
-    if (pending.length === 0) {
-      setConfig(MIGRATION_KEY, "done");
-      return;
-    }
-
-    console.log(`[capability-loader] migrating ${pending.length} bundled entries to registry...`);
-
-    for (const entry of pending) {
-      try {
-        await installEntry(entry.id, entry.kind);
-        setConfig(`${MIGRATION_KEY}.${entry.id}`, "done");
-        console.log(`[capability-loader] migrated ${entry.kind} "${entry.id}" to registry`);
-      } catch (err) {
-        console.warn(`[capability-loader] failed to migrate "${entry.id}" (will retry next startup):`, err);
-        logError("system_error", err, { entryId: entry.id });
-      }
-    }
-
-    // Check if all done
-    const allDone = MIGRATED_ENTRIES.every(
-      (e) => getConfig(`${MIGRATION_KEY}.${e.id}`) === "done",
-    );
-    if (allDone) {
-      setConfig(MIGRATION_KEY, "done");
-      console.log("[capability-loader] bundled→registry migration complete");
-    }
-  } catch (err) {
-    console.error("[capability-loader] migration error:", err);
-    logError("system_error", err);
-  }
-}
