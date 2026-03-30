@@ -18,6 +18,7 @@ import { IntegrationDetailPanel } from "../panels/IntegrationDetailPanel";
 import { ConversationsPanel } from "../panels/ConversationsPanel";
 import ActivityPanel from "../panels/ActivityPanel";
 import { EmotionHistoryPanel } from "../panels/EmotionHistoryPanel";
+import { PermissionsPanel } from "../panels/PermissionsPanel";
 import { CanvasPage } from "../canvas-page/CanvasPage";
 import { KnowledgePanel } from "../panels/KnowledgePanel";
 import { PcViewer } from "../pc-viewer/PcViewer";
@@ -33,6 +34,7 @@ const MOBILE_NAV_ITEMS: Array<{ panel: PanelId; label: string }> = [
   { panel: "persona", label: "Persona" },
   { panel: "memory", label: "Memory" },
   { panel: "knowledge", label: "Knowledge" },
+  { panel: "permissions", label: "Permissions" },
   { panel: "skills", label: "Skills" },
   { panel: "tools", label: "Tools" },
   { panel: "schedules", label: "Schedules" },
@@ -69,17 +71,18 @@ function MobileMenu() {
   );
 }
 
-const PANEL_META: Record<string, { title: string; subtitle: string; width?: number }> = {
-  brain: { title: "Brain", subtitle: "LLM, persona & memory" },
-  settings: { title: "Settings", subtitle: "API keys, voice, security & sessions" },
-  schedules: { title: "Schedules", subtitle: "Automated tasks & pulse", width: 640 },
-  webhooks: { title: "Webhooks", subtitle: "External event subscriptions", width: 640 },
-  memory: { title: "Memory", subtitle: "Learned facts & context" },
-  knowledge: { title: "Knowledge", subtitle: "Documents, URLs & resources" },
-  persona: { title: "Persona", subtitle: "Identity & directives" },
-  skills: { title: "Skills", subtitle: "Behavioral skills & workflows" },
+const PANEL_META: Record<string, { title: string; subtitle: string; width?: number; info?: string }> = {
+  brain: { title: "Brain", subtitle: "LLM, persona & memory", info: "Central AI configuration — model, behavior, persona, and memory." },
+  permissions: { title: "Permissions", subtitle: "PC control, shell, channels & media", info: "Control what your AI is allowed to do — PC access, shell commands, channels." },
+  settings: { title: "Settings", subtitle: "API keys, voice, security & sessions", info: "API keys, voice, security, session lifecycle, and backups." },
+  schedules: { title: "Schedules", subtitle: "Automated tasks & pulse", width: 640, info: "Automated tasks that run on a cron schedule." },
+  webhooks: { title: "Webhooks", subtitle: "External event subscriptions", width: 640, info: "Incoming triggers from external services like GitHub or Notion." },
+  memory: { title: "Memory", subtitle: "Learned facts & context", info: "Facts your AI has learned and remembers across conversations." },
+  knowledge: { title: "Knowledge", subtitle: "Documents, URLs & resources", info: "Ingested documents, URLs, and resources for context." },
+  persona: { title: "Persona", subtitle: "Identity & directives", info: "Your AI's identity, tone, style, and communication boundaries." },
+  skills: { title: "Skills", subtitle: "Behavioral skills & workflows", info: "Behavioral skills that shape how your AI responds." },
   "skill-detail": { title: "Skill", subtitle: "Details & instructions" },
-  tools: { title: "Tools", subtitle: "MCP capabilities & integrations" },
+  tools: { title: "Tools", subtitle: "MCP capabilities & integrations", info: "External tools — filesystem, web, MCP servers." },
   "tool-detail": { title: "Tool", subtitle: "Details & MCP config" },
   "integration-detail": { title: "Connection", subtitle: "Status & credential" },
   conversations: { title: "Conversations", subtitle: "Browse and manage chat history" },
@@ -91,6 +94,8 @@ function PanelContent({ panel }: { panel: string }) {
   switch (panel) {
     case "brain":
       return <BrainPanel />;
+    case "permissions":
+      return <PermissionsPanel />;
     case "settings":
       return <SettingsPanel />;
     case "schedules":
@@ -254,6 +259,7 @@ export function MainLayout() {
           <SlideOverPanel
             title={meta.title}
             subtitle={meta.subtitle}
+            info={meta.info}
             width={meta.width}
             onClose={closePanel}
           >

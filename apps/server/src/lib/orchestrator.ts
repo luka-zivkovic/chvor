@@ -1036,7 +1036,7 @@ export async function executeConversation(
           });
           emit({
             type: "skill.invoked",
-            data: { nodeId: `integration-${matchedIntegration.id}`, skillId: matchedIntegration.id, isApiConnection: true },
+            data: { nodeId: `api-${matchedIntegration.id}`, skillId: matchedIntegration.id, isApiConnection: true },
           });
         } else {
           emit({
@@ -1065,7 +1065,7 @@ export async function executeConversation(
           });
           const nativeMedia = extractMedia(nativeResult);
           if (matchedIntegration) {
-            emit({ type: "skill.completed", data: { nodeId: `integration-${matchedIntegration.id}`, output: "" } });
+            emit({ type: "skill.completed", data: { nodeId: `api-${matchedIntegration.id}`, output: "" } });
           } else if (target) {
             const nodePrefix = target.kind === "tool" ? "tool" : "skill";
             // Never broadcast raw secrets from credential tools to WS clients
@@ -1092,7 +1092,7 @@ export async function executeConversation(
           const errorMsg = err instanceof Error ? err.message : String(err);
           logError("tool_failure", err, { toolName: tc.toolName, sessionId: options?.sessionId });
           if (matchedIntegration) {
-            emit({ type: "skill.failed", data: { nodeId: `integration-${matchedIntegration.id}`, error: errorMsg } });
+            emit({ type: "skill.failed", data: { nodeId: `api-${matchedIntegration.id}`, error: errorMsg } });
           } else if (target) {
             const nodePrefix = target.kind === "tool" ? "tool" : "skill";
             emit({

@@ -131,7 +131,7 @@ export class AdvancedEmotionEngine {
       mood: this.getMood(),
       embodiment: this.getEmbodiment(),
       relationship: this.getRelationship(),
-      unresolvedResidues: this.residues.length,
+      unresolvedResidues: this.residues.map(r => ({ id: r.id, intensity: r.intensity })),
       regulationActive: this.lastRegulationActive,
       regulationStrategy: this.lastRegulationStrategy,
     };

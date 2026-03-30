@@ -17,7 +17,9 @@ function AnimatedEdgeInner({
   const active = edgeData?.active ?? false;
   const ghost = edgeData?.ghost ?? false;
   const emotionColor = useEmotionStore((s) => s.displayColor);
+  const previousColor = useEmotionStore((s) => s.previousSnapshot?.color ?? null);
   const arousal = useEmotionStore((s) => s.currentSnapshot?.vad.arousal ?? 0);
+  const blendIntensity = useEmotionStore((s) => s.blendIntensity);
 
   const [edgePath] = getBezierPath({
     sourceX,
@@ -70,15 +72,28 @@ function AnimatedEdgeInner({
         </linearGradient>
       </defs>
 
-      {/* Soft ambient glow (active) */}
+      {/* Emotion afterimage — faint trace of previous emotion color */}
+      {previousColor && previousColor !== emotionColor && (
+        <path
+          d={edgePath}
+          fill="none"
+          stroke={previousColor}
+          strokeWidth={2}
+          strokeLinecap="round"
+          opacity={0.08}
+          style={{ transition: "opacity 3s ease-out", filter: "blur(2px)" }}
+        />
+      )}
+
+      {/* Soft ambient glow (active), intensity modulated by emotion */}
       {active && (
         <path
           d={edgePath}
           fill="none"
           stroke={edgeColor}
-          strokeWidth={8}
-          opacity={0.06}
-          style={{ filter: "blur(6px)" }}
+          strokeWidth={6 + blendIntensity * 4}
+          opacity={0.04 + blendIntensity * 0.04}
+          style={{ filter: "blur(6px)", transition: "stroke-width 2s ease, opacity 2s ease" }}
         />
       )}
 

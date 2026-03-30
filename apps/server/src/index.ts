@@ -76,7 +76,7 @@ import { startAutoUpdate, stopAutoUpdate } from "./lib/registry-updater.ts";
 import { startMemoryDecay, stopMemoryDecay } from "./lib/memory-decay.ts";
 import { startConsolidation, stopConsolidation } from "./lib/memory-consolidation.ts";
 import { initJobRunner, stopAllPeriodicJobs } from "./lib/job-runner.ts";
-import { reloadAll } from "./lib/capability-loader.ts";
+import { reloadAll, runBundledMigration } from "./lib/capability-loader.ts";
 import { homedir } from "node:os";
 
 const app = new Hono();
@@ -526,6 +526,14 @@ startSkillWatcher([skillsDir, toolsDir], () => {
   reloadAll();
   wsManager.broadcast({ type: "skills.reloaded", data: {} });
 });
+
+// Migrate formerly-bundled skills/tools to registry (fire-and-forget)
+runBundledMigration()
+  .then(() => {
+    reloadAll();
+    wsManager.broadcast({ type: "skills.reloaded", data: {} });
+  })
+  .catch((err) => console.error("[capability-loader] bundled migration failed:", err));
 
 // Registry auto-update: check for skill updates periodically
 startAutoUpdate((event) => wsManager.broadcast(event));

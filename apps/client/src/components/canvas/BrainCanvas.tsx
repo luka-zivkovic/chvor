@@ -6,6 +6,7 @@ import "@xyflow/react/dist/style.css";
 import { useCanvasStore } from "../../stores/canvas-store";
 import type { ChvorNode, ChvorEdge } from "../../stores/canvas-store";
 import { useAppStore } from "../../stores/app-store";
+import { useEmotionStore } from "../../stores/emotion-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useSkillStore } from "../../stores/skill-store";
 import { usePersonaStore } from "../../stores/persona-store";
@@ -154,11 +155,8 @@ export function BrainCanvas() {
     if (initializedRef.current !== key) {
       const isFirstInit = initializedRef.current === undefined;
       initializedRef.current = key;
-      if (skills.length === 0 && tools.length === 0) {
-        initializeEmptyState(savedPositionsRef.current);
-      } else {
-        initializeFromSkills(enabledSkills, enabledTools, schedules, savedPositionsRef.current, channelIntegrations, apiIntegrations, webhooks);
-      }
+      // Always use full layout — hubs are always visible even when empty
+      initializeFromSkills(enabledSkills, enabledTools, schedules, savedPositionsRef.current, channelIntegrations, apiIntegrations, webhooks);
       // Restore saved viewport on first init, refit on subsequent
       if (isFirstInit && savedViewportRef.current) {
         setTimeout(() => {
@@ -409,7 +407,7 @@ function CanvasAtmosphere() {
       <div
         className="absolute inset-0"
         style={{
-          background: "radial-gradient(ellipse 80% 75% at 50% 48%, transparent 40%, oklch(0.08 0 0 / 0.5) 100%)",
+          background: "radial-gradient(ellipse 85% 80% at 50% 35%, transparent 40%, oklch(0.08 0 0 / 0.5) 100%)",
         }}
       />
     </div>
@@ -444,15 +442,26 @@ function seededPositions(count: number, seed: number) {
 }
 
 function EmotionTintOverlay() {
+  // Prefer VAD-based emotion store; fall back to legacy
+  const vadColor = useEmotionStore((s) => s.displayColor);
+  const vadIntensity = useEmotionStore((s) => s.blendIntensity);
+  const vadLabel = useEmotionStore((s) => s.displayLabel);
+  const dominance = useEmotionStore((s) => s.currentSnapshot?.vad?.dominance ?? 0);
+
   const currentEmotion = useAppStore((s) => s.currentEmotion);
-  const color = currentEmotion ? EMOTION_COLORS[currentEmotion.emotion] : null;
-  const intensity = currentEmotion?.intensity ?? 0;
-  const emotionName = currentEmotion?.emotion ?? "calm";
+  const legacyColor = currentEmotion ? EMOTION_COLORS[currentEmotion.emotion] : null;
+
+  const color = vadColor ?? legacyColor;
+  const intensity = vadIntensity || currentEmotion?.intensity || 0;
+  const emotionName = vadLabel || currentEmotion?.emotion || "calm";
   const config = EMOTION_PARTICLES[emotionName] ?? EMOTION_PARTICLES.calm;
   const positions = seededPositions(config.count, emotionName.length);
 
-  // Ambient color wash — stronger than before
-  const washAlpha = 0.06 + intensity * 0.1;
+  // Ambient wash alpha
+  const washAlpha = 0.05 + intensity * 0.08;
+
+  // Vignette tightness modulated by dominance: assertive = tight focused, yielding = wide diffuse
+  const vignetteSize = 75 + ((1 - dominance) / 2) * 15; // 75-90%
 
   return (
     <div
@@ -464,24 +473,24 @@ function EmotionTintOverlay() {
         className="absolute inset-0 transition-all duration-[2000ms]"
         style={{
           background: color
-            ? `radial-gradient(ellipse 100% 80% at 50% 40%, ${color} 0%, transparent 55%)`
+            ? `radial-gradient(ellipse 130% ${vignetteSize}% at 50% 25%, ${color} 0%, transparent 65%)`
             : "none",
           filter: "blur(60px)",
           opacity: washAlpha,
         }}
       />
-      {/* Whimsical floating particles — skip when intensity is negligible */}
-      {color && intensity >= 0.1 && positions.map((pos, i) => (
+      {/* Organic floating particles — skip when intensity is negligible */}
+      {color && intensity >= 0.15 && positions.map((pos, i) => (
         <div
           key={`${emotionName}-${i}`}
-          className="absolute transition-all duration-[2000ms]"
+          className="absolute transition-all duration-[2500ms]"
           style={{
             left: `${pos.x}%`,
             top: `${pos.y}%`,
             fontSize: config.sizeRange[0] + (config.sizeRange[1] - config.sizeRange[0]) * pos.size,
             color: color,
-            opacity: 0.3 + intensity * 0.3,
-            animation: `${config.anim} ${6 + pos.delay}s ease-in-out ${pos.delay}s infinite`,
+            opacity: 0.2 + intensity * 0.25,
+            animation: `${config.anim} ${7 + pos.delay}s ease-in-out ${pos.delay}s infinite`,
             transform: `rotate(${pos.rot}deg)`,
           }}
         >

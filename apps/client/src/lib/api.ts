@@ -179,6 +179,8 @@ export const api = {
   },
 
   registry: {
+    featured: () =>
+      request<(RegistryEntry & { installed: boolean; installedVersion: string | null })[]>("/registry/featured"),
     search: (params?: { q?: string; category?: string; tags?: string[]; kind?: string }) => {
       const qs = new URLSearchParams();
       if (params?.q) qs.set("q", params.q);

@@ -73,32 +73,44 @@ export function computeOrbitalPositions(
   ): OrbitalPosition =>
     savedPositions?.get(id) ?? { x: defaultX, y: defaultY };
 
-  // ── Brain center ──
-  const brainPos = pos("brain-0", -OFFSETS.brain.hw, -OFFSETS.brain.hh);
+  // ── Brain at slot 0 (12 o'clock), skills-hub at center ──
+  const slot0Angle = HUB_SLOT_ANGLE(0);
+  const brainPos = pos(
+    "brain-0",
+    Math.cos(slot0Angle) * INNER_RADIUS - OFFSETS.brain.hw,
+    Math.sin(slot0Angle) * INNER_RADIUS - OFFSETS.brain.hh
+  );
 
-  // ── Inner ring: fixed pentagon slots ──
+  // ── Inner ring: fixed hexagon slots ──
+  // All hubs always exist — empty hubs are still shown on canvas as entry points
+  // Skills-hub takes the center position (slot 0 is occupied by brain)
   const hubs: HubConfig[] = [
-    { id: "skills-hub", type: "skills-hub", slot: 0, exists: skills.length > 0 },
-    { id: "tools-hub", type: "tools-hub", slot: 1, exists: tools.length > 0 },
-    { id: "schedule-hub", type: "schedule-hub", slot: 2, exists: schedules.length > 0 },
-    { id: "integrations-hub", type: "integrations-hub", slot: 3, exists: channelCreds.length > 0 },
-    { id: "connections-hub", type: "connections-hub", slot: 4, exists: apiCreds.length > 0 },
-    { id: "webhooks-hub", type: "webhooks-hub", slot: 5, exists: webhooks.length > 0 },
+    { id: "skills-hub", type: "skills-hub", slot: -1, exists: true }, // center
+    { id: "tools-hub", type: "tools-hub", slot: 1, exists: true },
+    { id: "schedule-hub", type: "schedule-hub", slot: 2, exists: true },
+    { id: "integrations-hub", type: "integrations-hub", slot: 3, exists: true },
+    { id: "connections-hub", type: "connections-hub", slot: 4, exists: true },
+    { id: "webhooks-hub", type: "webhooks-hub", slot: 5, exists: true },
   ];
 
   const hubPositions = new Map<string, OrbitalPosition>();
 
   for (const hub of hubs) {
     if (!hub.exists) continue;
-    const angle = HUB_SLOT_ANGLE(hub.slot);
-    hubPositions.set(
-      hub.id,
-      pos(
+    if (hub.slot === -1) {
+      // Center position (swapped with brain)
+      hubPositions.set(hub.id, pos(hub.id, -OFFSETS.hub.hw, -OFFSETS.hub.hh));
+    } else {
+      const angle = HUB_SLOT_ANGLE(hub.slot);
+      hubPositions.set(
         hub.id,
-        Math.cos(angle) * INNER_RADIUS - OFFSETS.hub.hw,
-        Math.sin(angle) * INNER_RADIUS - OFFSETS.hub.hh
-      )
-    );
+        pos(
+          hub.id,
+          Math.cos(angle) * INNER_RADIUS - OFFSETS.hub.hw,
+          Math.sin(angle) * INNER_RADIUS - OFFSETS.hub.hh
+        )
+      );
+    }
   }
 
   // ── Fan-out helper ──
@@ -114,7 +126,9 @@ export function computeOrbitalPositions(
     const hubPos = hubPositions.get(hubId)!;
     const hubCenterX = hubPos.x + OFFSETS.hub.hw;
     const hubCenterY = hubPos.y + OFFSETS.hub.hh;
-    const hubAngle = Math.atan2(hubCenterY, hubCenterX);
+    // For center hub (skills): fan upward (-π/2) since brain occupies slot 0 above
+    const isCenter = Math.abs(hubCenterX) < 5 && Math.abs(hubCenterY) < 5;
+    const hubAngle = isCenter ? Math.PI / 2 : Math.atan2(hubCenterY, hubCenterX);
 
     const fanRadius = computeFanRadius(items.length);
     const fanSpread = computeFanArc(items.length, fanRadius);
@@ -166,7 +180,7 @@ export function computeOrbitalPositions(
   const channelPositions = computeFanPositions(
     channelCreds,
     "integrations-hub",
-    (cred) => `integration-${cred.id}`,
+    (cred) => `channel-${cred.id}`,
     OFFSETS.integration
   );
 
@@ -174,7 +188,7 @@ export function computeOrbitalPositions(
   const apiPositions = computeFanPositions(
     apiCreds,
     "connections-hub",
-    (cred) => `integration-${cred.id}`,
+    (cred) => `api-${cred.id}`,
     OFFSETS.integration
   );
 

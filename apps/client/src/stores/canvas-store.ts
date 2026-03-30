@@ -220,293 +220,281 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const hubNodes: ChvorNode[] = [];
     const hubEdges: ChvorEdge[] = [];
 
-    // --- Skills hub + fan-out skill nodes ---
-    if (skills.length > 0) {
-      hubNodes.push({
-        id: "skills-hub",
+    // --- Skills hub (always visible) + fan-out skill nodes ---
+    hubNodes.push({
+      id: "skills-hub",
+      type: "skills-hub" as const,
+      position: layout.hubPositions.get("skills-hub") ?? { x: 0, y: 0 },
+      data: {
         type: "skills-hub" as const,
-        position: layout.hubPositions.get("skills-hub") ?? { x: 0, y: 0 },
-        data: {
-          type: "skills-hub" as const,
-          label: "Skills",
-          skillCount: skills.length,
-          executionStatus: "idle" as const,
-        },
-      });
-      hubEdges.push({
-        id: "edge-brain-skills-hub",
-        source: "brain-0",
-        target: "skills-hub",
-        type: "animated",
-        animated: false,
-        data: { active: false },
-      });
+        label: "Skills",
+        skillCount: skills.length,
+        executionStatus: "idle" as const,
+      },
+    });
+    hubEdges.push({
+      id: "edge-brain-skills-hub",
+      source: "brain-0",
+      target: "skills-hub",
+      type: "animated",
+      animated: false,
+      data: { active: false },
+    });
 
-      skills.forEach((skill) => {
-        const nodeId = `skill-${skill.id}`;
-        hubNodes.push({
-          id: nodeId,
+    skills.forEach((skill) => {
+      const nodeId = `skill-${skill.id}`;
+      hubNodes.push({
+        id: nodeId,
+        type: "skill" as const,
+        position: layout.skillPositions.get(nodeId) ?? { x: 0, y: 0 },
+        data: {
           type: "skill" as const,
-          position: layout.skillPositions.get(nodeId) ?? { x: 0, y: 0 },
-          data: {
-            type: "skill" as const,
-            label: skill.metadata.name,
-            skillId: skill.id,
-            category: skill.metadata.category,
-            icon: skill.metadata.icon,
-            executionStatus: "idle" as const,
-          },
-        });
-        hubEdges.push({
-          id: `edge-skills-hub-${skill.id}`,
-          source: "skills-hub",
-          target: nodeId,
-          type: "animated",
-          animated: false,
-          data: { active: false },
-        });
+          label: skill.metadata.name,
+          skillId: skill.id,
+          category: skill.metadata.category,
+          icon: skill.metadata.icon,
+          executionStatus: "idle" as const,
+        },
       });
-    }
+      hubEdges.push({
+        id: `edge-skills-hub-${skill.id}`,
+        source: "skills-hub",
+        target: nodeId,
+        type: "animated",
+        animated: false,
+        data: { active: false },
+      });
+    });
 
-    // --- Tools hub + fan-out tool nodes ---
-    if (tools.length > 0) {
-      hubNodes.push({
-        id: "tools-hub",
+    // --- Tools hub (always visible) + fan-out tool nodes ---
+    hubNodes.push({
+      id: "tools-hub",
+      type: "tools-hub" as const,
+      position: layout.hubPositions.get("tools-hub") ?? { x: 0, y: 0 },
+      data: {
         type: "tools-hub" as const,
-        position: layout.hubPositions.get("tools-hub") ?? { x: 0, y: 0 },
-        data: {
-          type: "tools-hub" as const,
-          label: "Tools",
-          toolCount: tools.length,
-          executionStatus: "idle" as const,
-        },
-      });
-      hubEdges.push({
-        id: "edge-brain-tools-hub",
-        source: "brain-0",
-        target: "tools-hub",
-        type: "animated",
-        animated: false,
-        data: { active: false },
-      });
+        label: "Tools",
+        toolCount: tools.length,
+        executionStatus: "idle" as const,
+      },
+    });
+    hubEdges.push({
+      id: "edge-brain-tools-hub",
+      source: "brain-0",
+      target: "tools-hub",
+      type: "animated",
+      animated: false,
+      data: { active: false },
+    });
 
-      tools.forEach((tool) => {
-        const nodeId = `tool-${tool.id}`;
-        hubNodes.push({
-          id: nodeId,
+    tools.forEach((tool) => {
+      const nodeId = `tool-${tool.id}`;
+      hubNodes.push({
+        id: nodeId,
+        type: "tool" as const,
+        position: layout.toolPositions.get(nodeId) ?? { x: 0, y: 0 },
+        data: {
           type: "tool" as const,
-          position: layout.toolPositions.get(nodeId) ?? { x: 0, y: 0 },
-          data: {
-            type: "tool" as const,
-            label: tool.metadata.name,
-            toolId: tool.id,
-            category: tool.metadata.category,
-            icon: tool.metadata.icon,
-            source: tool.source,
-            builtIn: tool.builtIn,
-            executionStatus: "idle" as const,
-          },
-        });
-        hubEdges.push({
-          id: `edge-tools-hub-${tool.id}`,
-          source: "tools-hub",
-          target: nodeId,
-          type: "animated",
-          animated: false,
-          data: { active: false },
-        });
+          label: tool.metadata.name,
+          toolId: tool.id,
+          category: tool.metadata.category,
+          icon: tool.metadata.icon,
+          source: tool.source,
+          builtIn: tool.builtIn,
+          executionStatus: "idle" as const,
+        },
       });
-    }
+      hubEdges.push({
+        id: `edge-tools-hub-${tool.id}`,
+        source: "tools-hub",
+        target: nodeId,
+        type: "animated",
+        animated: false,
+        data: { active: false },
+      });
+    });
 
-    // --- Integrations hub (channels) --- FIXED: was connections-hub
-    if (channelCreds.length > 0) {
-      hubNodes.push({
-        id: "integrations-hub",
+    // --- Integrations hub (always visible) + channel nodes ---
+    hubNodes.push({
+      id: "integrations-hub",
+      type: "integrations-hub" as const,
+      position: layout.hubPositions.get("integrations-hub") ?? { x: 0, y: 0 },
+      data: {
         type: "integrations-hub" as const,
-        position: layout.hubPositions.get("integrations-hub") ?? { x: 0, y: 0 },
+        label: "Integrations",
+        integrationCount: channelCreds.length,
+        executionStatus: "idle" as const,
+      },
+    });
+    hubEdges.push({
+      id: "edge-brain-integrations-hub",
+      source: "brain-0",
+      target: "integrations-hub",
+      type: "animated",
+      animated: false,
+      data: { active: false },
+    });
+
+    channelCreds.forEach((cred) => {
+      const nodeId = `channel-${cred.id}`;
+      hubNodes.push({
+        id: nodeId,
+        type: "integration" as const,
+        position: layout.channelPositions.get(nodeId) ?? { x: 0, y: 0 },
         data: {
-          type: "integrations-hub" as const,
-          label: "Integrations",
-          integrationCount: channelCreds.length,
+          type: "integration" as const,
+          label: cred.name,
+          credentialId: cred.id,
+          credentialType: cred.type,
           executionStatus: "idle" as const,
         },
       });
       hubEdges.push({
-        id: "edge-brain-integrations-hub",
-        source: "brain-0",
-        target: "integrations-hub",
+        id: `edge-integrations-hub-${cred.id}`,
+        source: "integrations-hub",
+        target: nodeId,
         type: "animated",
         animated: false,
         data: { active: false },
       });
+    });
 
-      channelCreds.forEach((cred) => {
-        const nodeId = `integration-${cred.id}`;
-        hubNodes.push({
-          id: nodeId,
-          type: "integration" as const,
-          position: layout.channelPositions.get(nodeId) ?? { x: 0, y: 0 },
-          data: {
-            type: "integration" as const,
-            label: cred.name,
-            credentialId: cred.id,
-            credentialType: cred.type,
-            executionStatus: "idle" as const,
-          },
-        });
-        hubEdges.push({
-          id: `edge-integrations-hub-${cred.id}`,
-          source: "integrations-hub",
-          target: nodeId,
-          type: "animated",
-          animated: false,
-          data: { active: false },
-        });
-      });
-    }
-
-    // --- Connections hub (API creds) --- FIXED: was integrations-hub
-    if (apiCreds.length > 0) {
-      hubNodes.push({
-        id: "connections-hub",
+    // --- Connections hub (always visible) + API credential nodes ---
+    hubNodes.push({
+      id: "connections-hub",
+      type: "connections-hub" as const,
+      position: layout.hubPositions.get("connections-hub") ?? { x: 0, y: 0 },
+      data: {
         type: "connections-hub" as const,
-        position: layout.hubPositions.get("connections-hub") ?? { x: 0, y: 0 },
-        data: {
-          type: "connections-hub" as const,
-          label: "Connections",
-          connectionCount: apiCreds.length,
-          executionStatus: "idle" as const,
-        },
-      });
-      hubEdges.push({
-        id: "edge-brain-connections-hub",
-        source: "brain-0",
-        target: "connections-hub",
-        type: "animated",
-        animated: false,
-        data: { active: false },
-      });
+        label: "Connections",
+        connectionCount: apiCreds.length,
+        executionStatus: "idle" as const,
+      },
+    });
+    hubEdges.push({
+      id: "edge-brain-connections-hub",
+      source: "brain-0",
+      target: "connections-hub",
+      type: "animated",
+      animated: false,
+      data: { active: false },
+    });
 
-      apiCreds.forEach((cred) => {
-        const nodeId = `integration-${cred.id}`;
-        hubNodes.push({
-          id: nodeId,
+    apiCreds.forEach((cred) => {
+      const nodeId = `api-${cred.id}`;
+      hubNodes.push({
+        id: nodeId,
+        type: "integration" as const,
+        position: layout.apiPositions.get(nodeId) ?? { x: 0, y: 0 },
+        data: {
           type: "integration" as const,
-          position: layout.apiPositions.get(nodeId) ?? { x: 0, y: 0 },
-          data: {
-            type: "integration" as const,
-            label: cred.name,
-            credentialId: cred.id,
-            credentialType: cred.type,
-            executionStatus: "idle" as const,
-          },
-        });
-        hubEdges.push({
-          id: `edge-connections-hub-${cred.id}`,
-          source: "connections-hub",
-          target: nodeId,
-          type: "animated",
-          animated: false,
-          data: { active: false },
-        });
+          label: cred.name,
+          credentialId: cred.id,
+          credentialType: cred.type,
+          executionStatus: "idle" as const,
+        },
       });
-    }
+      hubEdges.push({
+        id: `edge-connections-hub-${cred.id}`,
+        source: "connections-hub",
+        target: nodeId,
+        type: "animated",
+        animated: false,
+        data: { active: false },
+      });
+    });
 
-    // --- Schedule hub ---
-    if (schedules.length > 0) {
-      hubNodes.push({
-        id: "schedule-hub",
+    // --- Schedule hub (always visible) + schedule nodes ---
+    hubNodes.push({
+      id: "schedule-hub",
+      type: "schedule-hub" as const,
+      position: layout.hubPositions.get("schedule-hub") ?? { x: 0, y: 0 },
+      data: {
         type: "schedule-hub" as const,
-        position: layout.hubPositions.get("schedule-hub") ?? { x: 0, y: 0 },
-        data: {
-          type: "schedule-hub" as const,
-          label: "Schedules",
-          scheduleCount: schedules.length,
-          executionStatus: "idle" as const,
-        },
-      });
-      hubEdges.push({
-        id: "edge-brain-schedule-hub",
-        source: "brain-0",
-        target: "schedule-hub",
-        type: "animated",
-        animated: false,
-        data: { active: false },
-      });
+        label: "Schedules",
+        scheduleCount: schedules.length,
+        executionStatus: "idle" as const,
+      },
+    });
+    hubEdges.push({
+      id: "edge-brain-schedule-hub",
+      source: "brain-0",
+      target: "schedule-hub",
+      type: "animated",
+      animated: false,
+      data: { active: false },
+    });
 
-      schedules.forEach((sched) => {
-        const nodeId = `schedule-${sched.id}`;
-        hubNodes.push({
-          id: nodeId,
-          type: "schedule" as const,
-          position: layout.schedulePositions.get(nodeId) ?? { x: 0, y: 0 },
-          data: {
-            type: "schedule" as const,
-            label: sched.name,
-            scheduleId: sched.id,
-            cronExpression: sched.cronExpression,
-            enabled: sched.enabled,
-            executionStatus: "idle" as const,
-          },
-        });
-        hubEdges.push({
-          id: `edge-schedule-hub-${sched.id}`,
-          source: "schedule-hub",
-          target: nodeId,
-          type: "animated",
-          animated: false,
-          data: { active: false },
-        });
-      });
-    }
-
-    // --- Webhooks hub ---
-    if (webhooks.length > 0) {
+    schedules.forEach((sched) => {
+      const nodeId = `schedule-${sched.id}`;
       hubNodes.push({
-        id: "webhooks-hub",
-        type: "webhooks-hub" as const,
-        position: layout.hubPositions.get("webhooks-hub") ?? { x: 0, y: 0 },
+        id: nodeId,
+        type: "schedule" as const,
+        position: layout.schedulePositions.get(nodeId) ?? { x: 0, y: 0 },
         data: {
-          type: "webhooks-hub" as const,
-          label: "Webhooks",
-          webhookCount: webhooks.length,
+          type: "schedule" as const,
+          label: sched.name,
+          scheduleId: sched.id,
+          cronExpression: sched.cronExpression,
+          enabled: sched.enabled,
           executionStatus: "idle" as const,
         },
       });
       hubEdges.push({
-        id: "edge-brain-webhooks-hub",
-        source: "brain-0",
-        target: "webhooks-hub",
+        id: `edge-schedule-hub-${sched.id}`,
+        source: "schedule-hub",
+        target: nodeId,
         type: "animated",
         animated: false,
         data: { active: false },
       });
+    });
 
-      webhooks.forEach((wh) => {
-        const nodeId = `webhook-${wh.id}`;
-        hubNodes.push({
-          id: nodeId,
+    // --- Webhooks hub (always visible) + webhook nodes ---
+    hubNodes.push({
+      id: "webhooks-hub",
+      type: "webhooks-hub" as const,
+      position: layout.hubPositions.get("webhooks-hub") ?? { x: 0, y: 0 },
+      data: {
+        type: "webhooks-hub" as const,
+        label: "Webhooks",
+        webhookCount: webhooks.length,
+        executionStatus: "idle" as const,
+      },
+    });
+    hubEdges.push({
+      id: "edge-brain-webhooks-hub",
+      source: "brain-0",
+      target: "webhooks-hub",
+      type: "animated",
+      animated: false,
+      data: { active: false },
+    });
+
+    webhooks.forEach((wh) => {
+      const nodeId = `webhook-${wh.id}`;
+      hubNodes.push({
+        id: nodeId,
+        type: "webhook" as const,
+        position: layout.webhookPositions.get(nodeId) ?? { x: 0, y: 0 },
+        data: {
           type: "webhook" as const,
-          position: layout.webhookPositions.get(nodeId) ?? { x: 0, y: 0 },
-          data: {
-            type: "webhook" as const,
-            label: wh.name,
-            webhookId: wh.id,
-            source: wh.source,
-            enabled: wh.enabled,
-            executionStatus: "idle" as const,
-          },
-        });
-        hubEdges.push({
-          id: `edge-webhooks-hub-${wh.id}`,
-          source: "webhooks-hub",
-          target: nodeId,
-          type: "animated",
-          animated: false,
-          data: { active: false },
-        });
+          label: wh.name,
+          webhookId: wh.id,
+          source: wh.source,
+          enabled: wh.enabled,
+          executionStatus: "idle" as const,
+        },
       });
-    }
+      hubEdges.push({
+        id: `edge-webhooks-hub-${wh.id}`,
+        source: "webhooks-hub",
+        target: nodeId,
+        type: "animated",
+        animated: false,
+        data: { active: false },
+      });
+    });
 
     set({
       nodes: [brainNode, ...hubNodes],

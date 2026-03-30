@@ -92,6 +92,8 @@ export interface RegistryEntry {
   dependencies?: string[];
   /** For templates: IDs of skills/tools included in the template */
   includes?: string[];
+  /** Whether this entry should be highlighted in onboarding / first-run prompts */
+  featured?: boolean;
 }
 
 /** @deprecated Use RegistryEntry */

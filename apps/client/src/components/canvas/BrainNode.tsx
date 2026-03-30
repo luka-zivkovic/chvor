@@ -21,6 +21,18 @@ const V = {
   nodeLabelDim: "var(--node-label-dim)",
 };
 
+/** Map mood octants to distinct hue shifts for the aura ring */
+const MOOD_HUES: Record<string, string> = {
+  exuberant: "oklch(0.72 0.16 85)",    // warm gold
+  relaxed: "oklch(0.68 0.10 170)",     // soft teal
+  docile: "oklch(0.60 0.08 220)",      // cool blue
+  dependent: "oklch(0.55 0.12 280)",   // muted violet
+  hostile: "oklch(0.50 0.18 25)",      // deep ember
+  anxious: "oklch(0.48 0.14 50)",      // rust
+  disdainful: "oklch(0.42 0.10 300)",  // cold purple
+  bored: "oklch(0.40 0.04 260)",       // desaturated slate
+};
+
 export const BrainNode = memo(function BrainNode({ data }: NodeProps) {
   const d = data as unknown as BrainNodeData;
   const currentEmotion = useAppStore((s) => s.currentEmotion);
@@ -38,53 +50,125 @@ export const BrainNode = memo(function BrainNode({ data }: NodeProps) {
   const isIdle = !isRunning && !isCompleted && !isFailed;
   const hasNoProvider = !d.providerId && d.model === "No provider";
 
-  // Use new emotion color, falling back to legacy
   const emotionColor = displayColor ?? null;
   const emotionIntensity = blendIntensity || currentEmotion?.intensity || 0;
   const hasEmotion = !!emotionColor || !!currentEmotion;
 
-  // Dynamic breathe animation based on arousal
+  // VAD-derived animation parameters
   const breatheDuration = useMemo(() => {
     if (!snapshot?.vad) return 4;
     return getBreatheDuration(snapshot.vad.arousal);
   }, [snapshot?.vad?.arousal]);
 
-  // Dynamic glow spread based on dominance
   const glowBlur = useMemo(() => {
     if (!snapshot?.vad) return 20;
     return getGlowSpread(snapshot.vad.dominance);
   }, [snapshot?.vad?.dominance]);
 
-  let fieldColor: string;
-  if (isRunning) {
-    fieldColor = V.accent;
-  } else if (isCompleted) {
-    fieldColor = V.completed;
-  } else if (isFailed) {
-    fieldColor = V.failed;
-  } else if (hasNoProvider) {
-    fieldColor = V.warning;
-  } else if (emotionColor) {
-    fieldColor = emotionColor;
-  } else {
-    fieldColor = V.accent;
-  }
+  // Advanced emotion data
+  const advancedState = snapshot?.advancedState;
+  const moodOctant = advancedState?.mood?.octant;
+  const energyLevel = advancedState?.embodiment?.energyLevel ?? 1;
+  const residues = advancedState?.unresolvedResidues ?? [];
+  const moodColor = moodOctant ? MOOD_HUES[moodOctant] ?? null : null;
 
-  // Animation classes based on state
+  // Energy arc: SVG arc stroke-dashoffset controls how much is visible
+  const energyCircumference = Math.PI * 2 * 98; // radius 98
+  const energyOffset = energyCircumference * (1 - energyLevel);
+
+  let fieldColor: string;
+  if (isRunning) fieldColor = V.accent;
+  else if (isCompleted) fieldColor = V.completed;
+  else if (isFailed) fieldColor = V.failed;
+  else if (hasNoProvider) fieldColor = V.warning;
+  else if (emotionColor) fieldColor = emotionColor;
+  else fieldColor = V.accent;
+
   const glassAnim = isRunning ? "animate-glass-pulse" : isCompleted ? "animate-glass-settle" : "animate-glass-float";
   const glowAnim = isRunning ? "animate-glass-pulse" : "animate-glass-breathe";
-
-  // Glow intensity — much stronger when processing, modulated by emotion intensity
   const glowAlpha = isRunning ? 0.55 : isCompleted ? 0.2 : isFailed ? 0.18 : 0.14 + emotionIntensity * 0.08;
 
-  // Emotion label to display
   const primaryLabel = displayLabel || currentEmotion?.emotion || "";
   const showEmotionLabels = isIdle && hasEmotion && primaryLabel;
 
   return (
     <>
       <div className="relative flex flex-col items-center" style={{ color: V.accent }}>
-        {/* Expanding ripple rings (running only) */}
+        {/* ── Mood aura ring: slow-rotating outer glow representing medium-term mood ── */}
+        {moodColor && isIdle && (
+          <div
+            className="animate-mood-aura pointer-events-none absolute"
+            style={{
+              width: 220, height: 220,
+              top: -20, left: "50%", marginLeft: -110,
+            }}
+          >
+            <div
+              className="animate-mood-aura-breathe absolute inset-0 rounded-full"
+              style={{
+                "--aura-alpha": 0.06 + emotionIntensity * 0.06,
+                background: `conic-gradient(from 0deg, ${withOpacity(moodColor, 0.12)}, transparent 40%, ${withOpacity(moodColor, 0.08)} 60%, transparent 80%, ${withOpacity(moodColor, 0.1)})`,
+                filter: "blur(12px)",
+              } as React.CSSProperties}
+            />
+          </div>
+        )}
+
+        {/* ── Energy arc: thin SVG ring that depletes as energy drops ── */}
+        {advancedState && isIdle && (
+          <svg
+            className="animate-energy-arc pointer-events-none absolute"
+            width="200" height="200"
+            style={{ top: -10, left: "50%", marginLeft: -100 }}
+            viewBox="0 0 200 200"
+          >
+            {/* Track (faint background ring) */}
+            <circle
+              cx="100" cy="100" r="98"
+              fill="none"
+              stroke={withOpacity(fieldColor, 0.04)}
+              strokeWidth="1"
+            />
+            {/* Energy level (depleting arc) */}
+            <circle
+              cx="100" cy="100" r="98"
+              fill="none"
+              stroke={withOpacity(fieldColor, 0.15 + energyLevel * 0.15)}
+              strokeWidth={energyLevel > 0.3 ? 1.5 : 1}
+              strokeDasharray={energyCircumference}
+              strokeDashoffset={energyOffset}
+              strokeLinecap="round"
+              transform="rotate(-90 100 100)"
+              style={{ transition: "stroke-dashoffset 2s ease-out, stroke 1.5s ease" }}
+            />
+          </svg>
+        )}
+
+        {/* ── Residue traces: faint persistent glow spots for unresolved emotions ── */}
+        {residues.length > 0 && isIdle && residues.slice(0, 4).map((residue, i) => {
+          const angle = -Math.PI / 2 + (i / Math.max(residues.length, 1)) * Math.PI * 2;
+          const rx = Math.cos(angle) * 70;
+          const ry = Math.sin(angle) * 70;
+          return (
+            <div
+              key={residue.id ?? i}
+              className="animate-residue-pulse pointer-events-none absolute rounded-full"
+              style={{
+                width: 8 + residue.intensity * 8,
+                height: 8 + residue.intensity * 8,
+                top: 90 + ry - 4,
+                left: "50%",
+                marginLeft: rx - 4,
+                background: `radial-gradient(circle, ${withOpacity(fieldColor, 0.3 * residue.intensity)} 0%, transparent 70%)`,
+                filter: "blur(3px)",
+                animationDelay: `${i * 1.1}s`,
+                animationDuration: `${3 + i * 0.7}s`,
+              }}
+            />
+          );
+        })}
+
+        {/* ── Expanding ripple rings (running only) ── */}
         {isRunning && (
           <>
             <div
@@ -107,32 +191,34 @@ export const BrainNode = memo(function BrainNode({ data }: NodeProps) {
           </>
         )}
 
-        {/* Emotion shift ripple (one-shot on significant shifts) */}
+        {/* ── Emotion shift ripple (one-shot on significant shifts) ── */}
         {isSignificantShift && emotionColor && (
           <div
             className="animate-emotion-shift pointer-events-none absolute rounded-full"
             style={{
-              width: 180,
-              height: 180,
-              top: 0,
-              left: "50%",
-              marginLeft: -90,
+              width: 180, height: 180,
+              top: 0, left: "50%", marginLeft: -90,
               border: `2px solid ${emotionColor}`,
             }}
           />
         )}
 
-        {/* Glass sphere container */}
+        {/* ── Glass sphere container ── */}
         <div className="relative flex items-center justify-center" style={{ width: 180, height: 180 }}>
-          {/* Ambient glow beneath — dramatically larger when running */}
+          {/* Ambient glow — breathing modulates spread depth, not just speed */}
           <div
             className={`absolute rounded-full transition-all duration-1000 ${glowAnim}`}
             style={{
               inset: isRunning ? "-45%" : "-20%",
+              "--glow-blur": `${glowBlur}px`,
               background: `radial-gradient(circle, ${withOpacity(fieldColor, glowAlpha)} 0%, ${withOpacity(fieldColor, glowAlpha * 0.3)} 40%, transparent 70%)`,
-              filter: isRunning ? "blur(24px)" : "blur(16px)",
-            }}
+              filter: isRunning ? "blur(24px)" : `blur(${glowBlur}px)`,
+              animation: isIdle
+                ? `glow-depth-breathe ${breatheDuration * 1.2}s ease-in-out infinite`
+                : undefined,
+            } as React.CSSProperties}
           />
+
           {/* Extra bloom layer — visible only when running */}
           {isRunning && (
             <div
@@ -144,7 +230,7 @@ export const BrainNode = memo(function BrainNode({ data }: NodeProps) {
             />
           )}
 
-          {/* Glass body — main frosted sphere, brighter when running */}
+          {/* Glass body — main frosted sphere */}
           <div
             className={`absolute inset-0 rounded-full transition-all duration-700 ${glassAnim}`}
             style={{
@@ -162,7 +248,7 @@ export const BrainNode = memo(function BrainNode({ data }: NodeProps) {
             }}
           />
 
-          {/* Specular highlight — top-left light catch */}
+          {/* Specular highlight */}
           <div
             className="absolute rounded-full"
             style={{
@@ -173,7 +259,7 @@ export const BrainNode = memo(function BrainNode({ data }: NodeProps) {
             }}
           />
 
-          {/* Brain icon — centered inside the glass sphere */}
+          {/* Brain icon */}
           <div
             className={`relative z-10 flex items-center justify-center transition-all duration-500 ${isRunning ? "animate-glass-pulse" : ""}`}
             style={{ width: 56, height: 56, opacity: isRunning ? 0.9 : 0.6 }}
@@ -213,7 +299,7 @@ export const BrainNode = memo(function BrainNode({ data }: NodeProps) {
           <span className="text-[8px]" style={{ color: V.nodeLabelDim }}>
             {d.model}
           </span>
-          {/* Emotion labels — primary + secondary blend */}
+          {/* Emotion labels */}
           {showEmotionLabels && (
             <div className="mt-0.5 flex items-center gap-1 font-mono text-[8px] font-medium lowercase transition-all duration-700">
               <span style={{ color: emotionColor ?? V.nodeLabelDim }}>
@@ -229,12 +315,12 @@ export const BrainNode = memo(function BrainNode({ data }: NodeProps) {
               )}
             </div>
           )}
-          {/* Advanced emotion: mood octant + energy */}
-          {snapshot?.advancedState && isIdle && (
+          {/* Advanced: mood octant + energy */}
+          {advancedState && isIdle && (
             <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[7px] lowercase" style={{ color: V.nodeLabelDim, opacity: 0.6 }}>
-              <span>{snapshot.advancedState.mood.octant}</span>
+              <span>{moodOctant}</span>
               <span style={{ opacity: 0.4 }}>/</span>
-              <span>{Math.round(snapshot.advancedState.embodiment.energyLevel * 100)}% energy</span>
+              <span>{Math.round(energyLevel * 100)}% energy</span>
             </div>
           )}
         </div>

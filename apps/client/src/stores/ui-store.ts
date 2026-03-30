@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type PanelId = "brain" | "persona" | "memory" | "knowledge" | "schedules" | "webhooks" | "settings" | "skills" | "skill-detail" | "tools" | "tool-detail" | "integration-detail" | "conversations" | "activity" | "emotion-history";
+export type PanelId = "brain" | "persona" | "memory" | "knowledge" | "permissions" | "schedules" | "webhooks" | "settings" | "skills" | "skill-detail" | "tools" | "tool-detail" | "integration-detail" | "conversations" | "activity" | "emotion-history";
 export type BrainTab = "overview" | "models" | "persona" | "memory";
 export type LayoutMode = "default" | "canvas-expanded" | "canvas";
 
