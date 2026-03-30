@@ -3,7 +3,6 @@ import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import type { ConnectionsHubNodeData } from "../../stores/canvas-store";
 import { RadiantOrb } from "./RadiantOrb";
-import { HubInfoTooltip } from "./HubInfoTooltip";
 
 const ACCENT = "var(--skill-web)";
 
@@ -23,10 +22,9 @@ export const ConnectionsHubNode = memo(function ConnectionsHubNode({ data }: Nod
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-none !w-1.5 !h-1.5 opacity-0" />
       <div className="group flex flex-col items-center gap-2">
         <div
-          className={`relative flex items-center justify-center transition-all duration-300 ease-out ${isCompleted ? "animate-field-intensify" : ""}`}
+          className={`flex items-center justify-center transition-all duration-300 ease-out ${isCompleted ? "animate-field-intensify" : ""}`}
           style={{ width: 72, height: 72 }}
         >
-          <HubInfoTooltip text="API credentials for external services. Click to manage." />
           <RadiantOrb color={orbColor} intensity={intensity}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={orbColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />

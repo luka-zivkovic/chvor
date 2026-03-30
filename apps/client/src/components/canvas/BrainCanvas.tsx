@@ -407,7 +407,7 @@ function CanvasAtmosphere() {
       <div
         className="absolute inset-0"
         style={{
-          background: "radial-gradient(ellipse 80% 75% at 50% 48%, transparent 40%, oklch(0.08 0 0 / 0.5) 100%)",
+          background: "radial-gradient(ellipse 85% 80% at 50% 35%, transparent 40%, oklch(0.08 0 0 / 0.5) 100%)",
         }}
       />
     </div>
@@ -473,7 +473,7 @@ function EmotionTintOverlay() {
         className="absolute inset-0 transition-all duration-[2000ms]"
         style={{
           background: color
-            ? `radial-gradient(ellipse 100% ${vignetteSize}% at 50% 40%, ${color} 0%, transparent 55%)`
+            ? `radial-gradient(ellipse 130% ${vignetteSize}% at 50% 25%, ${color} 0%, transparent 65%)`
             : "none",
           filter: "blur(60px)",
           opacity: washAlpha,
