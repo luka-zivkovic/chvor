@@ -631,3 +631,47 @@
 .animate-hint-fade {
   animation: hint-fade 3s ease-out forwards;
 }
+
+/* ─── Emotion overhaul: organic bioluminescent effects ─── */
+
+/* Mood aura — slow rotation for the outer mood ring */
+@keyframes mood-aura-rotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.animate-mood-aura {
+  animation: mood-aura-rotate 40s linear infinite;
+}
+
+/* Mood aura breathe — opacity modulation layered on rotation */
+@keyframes mood-aura-breathe {
+  0%, 100% { opacity: var(--aura-alpha, 0.08); }
+  50% { opacity: calc(var(--aura-alpha, 0.08) * 1.6); }
+}
+.animate-mood-aura-breathe {
+  animation: mood-aura-breathe 8s ease-in-out infinite;
+}
+
+/* Energy arc depletion — dashoffset controls visible length */
+@keyframes energy-arc-idle {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.7; }
+}
+.animate-energy-arc {
+  animation: energy-arc-idle 6s ease-in-out infinite;
+}
+
+/* Residue pulse — unresolved emotional threads glow faintly */
+@keyframes residue-pulse {
+  0%, 100% { opacity: 0.15; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(1.15); }
+}
+.animate-residue-pulse {
+  animation: residue-pulse 4s ease-in-out infinite;
+}
+
+/* Glow depth — breathing modulates spread, not just speed */
+@keyframes glow-depth-breathe {
+  0%, 100% { transform: scale(1); filter: blur(var(--glow-blur, 16px)); }
+  50% { transform: scale(1.06); filter: blur(calc(var(--glow-blur, 16px) * 1.3)); }
+}
