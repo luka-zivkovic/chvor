@@ -1552,6 +1552,7 @@ const switchModelToolDef = tool({
     "Use `action: \"list\"` to see available providers and models. " +
     "Use `action: \"switch\"` with a provider and model to change. " +
     "Use `action: \"rollback\"` to revert to the previous model if something goes wrong. " +
+    "Rollback supports one level only and is not persisted across restarts. " +
     "The switch takes effect starting from the next message.",
   parameters: z.object({
     action: z.enum(["list", "switch", "rollback"]).describe("list = show available models, switch = change model, rollback = revert to previous"),

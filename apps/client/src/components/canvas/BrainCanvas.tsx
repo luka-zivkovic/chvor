@@ -244,7 +244,7 @@ export function BrainCanvas() {
     } else {
       updateBrainProvider("", "No provider");
     }
-  }, [credentials, providers, nodes.length, modelRoles.primary, llmProviderDefs, LLM_TYPES]);
+  }, [credentials, providers, nodes.length, modelRoles.primary, llmProviderDefs]); // eslint-disable-line react-hooks/exhaustive-deps -- LLM_TYPES is a stable memoized constant
 
   // Sync brain label with persona aiName
   useEffect(() => {

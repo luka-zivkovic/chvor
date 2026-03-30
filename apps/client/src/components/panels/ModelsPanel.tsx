@@ -30,6 +30,14 @@ function useDynamicModels() {
   const [loading, setLoading] = useState<string | null>(null);
   const [, forceUpdate] = useState(0);
 
+  // Invalidate cache when credentials change so stale models don't persist
+  const credentials = useCredentialStore((s) => s.credentials);
+  const credVersionRef = useRef(credentials);
+  if (credVersionRef.current !== credentials) {
+    credVersionRef.current = credentials;
+    cacheRef.current.clear();
+  }
+
   const getModels = (provider: LLMProviderDef | null | undefined): ModelDef[] => {
     if (!provider) return [];
     return cacheRef.current.get(provider.id) ?? provider.models;

@@ -12,6 +12,9 @@ interface CacheEntry {
 const modelCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
+// Dedup concurrent fetches for the same provider
+const inFlightFetches = new Map<string, Promise<{ models: ModelDef[]; source: "api" | "static" }>>();
+
 export function clearModelCache(providerId?: string): void {
   if (providerId) {
     modelCache.delete(providerId);
@@ -31,6 +34,18 @@ export async function fetchModelsForProvider(
     return { models: cached.models, source: "api" };
   }
 
+  // Dedup: if a fetch is already in flight for this provider, reuse it
+  const existing = inFlightFetches.get(providerId);
+  if (existing) return existing;
+
+  const promise = _fetchModelsForProvider(providerId);
+  inFlightFetches.set(providerId, promise);
+  return promise.finally(() => inFlightFetches.delete(providerId));
+}
+
+async function _fetchModelsForProvider(
+  providerId: string
+): Promise<{ models: ModelDef[]; source: "api" | "static" }> {
   const providerDef = LLM_PROVIDERS.find((p) => p.id === providerId);
   if (!providerDef) {
     return { models: [], source: "static" };
