@@ -3,6 +3,7 @@ import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import type { ToolsHubNodeData } from "../../stores/canvas-store";
 import { RadiantOrb } from "./RadiantOrb";
+import { HubInfoTooltip } from "./HubInfoTooltip";
 import { useEmotionStore } from "../../stores/emotion-store";
 
 const ACCENT = "var(--tool-accent)";
@@ -24,9 +25,10 @@ export const ToolsHubNode = memo(function ToolsHubNode({ data }: NodeProps) {
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-none !w-1.5 !h-1.5 opacity-0" />
       <div className="group flex flex-col items-center gap-2">
         <div
-          className={`flex items-center justify-center transition-all duration-300 ease-out ${isCompleted ? "animate-field-intensify" : ""}`}
+          className={`relative flex items-center justify-center transition-all duration-300 ease-out ${isCompleted ? "animate-field-intensify" : ""}`}
           style={{ width: 72, height: 72 }}
         >
+          <HubInfoTooltip text="External tools your AI can use — filesystem, web, MCP servers. Click to manage." />
           <RadiantOrb color={orbColor} intensity={intensity} emotionTint={emotionTint}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={orbColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
               <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />

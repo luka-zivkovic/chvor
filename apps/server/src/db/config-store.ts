@@ -362,7 +362,7 @@ export function setSelfHealingEnabled(enabled: boolean): boolean {
 // --- PC Control config ---
 
 export function getPcControlEnabled(): boolean {
-  return (getConfig("pcControl.enabled") ?? "false") === "true";
+  return (getConfig("pcControl.enabled") ?? "true") === "true";
 }
 
 export function setPcControlEnabled(enabled: boolean): boolean {

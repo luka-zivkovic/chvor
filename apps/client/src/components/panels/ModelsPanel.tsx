@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { toast } from "sonner";
 import { useModelsStore } from "../../stores/models-store";
 import { useCredentialStore } from "../../stores/credential-store";
+import { useUIStore } from "../../stores/ui-store";
 import { api } from "../../lib/api";
 import { cn } from "@/lib/utils";
 import type { ModelRole, ModelDef, LLMProviderDef, EmbeddingProviderDef, RoleFallbackEntry } from "@chvor/shared";
@@ -265,15 +266,17 @@ function RoleSelector({
   const effectiveConfig = config ?? defaults[role] ?? null;
   const isDefault = !config && role !== "primary";
 
-  const availableProviders = llmProviders.filter((p) =>
-    credentials.some(
-      (c) => c.type === p.credentialType && c.testStatus !== "failed"
-    )
-  );
+  const hasCredential = (p: LLMProviderDef) =>
+    credentials.some((c) => c.type === p.credentialType && c.testStatus !== "failed");
+
+  // Show ALL providers — configured ones first, then unconfigured with "needs key"
+  const configuredProviders = llmProviders.filter(hasCredential);
+  const unconfiguredProviders = llmProviders.filter((p) => !hasCredential(p));
+  const availableProviders = [...configuredProviders, ...unconfiguredProviders];
 
   const activeProvider =
-    availableProviders.find((p) => p.id === effectiveConfig?.providerId) ??
-    availableProviders[0];
+    configuredProviders.find((p) => p.id === effectiveConfig?.providerId) ??
+    configuredProviders[0];
 
   const { getModels, fetchModels, loading: loadingModels } = useDynamicModels();
 
@@ -334,26 +337,42 @@ function RoleSelector({
           <div className="mb-2 flex flex-wrap gap-1.5">
             {availableProviders.map((p) => {
               const isActive = p.id === activeProvider?.id;
+              const configured = hasCredential(p);
               const cred = credentials.find((c) => c.type === p.credentialType);
               const status = cred?.testStatus ?? "untested";
               return (
                 <button
                   key={p.id}
-                  onClick={() => !isActive && handleProviderSwitch(p)}
-                  title={`${p.name} — ${status === "success" ? "Credential verified" : status === "failed" ? "Credential failed" : "Credential untested"}`}
+                  onClick={() => {
+                    if (!configured) {
+                      useUIStore.getState().openPanel("settings");
+                      return;
+                    }
+                    if (!isActive) handleProviderSwitch(p);
+                  }}
+                  title={configured
+                    ? `${p.name} — ${status === "success" ? "Credential verified" : status === "failed" ? "Credential failed" : "Credential untested"}`
+                    : `${p.name} — needs API key`}
                   className={cn(
                     "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-all",
                     isActive
                       ? "border-primary/60 bg-primary/10 text-foreground"
-                      : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
+                      : configured
+                        ? "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
+                        : "border-border/30 text-muted-foreground/50 hover:border-border/50 hover:text-muted-foreground"
                   )}
                 >
                   <span className={cn(
                     "inline-block h-1.5 w-1.5 rounded-full",
-                    status === "success" ? "bg-green-500" : status === "failed" ? "bg-red-500" : "bg-muted-foreground/50"
+                    configured
+                      ? status === "success" ? "bg-green-500" : status === "failed" ? "bg-red-500" : "bg-muted-foreground/50"
+                      : "bg-muted-foreground/20"
                   )} />
                   <ProviderIcon icon={p.icon} size={16} />
                   {p.name}
+                  {!configured && (
+                    <span className="text-[8px] text-muted-foreground/50">needs key</span>
+                  )}
                 </button>
               );
             })}
@@ -413,7 +432,7 @@ function RoleSelector({
         </>
       ) : (
         <p className="text-[10px] text-muted-foreground/60">
-          No providers with valid credentials
+          No providers available
         </p>
       )}
     </div>

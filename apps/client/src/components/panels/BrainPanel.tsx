@@ -277,6 +277,7 @@ function BrainConfigContent() {
               </p>
             )}
           </div>
+
         </div>
       </section>
 

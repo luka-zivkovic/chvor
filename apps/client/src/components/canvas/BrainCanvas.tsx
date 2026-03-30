@@ -154,11 +154,8 @@ export function BrainCanvas() {
     if (initializedRef.current !== key) {
       const isFirstInit = initializedRef.current === undefined;
       initializedRef.current = key;
-      if (skills.length === 0 && tools.length === 0) {
-        initializeEmptyState(savedPositionsRef.current);
-      } else {
-        initializeFromSkills(enabledSkills, enabledTools, schedules, savedPositionsRef.current, channelIntegrations, apiIntegrations, webhooks);
-      }
+      // Always use full layout — hubs are always visible even when empty
+      initializeFromSkills(enabledSkills, enabledTools, schedules, savedPositionsRef.current, channelIntegrations, apiIntegrations, webhooks);
       // Restore saved viewport on first init, refit on subsequent
       if (isFirstInit && savedViewportRef.current) {
         setTimeout(() => {

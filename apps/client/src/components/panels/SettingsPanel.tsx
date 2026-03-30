@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ShellApprovalMode, CredentialSummary, ChatType, ApiKeyInfo } from "@chvor/shared";
+import type { CredentialSummary, ChatType, ApiKeyInfo } from "@chvor/shared";
 import { toast } from "sonner";
 import { useCredentialStore } from "../../stores/credential-store";
 import { useRetentionStore } from "../../stores/retention-store";
@@ -114,16 +114,8 @@ function CredentialsContent() {
   );
 }
 
-const APPROVAL_MODES: { value: ShellApprovalMode; label: string; desc: string }[] = [
-  { value: "always_approve", label: "Always approve", desc: "Auto-execute all commands (blocked patterns still rejected)" },
-  { value: "dangerous_only", label: "Dangerous only", desc: "Prompt only for dangerous commands (rm, sudo, kill, ...)" },
-  { value: "moderate_plus", label: "Moderate + Dangerous", desc: "Prompt for moderate and dangerous commands (default)" },
-  { value: "block_all", label: "Block all", desc: "Reject all non-safe commands" },
-];
-
 function SecurityContent() {
   const { authEnabled, checkStatus, apiKeys, fetchApiKeys } = useAuthStore();
-  const [approvalMode, setApprovalMode] = useState<ShellApprovalMode>("moderate_plus");
   const [loading, setLoading] = useState(true);
 
   // Auth setup state
@@ -141,17 +133,9 @@ function SecurityContent() {
   const [disableConfirm, setDisableConfirm] = useState(false);
 
   useEffect(() => {
-    api.shellConfig.get().then((config) => {
-      setApprovalMode(config.approvalMode);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    setLoading(false);
     if (authEnabled) fetchApiKeys();
   }, [authEnabled, fetchApiKeys]);
-
-  const handleChange = (mode: ShellApprovalMode) => {
-    setApprovalMode(mode);
-    api.shellConfig.update({ approvalMode: mode });
-  };
 
   const handleSetup = async () => {
     setSetupError("");
@@ -193,8 +177,6 @@ function SecurityContent() {
   };
 
   if (loading) return <p className="text-xs text-muted-foreground">Loading...</p>;
-
-  const selected = APPROVAL_MODES.find((m) => m.value === approvalMode);
 
   return (
     <div className="flex flex-col gap-5">
@@ -356,28 +338,7 @@ function SecurityContent() {
         </div>
       )}
 
-      {/* Shell Command Approval */}
-      <div className="border-t border-border pt-4">
-        <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-          Shell Command Approval
-        </h3>
-
-        <div className="flex flex-col gap-2 mt-3">
-          <label className="text-xs text-muted-foreground">Approval mode</label>
-          <select
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
-            value={approvalMode}
-            onChange={(e) => handleChange(e.target.value as ShellApprovalMode)}
-          >
-            {APPROVAL_MODES.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
-          </select>
-          {selected && (
-            <p className="text-[11px] text-muted-foreground/70">{selected.desc}</p>
-          )}
-        </div>
-      </div>
+      {/* Shell command approval moved to Permissions panel */}
     </div>
   );
 }

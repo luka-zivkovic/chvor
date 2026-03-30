@@ -16,13 +16,14 @@ interface Props {
 }
 
 export function BrainPhase({ direction, onBack, onNext }: Props) {
-  const { credentials, providers, llmProviders, fetchAll: fetchCredentials } = useCredentialStore();
+  const { credentials, providers, llmProviders, embeddingProviders, fetchAll: fetchCredentials } = useCredentialStore();
 
   const [selectedSetup, setSelectedSetup] = useState<LLMProviderDef | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [setupError, setSetupError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [selectedModel, setSelectedModel] = useState("");
+  const [selectedEmbedder, setSelectedEmbedder] = useState("local");
 
   useEffect(() => { fetchCredentials(); }, [fetchCredentials]);
 
@@ -80,11 +81,26 @@ export function BrainPhase({ direction, onBack, onNext }: Props) {
       if (activeLLMProvider && selectedModel) {
         await api.llmConfig.set({ providerId: activeLLMProvider.id, model: selectedModel });
       }
+      // Save embedder selection
+      const embedProvider = embeddingProviders.find((p) => p.id === selectedEmbedder);
+      if (embedProvider) {
+        const defaultModel = embedProvider.models?.[0]?.id ?? "";
+        if (defaultModel) {
+          await api.models.setEmbedding({ embedding: { providerId: selectedEmbedder, model: defaultModel } });
+        }
+      }
       onNext();
     } catch {
       toast.error("Failed to save model configuration");
     }
   }
+
+  // Check if a cloud embedder has the required credential
+  const hasEmbedderCred = (providerId: string) => {
+    const ep = embeddingProviders.find((p) => p.id === providerId);
+    if (!ep || !ep.credentialType) return true; // local doesn't need creds
+    return credentials.some((c) => c.type === ep.credentialType);
+  };
 
   return (
     <motion.div
@@ -140,6 +156,42 @@ export function BrainPhase({ direction, onBack, onNext }: Props) {
                 </select>
               )}
             </motion.div>
+
+            {/* Embedder selection */}
+            {embeddingProviders.length > 0 && (
+              <motion.div variants={staggerItem}>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  Memory embedder
+                </label>
+                <p className="mb-2 text-[10px] text-muted-foreground">
+                  Used for semantic memory search. Local is free and runs on-device.
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {embeddingProviders.map((ep) => {
+                    const isActive = ep.id === selectedEmbedder;
+                    const needsKey = ep.credentialType && !hasEmbedderCred(ep.id);
+                    return (
+                      <button
+                        key={ep.id}
+                        onClick={() => !needsKey && setSelectedEmbedder(ep.id)}
+                        disabled={!!needsKey}
+                        className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-all ${
+                          isActive
+                            ? "border-primary/60 bg-primary/10 text-foreground"
+                            : needsKey
+                              ? "border-border/30 text-muted-foreground/40"
+                              : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
+                        }`}
+                      >
+                        <ProviderIcon icon={ep.icon} size={14} />
+                        {ep.name}
+                        {needsKey && <span className="text-[8px] text-muted-foreground/50">needs key</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
           </>
         ) : providers.length === 0 ? (
           <motion.div variants={staggerItem}>

@@ -18,6 +18,7 @@ import { IntegrationDetailPanel } from "../panels/IntegrationDetailPanel";
 import { ConversationsPanel } from "../panels/ConversationsPanel";
 import ActivityPanel from "../panels/ActivityPanel";
 import { EmotionHistoryPanel } from "../panels/EmotionHistoryPanel";
+import { PermissionsPanel } from "../panels/PermissionsPanel";
 import { CanvasPage } from "../canvas-page/CanvasPage";
 import { KnowledgePanel } from "../panels/KnowledgePanel";
 import { PcViewer } from "../pc-viewer/PcViewer";
@@ -33,6 +34,7 @@ const MOBILE_NAV_ITEMS: Array<{ panel: PanelId; label: string }> = [
   { panel: "persona", label: "Persona" },
   { panel: "memory", label: "Memory" },
   { panel: "knowledge", label: "Knowledge" },
+  { panel: "permissions", label: "Permissions" },
   { panel: "skills", label: "Skills" },
   { panel: "tools", label: "Tools" },
   { panel: "schedules", label: "Schedules" },
@@ -71,6 +73,7 @@ function MobileMenu() {
 
 const PANEL_META: Record<string, { title: string; subtitle: string; width?: number }> = {
   brain: { title: "Brain", subtitle: "LLM, persona & memory" },
+  permissions: { title: "Permissions", subtitle: "PC control, shell, channels & media" },
   settings: { title: "Settings", subtitle: "API keys, voice, security & sessions" },
   schedules: { title: "Schedules", subtitle: "Automated tasks & pulse", width: 640 },
   webhooks: { title: "Webhooks", subtitle: "External event subscriptions", width: 640 },
@@ -91,6 +94,8 @@ function PanelContent({ panel }: { panel: string }) {
   switch (panel) {
     case "brain":
       return <BrainPanel />;
+    case "permissions":
+      return <PermissionsPanel />;
     case "settings":
       return <SettingsPanel />;
     case "schedules":
