@@ -70,7 +70,8 @@ export async function postProcess(
     ttsText = stripMarkdown(ttsText);
 
     const voice = getConfig("voice.tts.voice") ?? undefined;
-    const result = await synthesizeWithFallback(ttsText, ctx.channelType, voice);
+    const speed = parseFloat(getConfig("voice.tts.speed") ?? "1.0") || 1.0;
+    const result = await synthesizeWithFallback(ttsText, ctx.channelType, voice, speed);
 
     const ext = result.format === "ogg" ? "ogg" : result.format === "wav" ? "wav" : "mp3";
     const id = await saveAudio(result.audio, ext);

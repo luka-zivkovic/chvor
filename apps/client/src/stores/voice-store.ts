@@ -28,6 +28,12 @@ export interface VoiceModelInfo {
   sizeEstimate: string;
   status: string;
   progress: { status: string; percent: number; error?: string };
+  meta?: {
+    language?: string;
+    locale?: string;
+    gender?: "male" | "female";
+    quality?: "low" | "medium" | "high";
+  };
 }
 
 // ── Store ─────────────────────────────────────────────────────
@@ -36,6 +42,8 @@ interface VoiceState {
   ttsMode: TtsMode;
   sttProvider: string;
   ttsProvider: string | null;
+  ttsSpeed: number;
+  piperVoice: string | null;
   recording: boolean;
   talkModeActive: boolean;
   talkPhase: "idle" | "listening" | "sending" | "thinking" | "speaking";
@@ -60,6 +68,8 @@ interface VoiceState {
   updateSTTProvider: (provider: string) => Promise<void>;
   updateTTSProvider: (provider: string) => Promise<void>;
   updateTTSMode: (mode: TtsMode) => Promise<void>;
+  updateTTSSpeed: (speed: number) => Promise<void>;
+  updatePiperVoice: (modelId: string) => Promise<void>;
   startModelDownload: (modelId: string) => Promise<void>;
 }
 
@@ -70,6 +80,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   ttsMode: "inbound",
   sttProvider: "whisper-api",
   ttsProvider: null,
+  ttsSpeed: 1.0,
+  piperVoice: null,
   recording: false,
   talkModeActive: false,
   talkPhase: "idle",
@@ -98,6 +110,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         ttsMode: json.data.ttsMode ?? "inbound",
         sttProvider: json.data.sttProvider ?? "whisper-api",
         ttsProvider: json.data.ttsProvider ?? null,
+        ttsSpeed: json.data.ttsSpeed ?? 1.0,
+        piperVoice: json.data.piperVoice ?? null,
       });
     } catch (err) {
       console.error("[voice] fetch config failed:", err);
@@ -174,6 +188,40 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     } catch (err) {
       set({ ttsMode: prev });
       console.error("[voice] update TTS mode failed:", err);
+    }
+  },
+
+  updateTTSSpeed: async (speed) => {
+    const prev = get().ttsSpeed;
+    set({ ttsSpeed: speed });
+    try {
+      const res = await fetch("/api/voice/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ ttsSpeed: speed }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      set({ ttsSpeed: prev });
+      console.error("[voice] update TTS speed failed:", err);
+    }
+  },
+
+  updatePiperVoice: async (modelId) => {
+    const prev = get().piperVoice;
+    set({ piperVoice: modelId });
+    try {
+      const res = await fetch("/api/voice/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ piperVoice: modelId }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      set({ piperVoice: prev });
+      console.error("[voice] update Piper voice failed:", err);
     }
   },
 

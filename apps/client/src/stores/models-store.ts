@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { toast } from "sonner";
 import type { ModelRole, ModelRoleConfig, ModelRolesConfig, EmbeddingConfig, RoleFallbackEntry } from "@chvor/shared";
 import { api } from "../lib/api";
 
@@ -52,6 +53,7 @@ export const useModelsStore = create<ModelsState>((set) => ({
       set(applyConfigResponse(result));
     } catch (err) {
       console.error("[models-store] setRole failed:", err);
+      toast.error("Failed to update model configuration");
     }
   },
 

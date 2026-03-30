@@ -155,9 +155,12 @@ export function TalkMode({ onSend }: Props) {
     el.pause();
     el.currentTime = 0;
     el.src = latestUrl;
-    el.play().catch(() => {});
+    el.play().catch((err) => {
+      console.warn("[TalkMode] audio playback failed:", err);
+      resumeListening();
+    });
     setTalkPhase("speaking");
-  }, [audioUrls, talkModeActive, lastPlayedAudioId, setLastPlayedAudioId, setTalkPhase, clearTtsTimeout]);
+  }, [audioUrls, talkModeActive, lastPlayedAudioId, setLastPlayedAudioId, setTalkPhase, clearTtsTimeout, resumeListening]);
 
   const handleAudioEnd = useCallback(() => {
     if (talkModeActiveRef.current) {
@@ -199,7 +202,14 @@ export function TalkMode({ onSend }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm">
-      <audio ref={audioRef} onEnded={handleAudioEnd} />
+      <audio
+        ref={audioRef}
+        onEnded={handleAudioEnd}
+        onError={() => {
+          console.warn("[TalkMode] audio element error — resuming listening");
+          if (talkModeActiveRef.current) resumeListening();
+        }}
+      />
 
       {/* Phase indicator */}
       <div className="mb-8 text-center">

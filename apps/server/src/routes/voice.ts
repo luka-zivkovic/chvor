@@ -140,7 +140,9 @@ app.get("/config", (c) => {
       ttsMode: getConfig("voice.tts.mode") ?? "inbound",
       ttsProvider: getConfig("voice.tts.provider") ?? null,
       ttsVoice: getConfig("voice.tts.voice") ?? null,
+      ttsSpeed: parseFloat(getConfig("voice.tts.speed") ?? "1.0") || 1.0,
       ttsMaxLength: parseInt(getConfig("voice.tts.maxLength") ?? "1500", 10),
+      piperVoice: getConfig("voice.tts.piperVoice") ?? null,
       sttProvider: getConfig("voice.stt.provider") ?? "whisper-api",
     },
   });
@@ -166,6 +168,13 @@ app.put("/config", async (c) => {
   }
   if (body.ttsVoice !== undefined) {
     setConfig("voice.tts.voice", body.ttsVoice ?? "");
+  }
+  if (body.ttsSpeed !== undefined) {
+    const speed = Math.max(0.5, Math.min(2.0, parseFloat(body.ttsSpeed) || 1.0));
+    setConfig("voice.tts.speed", String(speed));
+  }
+  if (body.piperVoice !== undefined) {
+    setConfig("voice.tts.piperVoice", body.piperVoice ?? "");
   }
   if (body.ttsMaxLength !== undefined) {
     setConfig("voice.tts.maxLength", String(Math.max(100, body.ttsMaxLength)));

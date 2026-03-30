@@ -1,13 +1,14 @@
 // apps/server/src/lib/voice/tts-piper.ts
 //
 // Local TTS via Piper ONNX models + onnxruntime-node (optional dep).
-// Character-level phonemization using Piper's phoneme_id_map from the model config.
+// Supports multiple downloadable voice models with configurable speed.
 
 import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import type { TTSProvider, TTSResult } from "./tts-provider.ts";
 import type { AudioFormat } from "../../channels/channel.ts";
-import { getModelsDir } from "./model-manager.ts";
+import { getModelsDir, VOICE_MODELS } from "./model-manager.ts";
+import { getConfig } from "../../db/config-store.ts";
 
 interface PiperConfig {
   audio: { sample_rate: number };
@@ -32,13 +33,13 @@ function encodeWav(pcm: Float32Array, sampleRate: number): Uint8Array {
 
   // fmt chunk
   writeString(view, 12, "fmt ");
-  view.setUint32(16, 16, true); // chunk size
+  view.setUint32(16, 16, true);
   view.setUint16(20, 1, true); // PCM format
   view.setUint16(22, 1, true); // mono
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, sampleRate * bytesPerSample, true);
   view.setUint16(32, bytesPerSample, true);
-  view.setUint16(34, 16, true); // bits per sample
+  view.setUint16(34, 16, true);
 
   // data chunk
   writeString(view, 36, "data");
@@ -83,82 +84,113 @@ function textToPhonemeIds(text: string, map: Record<string, number[]>): number[]
 
 // ── Provider ────────────────────────────────────────────────────
 
+interface CachedSession {
+  session: any;
+  config: PiperConfig;
+}
+
 export class PiperTTSProvider implements TTSProvider {
   name = "piper";
-  private session: any = null;
-  private config: PiperConfig | null = null;
-  private initPromise: Promise<void> | null = null;
-  private failed = false;
+  private sessions = new Map<string, CachedSession>();
+  private initFailed = new Set<string>();
+  private initPromises = new Map<string, Promise<CachedSession | null>>();
 
-  async init(): Promise<void> {
-    if (this.session || this.failed) return;
-    if (this.initPromise) return this.initPromise;
+  /** Resolve which Piper model to use: configured > first available. */
+  private resolveModelId(): string | null {
+    const configured = getConfig("voice.tts.piperVoice");
+    if (configured) return configured;
+    // Fall back to first downloaded Piper model
+    const dir = getModelsDir();
+    const piperModels = VOICE_MODELS.filter((m) => m.type === "tts" && m.id.startsWith("piper-"));
+    for (const m of piperModels) {
+      if (m.files.length > 0 && m.files.every((f) => existsSync(join(dir, f.filename)))) {
+        return m.id;
+      }
+    }
+    return null;
+  }
 
-    this.initPromise = (async () => {
+  /** Load an ONNX session for a specific model. */
+  private async loadModel(modelId: string): Promise<CachedSession | null> {
+    if (this.sessions.has(modelId)) return this.sessions.get(modelId)!;
+    if (this.initFailed.has(modelId)) return null;
+    if (this.initPromises.has(modelId)) return this.initPromises.get(modelId)!;
+
+    const promise = (async (): Promise<CachedSession | null> => {
       try {
+        const def = VOICE_MODELS.find((m) => m.id === modelId);
+        if (!def || def.files.length < 2) throw new Error(`Unknown Piper model: ${modelId}`);
+
         const dir = getModelsDir();
-        const modelPath = join(dir, "en_US-lessac-medium.onnx");
-        const configPath = join(dir, "en_US-lessac-medium.onnx.json");
+        const onnxFile = def.files.find((f) => f.filename.endsWith(".onnx") && !f.filename.endsWith(".json"));
+        const configFile = def.files.find((f) => f.filename.endsWith(".json"));
+        if (!onnxFile || !configFile) throw new Error(`Invalid model files for ${modelId}`);
+
+        const modelPath = join(dir, onnxFile.filename);
+        const configPath = join(dir, configFile.filename);
 
         if (!existsSync(modelPath) || !existsSync(configPath)) {
           throw new Error("Piper model not downloaded");
         }
 
-        this.config = JSON.parse(readFileSync(configPath, "utf8"));
-
+        const config: PiperConfig = JSON.parse(readFileSync(configPath, "utf8"));
         const ort = await import("onnxruntime-node");
-        this.session = await ort.InferenceSession.create(modelPath, {
+        const session = await ort.InferenceSession.create(modelPath, {
           executionProviders: ["cpu"],
         });
 
-        console.log("[tts:piper] model loaded");
+        const cached = { session, config };
+        this.sessions.set(modelId, cached);
+        console.log(`[tts:piper] loaded model: ${modelId}`);
+        return cached;
       } catch (err) {
-        this.failed = true;
-        console.error("[tts:piper] failed to load:", err instanceof Error ? err.message : err);
+        this.initFailed.add(modelId);
+        console.error(`[tts:piper] failed to load ${modelId}:`, err instanceof Error ? err.message : err);
+        return null;
+      } finally {
+        this.initPromises.delete(modelId);
       }
     })();
-    return this.initPromise;
-  }
 
-  isAvailable(): boolean {
-    return this.session !== null && !this.failed;
+    this.initPromises.set(modelId, promise);
+    return promise;
   }
 
   async synthesize(
     text: string,
-    opts?: { voice?: string; format?: AudioFormat }
+    opts?: { voice?: string; format?: AudioFormat; speed?: number }
   ): Promise<TTSResult> {
-    if (!this.session) await this.init();
-    if (!this.session || !this.config) {
-      throw new Error("Piper TTS not available");
-    }
+    const modelId = this.resolveModelId();
+    if (!modelId) throw new Error("Piper TTS not available");
 
+    const cached = await this.loadModel(modelId);
+    if (!cached) throw new Error("Piper TTS not available");
+
+    const { session, config } = cached;
     const ort = await import("onnxruntime-node");
-    const phonemeIds = textToPhonemeIds(text, this.config.phoneme_id_map);
+    const phonemeIds = textToPhonemeIds(text, config.phoneme_id_map);
+
+    // Speed: lower length_scale = faster speech
+    const speed = Math.max(0.5, Math.min(2.0, opts?.speed ?? 1.0));
+    const lengthScale = config.inference.length_scale / speed;
 
     // Build ONNX tensors
     const input = new ort.Tensor("int64", BigInt64Array.from(phonemeIds.map(BigInt)), [1, phonemeIds.length]);
     const inputLengths = new ort.Tensor("int64", BigInt64Array.from([BigInt(phonemeIds.length)]), [1]);
     const scales = new ort.Tensor(
       "float32",
-      Float32Array.from([
-        this.config.inference.noise_scale,
-        this.config.inference.length_scale,
-        this.config.inference.noise_w,
-      ]),
+      Float32Array.from([config.inference.noise_scale, lengthScale, config.inference.noise_w]),
       [3]
     );
 
-    const result = await this.session.run({ input, input_lengths: inputLengths, scales });
+    const result = await session.run({ input, input_lengths: inputLengths, scales });
 
-    // Output is "output" tensor with shape [1, 1, num_samples]
     const outputTensor = result["output"] ?? result[Object.keys(result)[0]];
     const pcm = new Float32Array(outputTensor.data);
 
-    const sampleRate = this.config.audio.sample_rate;
+    const sampleRate = config.audio.sample_rate;
     const wav = encodeWav(pcm, sampleRate);
 
-    // Piper outputs WAV. Format is always "wav" — browsers can play it.
     return { audio: wav, format: "wav" as AudioFormat };
   }
 }

@@ -8,6 +8,7 @@ import {
   getCredentialData,
   updateTestStatus,
 } from "../db/credential-store.ts";
+import { clearModelCache } from "../lib/model-fetcher.ts";
 import { testProvider } from "./provider-tester.ts";
 import { getGatewayInstance } from "../gateway/gateway-instance.ts";
 import { invalidateToolCache } from "../lib/tool-builder.ts";
@@ -62,6 +63,7 @@ credentials.post("/", async (c) => {
       return c.json({ error: "name, type, and data are required" }, 400);
     }
     const summary = createCredential(body.name, body.type, body.data, body.usageContext);
+    clearModelCache();
     tryRestartChannel(body.type);
     await refreshToolsForCredential(body.type);
     return c.json({ data: summary }, 201);
@@ -86,6 +88,7 @@ credentials.put("/:id", async (c) => {
     if (!summary) return c.json({ error: "not found" }, 404);
 
     if (body.data) {
+      clearModelCache();
       tryRestartChannel(record.cred.type);
       await refreshToolsForCredential(record.cred.type);
     }
@@ -140,6 +143,7 @@ credentials.delete("/:id", async (c) => {
     const record = getCredentialData(id);
     const deleted = deleteCredential(id);
     if (!deleted) return c.json({ error: "not found" }, 404);
+    clearModelCache();
     if (record) {
       tryRestartChannel(record.cred.type);
       await refreshToolsForCredential(record.cred.type);

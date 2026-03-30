@@ -13,7 +13,7 @@ export interface TTSResult {
 
 export interface TTSProvider {
   name: string;
-  synthesize(text: string, opts?: { voice?: string; format?: AudioFormat }): Promise<TTSResult>;
+  synthesize(text: string, opts?: { voice?: string; format?: AudioFormat; speed?: number }): Promise<TTSResult>;
 }
 
 export type TTSProviderName = "openai" | "elevenlabs" | "edge" | "piper";

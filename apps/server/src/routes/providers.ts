@@ -4,6 +4,7 @@ import {
   EMBEDDING_PROVIDERS,
   INTEGRATION_PROVIDERS,
 } from "../lib/provider-registry.ts";
+import { fetchModelsForProvider, clearModelCache } from "../lib/model-fetcher.ts";
 
 const providers = new Hono();
 
@@ -18,6 +19,7 @@ providers.get("/", (c) => {
 });
 
 // ── Auto-discovery: probe default local ports for running services ──
+// IMPORTANT: must be registered before /:id/models to avoid route shadowing
 
 const LOCAL_PROBES: { id: string; url: string }[] = [
   { id: "ollama", url: "http://localhost:11434/api/tags" },
@@ -41,6 +43,27 @@ providers.get("/discovery", async (c) => {
     .map((r) => r.value.id);
 
   return c.json({ data: { discovered } });
+});
+
+// ── Dynamic model list per provider ─────────────────────────────
+
+providers.get("/:id/models", async (c) => {
+  const providerId = c.req.param("id");
+  const providerDef = LLM_PROVIDERS.find((p) => p.id === providerId);
+  if (!providerDef) {
+    return c.json({ error: `Unknown provider: ${providerId}` }, 404);
+  }
+
+  const result = await fetchModelsForProvider(providerId);
+  return c.json({ data: result });
+});
+
+// ── Cache invalidation (called when credentials change) ─────────
+
+providers.delete("/:id/models/cache", (c) => {
+  const providerId = c.req.param("id");
+  clearModelCache(providerId);
+  return c.json({ ok: true });
 });
 
 export default providers;

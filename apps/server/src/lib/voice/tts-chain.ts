@@ -24,7 +24,8 @@ function getOrCreateProvider(name: TTSProviderName): TTSProvider {
 export async function synthesizeWithFallback(
   text: string,
   channelType: string,
-  voice?: string
+  voice?: string,
+  speed?: number
 ): Promise<TTSResult> {
   const order = resolveTtsProviderOrder();
   const format = resolveOutputFormat(channelType);
@@ -36,7 +37,7 @@ export async function synthesizeWithFallback(
 
     try {
       const provider = getOrCreateProvider(name);
-      const result = await provider.synthesize(text, { voice, format });
+      const result = await provider.synthesize(text, { voice, format, speed });
       console.log(`[tts] synthesized ${text.length} chars via ${name} (${result.audio.length} bytes)`);
       return result;
     } catch (err) {

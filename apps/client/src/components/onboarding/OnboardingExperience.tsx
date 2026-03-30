@@ -9,6 +9,7 @@ import { WelcomePhase } from "./phases/WelcomePhase";
 import { BrainPhase } from "./phases/BrainPhase";
 import { PersonalityPhase } from "./phases/PersonalityPhase";
 import { PowerUpPhase } from "./phases/PowerUpPhase";
+import { VoicePhase } from "./phases/VoicePhase";
 import { LaunchPhase } from "./phases/LaunchPhase";
 import { PERSONALITY_COLORS } from "./onboarding-variants";
 
@@ -20,7 +21,7 @@ export function OnboardingExperience({ onComplete }: Props) {
   const { updatePersona } = usePersonaStore();
 
   // Phase state
-  const [phase, setPhase] = useState(0); // 0 = intro, 1-5 = phases
+  const [phase, setPhase] = useState(0); // 0 = intro, 1-6 = phases
   const [direction, setDirection] = useState(1);
   const [launching, setLaunching] = useState(false);
   const launchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -132,7 +133,7 @@ export function OnboardingExperience({ onComplete }: Props) {
         className="relative z-10 flex items-center justify-center"
         style={{ marginTop: "16vh" }}
         animate={{
-          marginTop: phase === 0 ? "35vh" : phase === 5 ? "12vh" : "16vh",
+          marginTop: phase === 0 ? "35vh" : phase === 6 ? "12vh" : "16vh",
         }}
         transition={{ type: "spring", stiffness: 80, damping: 20 }}
       >
@@ -211,11 +212,18 @@ export function OnboardingExperience({ onComplete }: Props) {
             />
           )}
           {phase === 5 && (
+            <VoicePhase
+              direction={direction}
+              onBack={() => goTo(4)}
+              onNext={() => goTo(6)}
+            />
+          )}
+          {phase === 6 && (
             <LaunchPhase
               direction={direction}
               aiName={aiName}
               userName={name}
-              onBack={() => goTo(4)}
+              onBack={() => goTo(5)}
               onLaunch={handleLaunch}
             />
           )}

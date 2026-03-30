@@ -52,6 +52,7 @@ import type {
   UpdateChannelPolicyRequest,
   SessionLifecycleConfig,
   UpdateSessionLifecycleRequest,
+  ModelDef,
   RoleFallbackEntry,
   RegistryEntry,
   SkillConfigParam,
@@ -142,6 +143,8 @@ export const api = {
   providers: {
     list: () => request<ProvidersResponse>("/providers"),
     discovery: () => request<{ discovered: string[] }>("/providers/discovery"),
+    models: (providerId: string) =>
+      request<{ models: ModelDef[]; source: "api" | "static" }>(`/providers/${providerId}/models`),
   },
 
   skills: {

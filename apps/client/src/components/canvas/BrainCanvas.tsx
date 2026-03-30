@@ -13,6 +13,7 @@ import { EMOTION_COLORS } from "@chvor/shared";
 import { useScheduleStore } from "../../stores/schedule-store";
 import { useWebhookStore } from "../../stores/webhook-store";
 import { useCredentialStore } from "../../stores/credential-store";
+import { useModelsStore } from "../../stores/models-store";
 import { useToolStore } from "../../stores/tool-store";
 import { api } from "../../lib/api";
 import type { AnyProviderDef } from "@chvor/shared";
@@ -205,11 +206,24 @@ export function BrainCanvas() {
     return true;
   }, []);
 
-  // Sync brain node with active LLM credential
+  // Sync brain node with configured model (from models-store), falling back to credential auto-detect
+  const modelRoles = useModelsStore((s) => s.roles);
+  const llmProviderDefs = useCredentialStore((s) => s.llmProviders);
+
   useEffect(() => {
     if (nodes.length === 0) return;
     const { updateBrainProvider } = useCanvasStore.getState();
 
+    // If user has explicitly configured a primary model, show that
+    if (modelRoles.primary) {
+      const provDef = llmProviderDefs.find((p) => p.id === modelRoles.primary!.providerId);
+      const modelDef = provDef?.models.find((m) => m.id === modelRoles.primary!.model);
+      const displayModel = modelDef?.name ?? modelRoles.primary.model;
+      updateBrainProvider(modelRoles.primary.providerId, displayModel);
+      return;
+    }
+
+    // Fallback: auto-detect from first provider with valid credentials
     const llmProviders = providers.filter(isLLMProvider);
     const activeProvider = llmProviders.find((p) =>
       credentials.some(
@@ -230,7 +244,7 @@ export function BrainCanvas() {
     } else {
       updateBrainProvider("", "No provider");
     }
-  }, [credentials, providers, nodes.length]);
+  }, [credentials, providers, nodes.length, modelRoles.primary, llmProviderDefs, LLM_TYPES]);
 
   // Sync brain label with persona aiName
   useEffect(() => {

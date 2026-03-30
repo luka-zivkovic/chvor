@@ -21,6 +21,41 @@ function formatModelLabel(m: ModelDef): string {
   return parts.join(" ");
 }
 
+/** Shared cache for dynamic models — survives across component instances. */
+const _dynamicModelCache = new Map<string, ModelDef[]>();
+
+/** Fetch dynamic models for a provider, caching results across re-renders. */
+function useDynamicModels() {
+  const cacheRef = useRef(_dynamicModelCache);
+  const [loading, setLoading] = useState<string | null>(null);
+  const [, forceUpdate] = useState(0);
+
+  const getModels = (provider: LLMProviderDef | null | undefined): ModelDef[] => {
+    if (!provider) return [];
+    return cacheRef.current.get(provider.id) ?? provider.models;
+  };
+
+  const fetchModels = (provider: LLMProviderDef | null | undefined) => {
+    if (!provider) return;
+    if (cacheRef.current.has(provider.id)) return;
+
+    setLoading(provider.id);
+    api.providers.models(provider.id)
+      .then((result) => {
+        if (result.models.length > 0) {
+          cacheRef.current.set(provider.id, result.models);
+          forceUpdate((n) => n + 1);
+        }
+      })
+      .catch(() => {
+        // Silently fall back to static models
+      })
+      .finally(() => setLoading(null));
+  };
+
+  return { getModels, fetchModels, loading };
+}
+
 function FallbackList({ role }: { role: ModelRole }) {
   const { fallbacks, setFallbacks } = useModelsStore();
   const { credentials, llmProviders } = useCredentialStore();
@@ -28,6 +63,7 @@ function FallbackList({ role }: { role: ModelRole }) {
   const [addProvider, setAddProvider] = useState<LLMProviderDef | null>(null);
   const [addModel, setAddModel] = useState("");
   const [addAlias, setAddAlias] = useState("");
+  const { getModels, fetchModels } = useDynamicModels();
 
   const entries = fallbacks[role] ?? [];
 
@@ -133,7 +169,9 @@ function FallbackList({ role }: { role: ModelRole }) {
                     key={p.id}
                     onClick={() => {
                       setAddProvider(p);
-                      setAddModel(p.freeTextModel ? "" : (p.models[0]?.id ?? ""));
+                      fetchModels(p);
+                      const models = getModels(p);
+                      setAddModel(models[0]?.id ?? "");
                     }}
                     className={cn(
                       "flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium transition-all",
@@ -149,27 +187,21 @@ function FallbackList({ role }: { role: ModelRole }) {
               </div>
               {addProvider && (
                 <>
-                  {addProvider.freeTextModel ? (
-                    <input
-                      type="text"
-                      value={addModel}
-                      onChange={(e) => setAddModel(e.target.value)}
-                      placeholder="Model name"
-                      className="w-full rounded border border-border/50 bg-transparent px-2 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/50"
-                    />
-                  ) : (
-                    <select
-                      value={addModel}
-                      onChange={(e) => setAddModel(e.target.value)}
-                      className="w-full rounded border border-border/50 bg-transparent px-2 py-1 text-[10px] text-foreground"
-                    >
-                      {addProvider.models.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {formatModelLabel(m)}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  <input
+                    type="text"
+                    list={`fallback-models-${role}-${addProvider.id}`}
+                    value={addModel}
+                    onChange={(e) => setAddModel(e.target.value)}
+                    placeholder={getModels(addProvider).length > 0 ? "Select or type a model…" : "Type a model name…"}
+                    className="w-full rounded border border-border/50 bg-transparent px-2 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/50"
+                  />
+                  <datalist id={`fallback-models-${role}-${addProvider.id}`}>
+                    {getModels(addProvider).map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {formatModelLabel(m)}
+                      </option>
+                    ))}
+                  </datalist>
                   <input
                     type="text"
                     value={addAlias}
@@ -235,17 +267,26 @@ function RoleSelector({
     availableProviders.find((p) => p.id === effectiveConfig?.providerId) ??
     availableProviders[0];
 
+  const { getModels, fetchModels, loading: loadingModels } = useDynamicModels();
+
+  // Fetch dynamic models when active provider changes
+  useEffect(() => {
+    fetchModels(activeProvider);
+  }, [activeProvider?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const displayModels = getModels(activeProvider);
+
   const [freeTextModel, setFreeTextModel] = useState(effectiveConfig?.model ?? "");
 
   // Sync free-text model state when effective config or active provider changes
   useEffect(() => {
-    if (activeProvider?.freeTextModel) {
-      setFreeTextModel(effectiveConfig?.model ?? "");
-    }
-  }, [activeProvider?.id, effectiveConfig?.model, activeProvider?.freeTextModel]);
+    setFreeTextModel(effectiveConfig?.model ?? "");
+  }, [activeProvider?.id, effectiveConfig?.model]);
 
   const handleProviderSwitch = async (provider: LLMProviderDef) => {
-    const firstModel = provider.freeTextModel ? "" : (provider.models[0]?.id ?? "");
+    fetchModels(provider);
+    const models = getModels(provider);
+    const firstModel = models[0]?.id ?? "";
     await setRole(role, provider.id, firstModel);
   };
 
@@ -311,51 +352,53 @@ function RoleSelector({
           </div>
 
           {activeProvider && (
-            activeProvider.freeTextModel ? (
-              <input
-                type="text"
-                value={freeTextModel}
-                onChange={(e) => setFreeTextModel(e.target.value)}
-                onBlur={() => {
-                  if (freeTextModel.trim()) {
-                    handleModelChange(freeTextModel.trim());
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && freeTextModel.trim()) {
-                    handleModelChange(freeTextModel.trim());
-                  }
-                }}
-                placeholder="e.g. meta-llama/llama-3.1-405b-instruct"
-                className="w-full rounded border border-border/50 bg-transparent px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50"
-              />
-            ) : (
-              <>
-                <select
-                  value={effectiveConfig?.model ?? ""}
-                  onChange={(e) => handleModelChange(e.target.value)}
-                  className="w-full rounded border border-border/50 bg-transparent px-2 py-1.5 text-xs text-foreground"
-                >
-                  {activeProvider.models.map((m) => (
+            <>
+              <div className="relative">
+                <input
+                  type="text"
+                  list={`models-${role}-${activeProvider.id}`}
+                  value={freeTextModel}
+                  onChange={(e) => setFreeTextModel(e.target.value)}
+                  onBlur={() => {
+                    if (freeTextModel.trim()) {
+                      handleModelChange(freeTextModel.trim());
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && freeTextModel.trim()) {
+                      handleModelChange(freeTextModel.trim());
+                      (e.target as HTMLInputElement).blur();
+                    }
+                  }}
+                  placeholder={displayModels.length > 0 ? "Select or type a model name…" : "Type a model name…"}
+                  className="w-full rounded border border-border/50 bg-transparent px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50"
+                />
+                <datalist id={`models-${role}-${activeProvider.id}`}>
+                  {displayModels.map((m) => (
                     <option key={m.id} value={m.id}>
                       {formatModelLabel(m)}
                     </option>
                   ))}
-                </select>
-                {(() => {
-                  const selected = activeProvider.models.find((m) => m.id === effectiveConfig?.model);
-                  return selected?.capabilities?.length ? (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {selected.capabilities.map((cap) => (
-                        <span key={cap} className="rounded bg-muted/40 px-1 py-0.5 text-[9px] text-muted-foreground">
-                          {cap}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null;
-                })()}
-              </>
-            )
+                </datalist>
+                {loadingModels === activeProvider?.id && (
+                  <span className="absolute right-7 top-1/2 -translate-y-1/2 text-[9px] text-muted-foreground animate-pulse">
+                    loading…
+                  </span>
+                )}
+              </div>
+              {(() => {
+                const selected = displayModels.find((m) => m.id === effectiveConfig?.model);
+                return selected?.capabilities?.length ? (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {selected.capabilities.map((cap) => (
+                      <span key={cap} className="rounded bg-muted/40 px-1 py-0.5 text-[9px] text-muted-foreground">
+                        {cap}
+                      </span>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
+            </>
           )}
 
           <FallbackList role={role} />

@@ -17,6 +17,13 @@ export interface VoiceModelFile {
   sizeEstimate: number; // bytes
 }
 
+export interface VoiceModelMeta {
+  language?: string;
+  locale?: string;
+  gender?: "male" | "female";
+  quality?: "low" | "medium" | "high";
+}
+
 export interface VoiceModelDef {
   id: string;
   name: string;
@@ -24,6 +31,7 @@ export interface VoiceModelDef {
   description: string;
   sizeEstimate: string; // human-readable, e.g. "~40MB"
   files: VoiceModelFile[];
+  meta?: VoiceModelMeta;
 }
 
 export type ModelStatus = "not_downloaded" | "downloading" | "ready" | "error";
@@ -35,6 +43,24 @@ export interface ModelProgress {
 }
 
 const HF_BASE = "https://huggingface.co";
+const PIPER_BASE = `${HF_BASE}/rhasspy/piper-voices/resolve/main`;
+
+/** Helper to create a Piper voice model definition. */
+function piperVoice(
+  id: string, name: string, description: string,
+  lang: string, locale: string, voiceName: string, quality: "low" | "medium" | "high",
+  gender: "male" | "female", sizeEstimate: string, onnxSize: number,
+): VoiceModelDef {
+  const filename = `${locale}-${voiceName}-${quality}`;
+  return {
+    id, name, type: "tts", description, sizeEstimate,
+    meta: { language: lang, locale, gender, quality },
+    files: [
+      { url: `${PIPER_BASE}/${lang.substring(0, 2)}/${locale}/${voiceName}/${quality}/${filename}.onnx`, filename: `${filename}.onnx`, sizeEstimate: onnxSize },
+      { url: `${PIPER_BASE}/${lang.substring(0, 2)}/${locale}/${voiceName}/${quality}/${filename}.onnx.json`, filename: `${filename}.onnx.json`, sizeEstimate: 50_000 },
+    ],
+  };
+}
 
 export const VOICE_MODELS: VoiceModelDef[] = [
   {
@@ -43,29 +69,26 @@ export const VOICE_MODELS: VoiceModelDef[] = [
     type: "stt",
     description: "Fast local speech-to-text. English only. ~40MB download. Runs on CPU.",
     sizeEstimate: "~40MB",
-    // Whisper model is auto-managed by @huggingface/transformers pipeline.
-    // We track "ready" by checking if the local provider initialized successfully.
-    files: [], // empty — HF Transformers handles download internally
+    files: [],
   },
-  {
-    id: "piper-lessac-medium",
-    name: "Piper Lessac Medium",
-    type: "tts",
-    description: "Natural English voice. Runs locally. Fast, private. ~30MB download.",
-    sizeEstimate: "~30MB",
-    files: [
-      {
-        url: `${HF_BASE}/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx`,
-        filename: "en_US-lessac-medium.onnx",
-        sizeEstimate: 29_000_000,
-      },
-      {
-        url: `${HF_BASE}/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json`,
-        filename: "en_US-lessac-medium.onnx.json",
-        sizeEstimate: 50_000,
-      },
-    ],
-  },
+
+  // ── English voices ────────────────────────────────────────────
+  piperVoice("piper-lessac-medium", "Lessac", "Natural American male voice. Clear and warm.", "en", "en_US", "lessac", "medium", "male", "~30MB", 29_000_000),
+  piperVoice("piper-lessac-high", "Lessac (High Quality)", "Premium American male voice. Best quality, slower.", "en", "en_US", "lessac", "high", "male", "~60MB", 58_000_000),
+  piperVoice("piper-amy-medium", "Amy", "British female voice. Warm and professional.", "en", "en_GB", "amy", "medium", "female", "~30MB", 29_000_000),
+  piperVoice("piper-ryan-medium", "Ryan", "American male voice. Casual and friendly.", "en", "en_US", "ryan", "medium", "male", "~30MB", 29_000_000),
+  piperVoice("piper-alba-medium", "Alba", "British female voice. Calm and clear.", "en", "en_GB", "alba", "medium", "female", "~30MB", 29_000_000),
+  piperVoice("piper-danny-low", "Danny", "British male voice. Lightweight and fast.", "en", "en_GB", "danny", "low", "male", "~15MB", 15_000_000),
+
+  // ── European voices ───────────────────────────────────────────
+  piperVoice("piper-thorsten-medium", "Thorsten", "German male voice. Natural speech.", "de", "de_DE", "thorsten", "medium", "male", "~30MB", 29_000_000),
+  piperVoice("piper-siwis-medium", "Siwis", "French female voice. Expressive and clear.", "fr", "fr_FR", "siwis", "medium", "female", "~30MB", 29_000_000),
+  piperVoice("piper-riccardo-medium", "Riccardo", "Italian male voice. Warm and natural.", "it", "it_IT", "riccardo", "medium", "male", "~30MB", 29_000_000),
+  piperVoice("piper-mls-medium", "MLS", "Spanish male voice. Clear pronunciation.", "es", "es_ES", "mls_9972", "medium", "male", "~30MB", 29_000_000),
+
+  // ── Other languages ───────────────────────────────────────────
+  piperVoice("piper-tugao-medium", "Tugão", "Portuguese (Brazil) male voice.", "pt", "pt_BR", "faber", "medium", "male", "~30MB", 29_000_000),
+  piperVoice("piper-karlsson-medium", "Karlsson", "Swedish male voice. Clear and natural.", "sv", "sv_SE", "nst", "medium", "male", "~30MB", 29_000_000),
 ];
 
 // ── State ─────────────────────────────────────────────────────────
