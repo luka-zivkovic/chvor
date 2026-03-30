@@ -336,7 +336,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
 
     channelCreds.forEach((cred) => {
-      const nodeId = `integration-${cred.id}`;
+      const nodeId = `channel-${cred.id}`;
       hubNodes.push({
         id: nodeId,
         type: "integration" as const,
@@ -381,7 +381,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
 
     apiCreds.forEach((cred) => {
-      const nodeId = `integration-${cred.id}`;
+      const nodeId = `api-${cred.id}`;
       hubNodes.push({
         id: nodeId,
         type: "integration" as const,

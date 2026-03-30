@@ -176,11 +176,17 @@ export interface EmotionSnapshot {
 
 export type { MoodState, EmbodimentState, RelationshipState, RegulationStrategy } from "./advanced-emotion.js";
 
+/** Lightweight residue summary sent to the client for visualization */
+export interface ResidueSummary {
+  id: string;
+  intensity: number;
+}
+
 export interface AdvancedEmotionState {
   mood: import("./advanced-emotion.js").MoodState;
   embodiment: import("./advanced-emotion.js").EmbodimentState;
   relationship: import("./advanced-emotion.js").RelationshipState;
-  unresolvedResidues: number;
+  unresolvedResidues: ResidueSummary[];
   regulationActive: boolean;
   regulationStrategy?: import("./advanced-emotion.js").RegulationStrategy;
 }

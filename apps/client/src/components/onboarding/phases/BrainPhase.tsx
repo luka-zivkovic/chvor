@@ -183,7 +183,7 @@ export function BrainPhase({ direction, onBack, onNext }: Props) {
                               : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
                         }`}
                       >
-                        <ProviderIcon icon={ep.icon} size={14} />
+                        <ProviderIcon icon={ep.icon ?? ep.id} size={14} />
                         {ep.name}
                         {needsKey && <span className="text-[8px] text-muted-foreground/50">needs key</span>}
                       </button>

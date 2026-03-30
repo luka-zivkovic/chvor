@@ -180,7 +180,7 @@ export function computeOrbitalPositions(
   const channelPositions = computeFanPositions(
     channelCreds,
     "integrations-hub",
-    (cred) => `integration-${cred.id}`,
+    (cred) => `channel-${cred.id}`,
     OFFSETS.integration
   );
 
@@ -188,7 +188,7 @@ export function computeOrbitalPositions(
   const apiPositions = computeFanPositions(
     apiCreds,
     "connections-hub",
-    (cred) => `integration-${cred.id}`,
+    (cred) => `api-${cred.id}`,
     OFFSETS.integration
   );
 

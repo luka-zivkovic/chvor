@@ -152,7 +152,7 @@ export class Gateway extends EventEmitter {
         channelCredId = cred.id;
         this.emitEvent({
           type: "execution.event",
-          data: { type: "skill.invoked", data: { nodeId: `integration-${cred.id}`, skillId: cred.id } },
+          data: { type: "skill.invoked", data: { nodeId: `channel-${cred.id}`, skillId: cred.id } },
           sourceChannel,
         });
       }
@@ -361,7 +361,7 @@ export class Gateway extends EventEmitter {
     if (channelCredId) {
       this.emitEvent({
         type: "execution.event",
-        data: { type: "skill.completed", data: { nodeId: `integration-${channelCredId}`, output: "" } },
+        data: { type: "skill.completed", data: { nodeId: `channel-${channelCredId}`, output: "" } },
         sourceChannel,
       });
     }

@@ -106,23 +106,22 @@ export function useExecution() {
 
         case "skill.invoked": {
           const rawNodeId = event.data.nodeId;
-          const isIntegration = rawNodeId.startsWith("integration-");
-          const isApiConnection = isIntegration && !!event.data.isApiConnection;
-          const nodeId = isIntegration ? rawNodeId
+          const isChannel = rawNodeId.startsWith("channel-");
+          const isApi = rawNodeId.startsWith("api-");
+          const nodeId = isChannel || isApi ? rawNodeId
             : rawNodeId.startsWith("skill-") ? rawNodeId
             : `skill-${rawNodeId}`;
           markRunning(nodeId);
-          if (isIntegration) {
-            const credId = rawNodeId.replace("integration-", "");
-            if (isApiConnection) {
-              markRunning("connections-hub");
-              setEdgeActive("edge-brain-connections-hub", true);
-              setEdgeActive(`edge-connections-hub-${credId}`, true);
-            } else {
-              markRunning("integrations-hub");
-              setEdgeActive("edge-brain-integrations-hub", true);
-              setEdgeActive(`edge-integrations-hub-${credId}`, true);
-            }
+          if (isApi) {
+            const credId = rawNodeId.replace("api-", "");
+            markRunning("connections-hub");
+            setEdgeActive("edge-brain-connections-hub", true);
+            setEdgeActive(`edge-connections-hub-${credId}`, true);
+          } else if (isChannel) {
+            const credId = rawNodeId.replace("channel-", "");
+            markRunning("integrations-hub");
+            setEdgeActive("edge-brain-integrations-hub", true);
+            setEdgeActive(`edge-integrations-hub-${credId}`, true);
           } else {
             markRunning("skills-hub");
             setEdgeActive("edge-brain-skills-hub", true);
@@ -134,23 +133,22 @@ export function useExecution() {
 
         case "skill.completed": {
           const rawNodeId = event.data.nodeId;
-          const isIntegration = rawNodeId.startsWith("integration-");
-          const nodeId = isIntegration ? rawNodeId
+          const isChannel = rawNodeId.startsWith("channel-");
+          const isApi = rawNodeId.startsWith("api-");
+          const nodeId = isChannel || isApi ? rawNodeId
             : rawNodeId.startsWith("skill-") ? rawNodeId
             : `skill-${rawNodeId}`;
           markNodeFinal(nodeId, "completed");
-          if (isIntegration) {
-            const credId = rawNodeId.replace("integration-", "");
-            const isUnderConnectionsHub = !!useCanvasStore.getState().edges.find((e) => e.id === `edge-connections-hub-${credId}`);
-            if (isUnderConnectionsHub) {
-              markNodeFinal("connections-hub", "completed");
-              deactivateEdge("edge-brain-connections-hub");
-              deactivateEdge(`edge-connections-hub-${credId}`);
-            } else {
-              markNodeFinal("integrations-hub", "completed");
-              deactivateEdge("edge-brain-integrations-hub");
-              deactivateEdge(`edge-integrations-hub-${credId}`);
-            }
+          if (isApi) {
+            const credId = rawNodeId.replace("api-", "");
+            markNodeFinal("connections-hub", "completed");
+            deactivateEdge("edge-brain-connections-hub");
+            deactivateEdge(`edge-connections-hub-${credId}`);
+          } else if (isChannel) {
+            const credId = rawNodeId.replace("channel-", "");
+            markNodeFinal("integrations-hub", "completed");
+            deactivateEdge("edge-brain-integrations-hub");
+            deactivateEdge(`edge-integrations-hub-${credId}`);
           } else {
             markNodeFinal("skills-hub", "completed");
             deactivateEdge("edge-brain-skills-hub");
@@ -162,21 +160,20 @@ export function useExecution() {
 
         case "skill.failed": {
           const rawNodeId = event.data.nodeId;
-          const isIntegration = rawNodeId.startsWith("integration-");
-          const nodeId = isIntegration ? rawNodeId
+          const isChannel = rawNodeId.startsWith("channel-");
+          const isApi = rawNodeId.startsWith("api-");
+          const nodeId = isChannel || isApi ? rawNodeId
             : rawNodeId.startsWith("skill-") ? rawNodeId
             : `skill-${rawNodeId}`;
           markNodeFinal(nodeId, "failed");
-          if (isIntegration) {
-            const credId = rawNodeId.replace("integration-", "");
-            const isUnderConnectionsHub = !!useCanvasStore.getState().edges.find((e) => e.id === `edge-connections-hub-${credId}`);
-            if (isUnderConnectionsHub) {
-              deactivateEdge("edge-brain-connections-hub");
-              deactivateEdge(`edge-connections-hub-${credId}`);
-            } else {
-              deactivateEdge("edge-brain-integrations-hub");
-              deactivateEdge(`edge-integrations-hub-${credId}`);
-            }
+          if (isApi) {
+            const credId = rawNodeId.replace("api-", "");
+            deactivateEdge("edge-brain-connections-hub");
+            deactivateEdge(`edge-connections-hub-${credId}`);
+          } else if (isChannel) {
+            const credId = rawNodeId.replace("channel-", "");
+            deactivateEdge("edge-brain-integrations-hub");
+            deactivateEdge(`edge-integrations-hub-${credId}`);
           } else {
             deactivateEdge("edge-brain-skills-hub");
             const skillId = nodeId.replace("skill-", "");
