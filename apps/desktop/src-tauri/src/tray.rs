@@ -32,9 +32,13 @@ pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let icon = app.default_window_icon()
-        .cloned()
-        .ok_or("no default icon available")?;
+    let icon = match app.default_window_icon().cloned() {
+        Some(icon) => icon,
+        None => {
+            eprintln!("[tray] No default icon available, skipping tray setup");
+            return Ok(());
+        }
+    };
 
     let tray = tauri::tray::TrayIconBuilder::with_id("main")
         .icon(icon)

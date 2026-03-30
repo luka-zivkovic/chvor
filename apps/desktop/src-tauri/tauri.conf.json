@@ -49,6 +49,7 @@
   },
   "plugins": {
     "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVGNzhBQUM4OUI0RjE5Q0UKUldUT0dVK2J5S3A0WCtOZUIrdkpvcWZ5RXRRUk13WW85ZlpNTjJsT0tRYVBqZXFBbDlSZHdkaVkK",
       "endpoints": [
         "https://github.com/luka-zivkovic/chvor/releases/latest/download/latest.json"
       ]
