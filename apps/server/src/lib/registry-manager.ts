@@ -168,6 +168,9 @@ function validateManifest(entryId: string, raw: unknown): TemplateManifest {
       if (typeof so.skillId !== "string" || !so.skillId.trim()) {
         throw new Error(`Invalid template manifest for "${entryId}": skillOverrides[${i}].skillId must be a non-empty string`);
       }
+      if (!SAFE_ENTRY_ID_RE.test(so.skillId)) {
+        throw new Error(`Invalid template manifest for "${entryId}": skillOverrides[${i}].skillId "${so.skillId}" contains invalid characters`);
+      }
       if (typeof so.instructions !== "string") {
         throw new Error(`Invalid template manifest for "${entryId}": skillOverrides[${i}].instructions must be a string`);
       }

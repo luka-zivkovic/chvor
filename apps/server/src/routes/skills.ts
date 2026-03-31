@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadSkills, getSkill, reloadAll } from "../lib/capability-loader.ts";
 import { parseCapabilityMd } from "../lib/capability-parser.ts";
+import { assertSafeEntryId } from "../lib/registry-manager.ts";
 import { isCapabilityEnabled, setCapabilityEnabled, getConfig, setConfig, getInstructionOverride, setInstructionOverride, clearInstructionOverride } from "../db/config-store.ts";
 
 const skills = new Hono();
@@ -58,6 +59,7 @@ skills.patch("/:id/toggle", async (c) => {
 // GET /api/skills/:id/instructions — get original + override
 skills.get("/:id/instructions", (c) => {
   const id = c.req.param("id");
+  try { assertSafeEntryId(id); } catch { return c.json({ error: "invalid id" }, 400); }
   const skill = getSkill(id);
   if (!skill) return c.json({ error: "not found" }, 404);
   const override = getInstructionOverride("skill", id);
@@ -67,6 +69,7 @@ skills.get("/:id/instructions", (c) => {
 // PATCH /api/skills/:id/instructions — save instruction override
 skills.patch("/:id/instructions", async (c) => {
   const id = c.req.param("id");
+  try { assertSafeEntryId(id); } catch { return c.json({ error: "invalid id" }, 400); }
   const skill = getSkill(id);
   if (!skill) return c.json({ error: "not found" }, 404);
   const body = await c.req.json() as { instructions?: string };
@@ -79,6 +82,7 @@ skills.patch("/:id/instructions", async (c) => {
 // DELETE /api/skills/:id/instructions — clear instruction override
 skills.delete("/:id/instructions", (c) => {
   const id = c.req.param("id");
+  try { assertSafeEntryId(id); } catch { return c.json({ error: "invalid id" }, 400); }
   const skill = getSkill(id);
   if (!skill) return c.json({ error: "not found" }, 404);
   clearInstructionOverride("skill", id);

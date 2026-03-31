@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadTools, getTool, reloadAll } from "../lib/capability-loader.ts";
 import { parseCapabilityMd } from "../lib/capability-parser.ts";
+import { assertSafeEntryId } from "../lib/registry-manager.ts";
 import { isCapabilityEnabled, setCapabilityEnabled, getInstructionOverride, setInstructionOverride, clearInstructionOverride } from "../db/config-store.ts";
 import { invalidateToolCache } from "../lib/tool-builder.ts";
 
@@ -61,6 +62,7 @@ tools.patch("/:id/toggle", async (c) => {
 // GET /api/tools/:id/instructions — get original + override
 tools.get("/:id/instructions", (c) => {
   const id = c.req.param("id");
+  try { assertSafeEntryId(id); } catch { return c.json({ error: "invalid id" }, 400); }
   const tool = getTool(id);
   if (!tool) return c.json({ error: "not found" }, 404);
   const override = getInstructionOverride("tool", id);
@@ -70,6 +72,7 @@ tools.get("/:id/instructions", (c) => {
 // PATCH /api/tools/:id/instructions — save instruction override
 tools.patch("/:id/instructions", async (c) => {
   const id = c.req.param("id");
+  try { assertSafeEntryId(id); } catch { return c.json({ error: "invalid id" }, 400); }
   const tool = getTool(id);
   if (!tool) return c.json({ error: "not found" }, 404);
   const body = await c.req.json() as { instructions?: string };
@@ -82,6 +85,7 @@ tools.patch("/:id/instructions", async (c) => {
 // DELETE /api/tools/:id/instructions — clear instruction override
 tools.delete("/:id/instructions", (c) => {
   const id = c.req.param("id");
+  try { assertSafeEntryId(id); } catch { return c.json({ error: "invalid id" }, 400); }
   const tool = getTool(id);
   if (!tool) return c.json({ error: "not found" }, 404);
   clearInstructionOverride("tool", id);
