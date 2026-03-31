@@ -32,10 +32,13 @@ import type { ScoreBreakdown } from "./memory-projections.ts";
 import { spreadActivation, strengthenCoAccessedEdges } from "./memory-graph.ts";
 import { computeTopicHash, updateAccessLogTopics, predictNextMemories } from "./memory-preloader.ts";
 import { getCognitiveMemoryConfig } from "../db/config-store.ts";
-import { getPersona, isCapabilityEnabled, getExtendedThinking, getBrainConfig, getSelfHealingEnabled, getPcControlEnabled, getInstructionOverride } from "../db/config-store.ts";
+import { getPersona, isCapabilityEnabled, getExtendedThinking, getBrainConfig, getSelfHealingEnabled, getPcControlEnabled, getAllInstructionOverrides } from "../db/config-store.ts";
 import { storeMediaFromBase64 } from "./media-store.ts";
 
 export type EventEmitter = (event: ExecutionEvent) => void;
+
+/** PC control tools whose media (screenshots) should not be shown in the chat UI */
+const PC_INTERNAL_MEDIA_TOOLS = new Set(["native__pc_do", "native__pc_observe"]);
 
 /** @deprecated Use resolveRoleConfig from llm-router instead */
 export function resolveConfig(): ResolvedConfig {
@@ -193,10 +196,13 @@ function buildSystemPrompt(
   stableSections.push(`## Tool Usage\n\n${toolUsageLines.join("\n")}`);
 
   // Group skills by type for clearer system prompt sections
-  // Resolve instruction overrides: user-edited instructions take precedence over originals
-  const resolveInstructions = (kind: "skill" | "tool", id: string, original: string): string => {
-    try { return getInstructionOverride(kind, id) ?? original; } catch { return original; }
-  };
+  // Precompute all instruction overrides in a single DB query to avoid N+1
+  const overrideMap = new Map<string, string>();
+  try {
+    for (const o of getAllInstructionOverrides()) overrideMap.set(`${o.kind}:${o.id}`, o.instructions);
+  } catch { /* fallback: no overrides */ }
+  const resolveInstructions = (kind: "skill" | "tool", id: string, original: string): string =>
+    overrideMap.get(`${kind}:${id}`) ?? original;
 
   const promptSkills = skills.filter((s) => s.skillType === "prompt" && resolveInstructions("skill", s.id, s.instructions).trim());
   const workflowSkills = skills.filter((s) => s.skillType === "workflow" && resolveInstructions("skill", s.id, s.instructions).trim());
@@ -1070,7 +1076,6 @@ export async function executeConversation(
             channelType: options?.channelType,
             channelId: options?.channelId,
           });
-          const PC_INTERNAL_MEDIA_TOOLS = new Set(["native__pc_do", "native__pc_observe"]);
           const nativeMedia = extractMedia(nativeResult, PC_INTERNAL_MEDIA_TOOLS.has(tc.toolName) ? { internal: true } : undefined);
           if (matchedIntegration) {
             emit({ type: "skill.completed", data: { nodeId: `api-${matchedIntegration.id}`, output: "" } });

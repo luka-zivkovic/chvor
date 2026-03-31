@@ -33,17 +33,26 @@ templates.get("/export", (c) => {
       .filter((o) => o.kind === "skill")
       .map((o) => ({ skillId: o.id, instructions: o.instructions }));
 
-    // Credential types (no secrets — only type and field schema)
-    const credentials: TemplateCredentialDef[] = listCredentials().map((cred) => ({
-      type: cred.type,
-      name: cred.name,
-      description: `${cred.type} integration`,
-      fields: Object.keys(cred.redactedFields).map((fieldName) => ({
-        name: fieldName,
-        label: fieldName.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase()),
-        secret: true,
-      })),
-    }));
+    // Credential types — only include types required by enabled skills/tools (no secrets)
+    const requiredCredTypes = new Set<string>();
+    for (const s of loadSkills().filter((s) => isCapabilityEnabled("skill", s.id))) {
+      for (const c of s.metadata.requires?.credentials ?? []) requiredCredTypes.add(c);
+    }
+    for (const t of loadTools().filter((t) => isCapabilityEnabled("tool", t.id))) {
+      for (const c of t.metadata.requires?.credentials ?? []) requiredCredTypes.add(c);
+    }
+    const credentials: TemplateCredentialDef[] = listCredentials()
+      .filter((cred) => requiredCredTypes.has(cred.type))
+      .map((cred) => ({
+        type: cred.type,
+        name: cred.name,
+        description: `${cred.type} integration`,
+        fields: Object.keys(cred.redactedFields).map((fieldName) => ({
+          name: fieldName,
+          label: fieldName.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase()),
+          secret: true,
+        })),
+      }));
 
     // Schedules
     const allSchedules = listSchedules();

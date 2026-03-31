@@ -3744,9 +3744,16 @@ const pcShellToolDef = tool({
 const pcObserveTracker = new Map<string, { count: number; lastResetAt: number }>();
 const PC_OBSERVE_LOOP_THRESHOLD = 3;
 const PC_OBSERVE_TRACKER_TTL_MS = 5 * 60 * 1000; // 5 min stale window
+const PC_OBSERVE_MAX_ENTRIES = 200; // prevent unbounded growth
 
 function getPcObserveTracker(sessionId: string) {
   const now = Date.now();
+  // Periodic cleanup: evict stale entries when map grows large
+  if (pcObserveTracker.size > PC_OBSERVE_MAX_ENTRIES) {
+    for (const [key, val] of pcObserveTracker) {
+      if (now - val.lastResetAt > PC_OBSERVE_TRACKER_TTL_MS) pcObserveTracker.delete(key);
+    }
+  }
   let entry = pcObserveTracker.get(sessionId);
   if (!entry || now - entry.lastResetAt > PC_OBSERVE_TRACKER_TTL_MS) {
     entry = { count: 0, lastResetAt: now };

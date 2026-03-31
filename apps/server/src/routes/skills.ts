@@ -55,6 +55,36 @@ skills.patch("/:id/toggle", async (c) => {
   return c.json({ data: { id, enabled } });
 });
 
+// GET /api/skills/:id/instructions — get original + override
+skills.get("/:id/instructions", (c) => {
+  const id = c.req.param("id");
+  const skill = getSkill(id);
+  if (!skill) return c.json({ error: "not found" }, 404);
+  const override = getInstructionOverride("skill", id);
+  return c.json({ data: { id, original: skill.instructions, override, hasOverride: override !== null } });
+});
+
+// PATCH /api/skills/:id/instructions — save instruction override
+skills.patch("/:id/instructions", async (c) => {
+  const id = c.req.param("id");
+  const skill = getSkill(id);
+  if (!skill) return c.json({ error: "not found" }, 404);
+  const body = await c.req.json() as { instructions?: string };
+  if (typeof body.instructions !== "string") return c.json({ error: "instructions must be a string" }, 400);
+  if (body.instructions.length > 500_000) return c.json({ error: "Instructions too large (max 500KB)" }, 400);
+  setInstructionOverride("skill", id, body.instructions);
+  return c.json({ data: { id, hasOverride: true } });
+});
+
+// DELETE /api/skills/:id/instructions — clear instruction override
+skills.delete("/:id/instructions", (c) => {
+  const id = c.req.param("id");
+  const skill = getSkill(id);
+  if (!skill) return c.json({ error: "not found" }, 404);
+  clearInstructionOverride("skill", id);
+  return c.json({ data: { id, hasOverride: false } });
+});
+
 // DELETE /api/skills/:id — delete skill file from disk (reject 403 if bundled)
 skills.delete("/:id", (c) => {
   const id = c.req.param("id");
@@ -73,35 +103,6 @@ skills.delete("/:id", (c) => {
     console.error("[api] DELETE /skills/:id error:", err);
     return c.json({ error: String(err) }, 500);
   }
-});
-
-// GET /api/skills/:id/instructions — get original + override
-skills.get("/:id/instructions", (c) => {
-  const id = c.req.param("id");
-  const skill = getSkill(id);
-  if (!skill) return c.json({ error: "not found" }, 404);
-  const override = getInstructionOverride("skill", id);
-  return c.json({ data: { id, original: skill.instructions, override, hasOverride: override !== null } });
-});
-
-// PATCH /api/skills/:id/instructions — save instruction override
-skills.patch("/:id/instructions", async (c) => {
-  const id = c.req.param("id");
-  const skill = getSkill(id);
-  if (!skill) return c.json({ error: "not found" }, 404);
-  const body = await c.req.json() as { instructions?: string };
-  if (typeof body.instructions !== "string") return c.json({ error: "instructions must be a string" }, 400);
-  setInstructionOverride("skill", id, body.instructions);
-  return c.json({ data: { id, hasOverride: true } });
-});
-
-// DELETE /api/skills/:id/instructions — clear instruction override
-skills.delete("/:id/instructions", (c) => {
-  const id = c.req.param("id");
-  const skill = getSkill(id);
-  if (!skill) return c.json({ error: "not found" }, 404);
-  clearInstructionOverride("skill", id);
-  return c.json({ data: { id, hasOverride: false } });
 });
 
 // GET /api/skills/:id/export — download raw SKILL.md

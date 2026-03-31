@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { usePersonaStore } from "@/stores/persona-store";
 
 const STORAGE_KEY = "chvor:canvas-hint-shown";
 
@@ -9,25 +10,36 @@ const STORAGE_KEY = "chvor:canvas-hint-shown";
  */
 export function CanvasHint() {
   const [visible, setVisible] = useState(false);
+  const mountedRef = useRef(true);
+  const persona = usePersonaStore((s) => s.persona);
 
   useEffect(() => {
-    if (localStorage.getItem(STORAGE_KEY)) return;
-    // Small delay so the canvas renders first
-    const timer = setTimeout(() => setVisible(true), 1200);
-    return () => clearTimeout(timer);
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
   }, []);
 
-  const dismiss = () => {
+  const dismiss = useCallback(() => {
+    if (!mountedRef.current) return;
     setVisible(false);
     localStorage.setItem(STORAGE_KEY, "1");
-  };
+  }, []);
+
+  // Only show after onboarding is complete
+  useEffect(() => {
+    if (localStorage.getItem(STORAGE_KEY)) return;
+    if (!persona?.onboarded) return;
+    const timer = setTimeout(() => {
+      if (mountedRef.current) setVisible(true);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [persona?.onboarded]);
 
   // Auto-dismiss after 8 seconds
   useEffect(() => {
     if (!visible) return;
     const timer = setTimeout(dismiss, 8000);
     return () => clearTimeout(timer);
-  }, [visible]);
+  }, [visible, dismiss]);
 
   return (
     <AnimatePresence>

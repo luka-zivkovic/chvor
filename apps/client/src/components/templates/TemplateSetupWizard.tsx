@@ -20,12 +20,14 @@ export function TemplateSetupWizard({ template, onComplete, onCancel }: Props) {
 
   useEffect(() => { fetchCredentials(); }, [fetchCredentials]);
 
-  // Close on Escape
+  // Close on Escape — but not when credential dialog is open (it has its own Escape handler)
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !setupCredType) onCancel();
+    };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onCancel]);
+  }, [onCancel, setupCredType]);
 
   const credTypeSet = new Set(credentials.map((c) => c.type));
   const requiredCreds = template.credentials ?? [];

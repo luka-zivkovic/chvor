@@ -627,9 +627,6 @@ export function getAllMediaModelConfigs(): Record<MediaModelType, MediaModelConf
   };
 }
 
-// ── Media retention ──────────────────────────────────────────────
-
-/** Get media retention period in days. 0 = keep forever. Default: 7. */
 // ── Security: Localhost access ──────────────────────────────────────
 
 /** Whether the AI is allowed to fetch localhost / private network URLs. Default: false (blocked). */
@@ -642,6 +639,9 @@ export function setAllowLocalhost(allow: boolean): boolean {
   return allow;
 }
 
+// ── Media retention ──────────────────────────────────────────────
+
+/** Get media retention period in days. 0 = keep forever. Default: 7. */
 export function getMediaRetentionDays(): number {
   const raw = getConfig("media.retentionDays");
   if (raw == null) return 7;
@@ -682,8 +682,11 @@ export function getAllInstructionOverrides(): Array<{ kind: "skill" | "tool"; id
   ).all() as { key: string; value: string }[];
   return rows.map((r) => {
     // key format: "{kind}.instructions.override.{id}"
-    const kind = r.key.startsWith("skill.") ? "skill" as const : "tool" as const;
-    const id = r.key.replace(/^(skill|tool)\.instructions\.override\./, "");
+    // Use fixed prefix lengths for robust parsing (skill.instructions.override. = 28, tool.instructions.override. = 27)
+    const isSkill = r.key.startsWith("skill.");
+    const kind = isSkill ? "skill" as const : "tool" as const;
+    const prefixLen = isSkill ? "skill.instructions.override.".length : "tool.instructions.override.".length;
+    const id = r.key.slice(prefixLen);
     return { kind, id, instructions: r.value };
   });
 }

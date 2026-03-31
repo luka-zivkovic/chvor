@@ -58,6 +58,36 @@ tools.patch("/:id/toggle", async (c) => {
   return c.json({ data: { id, enabled } });
 });
 
+// GET /api/tools/:id/instructions — get original + override
+tools.get("/:id/instructions", (c) => {
+  const id = c.req.param("id");
+  const tool = getTool(id);
+  if (!tool) return c.json({ error: "not found" }, 404);
+  const override = getInstructionOverride("tool", id);
+  return c.json({ data: { id, original: tool.instructions, override, hasOverride: override !== null } });
+});
+
+// PATCH /api/tools/:id/instructions — save instruction override
+tools.patch("/:id/instructions", async (c) => {
+  const id = c.req.param("id");
+  const tool = getTool(id);
+  if (!tool) return c.json({ error: "not found" }, 404);
+  const body = await c.req.json() as { instructions?: string };
+  if (typeof body.instructions !== "string") return c.json({ error: "instructions must be a string" }, 400);
+  if (body.instructions.length > 500_000) return c.json({ error: "Instructions too large (max 500KB)" }, 400);
+  setInstructionOverride("tool", id, body.instructions);
+  return c.json({ data: { id, hasOverride: true } });
+});
+
+// DELETE /api/tools/:id/instructions — clear instruction override
+tools.delete("/:id/instructions", (c) => {
+  const id = c.req.param("id");
+  const tool = getTool(id);
+  if (!tool) return c.json({ error: "not found" }, 404);
+  clearInstructionOverride("tool", id);
+  return c.json({ data: { id, hasOverride: false } });
+});
+
 // DELETE /api/tools/:id — delete tool file from disk (reject 403 if builtIn)
 tools.delete("/:id", (c) => {
   const id = c.req.param("id");
@@ -76,35 +106,6 @@ tools.delete("/:id", (c) => {
     console.error("[api] DELETE /tools/:id error:", err);
     return c.json({ error: String(err) }, 500);
   }
-});
-
-// GET /api/tools/:id/instructions — get original + override
-tools.get("/:id/instructions", (c) => {
-  const id = c.req.param("id");
-  const tool = getTool(id);
-  if (!tool) return c.json({ error: "not found" }, 404);
-  const override = getInstructionOverride("tool", id);
-  return c.json({ data: { id, original: tool.instructions, override, hasOverride: override !== null } });
-});
-
-// PATCH /api/tools/:id/instructions — save instruction override
-tools.patch("/:id/instructions", async (c) => {
-  const id = c.req.param("id");
-  const tool = getTool(id);
-  if (!tool) return c.json({ error: "not found" }, 404);
-  const body = await c.req.json() as { instructions?: string };
-  if (typeof body.instructions !== "string") return c.json({ error: "instructions must be a string" }, 400);
-  setInstructionOverride("tool", id, body.instructions);
-  return c.json({ data: { id, hasOverride: true } });
-});
-
-// DELETE /api/tools/:id/instructions — clear instruction override
-tools.delete("/:id/instructions", (c) => {
-  const id = c.req.param("id");
-  const tool = getTool(id);
-  if (!tool) return c.json({ error: "not found" }, 404);
-  clearInstructionOverride("tool", id);
-  return c.json({ data: { id, hasOverride: false } });
 });
 
 // GET /api/tools/:id/export — download raw .md file

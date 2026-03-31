@@ -451,7 +451,10 @@ export const api = {
 
   templates: {
     exportYaml: () =>
-      fetch(`${BASE}/templates/export`, { credentials: "same-origin" }).then((r) => r.text()),
+      fetch(`${BASE}/templates/export`, { credentials: "same-origin" }).then((r) => {
+        if (!r.ok) throw new Error(`Export failed: ${r.status}`);
+        return r.text();
+      }),
   },
 
   securityConfig: {
