@@ -5,7 +5,7 @@ import { parse as parseYaml } from "yaml";
 import type { RegistryLock, InstalledRegistryEntry, RegistryEntryKind, RegistryEntry, Skill, Tool, Capability, TemplateManifest } from "@chvor/shared";
 import { fetchRegistryIndex, fetchEntryContent, computeSha256, getDefaultRegistryUrl } from "./registry-client.ts";
 import { reloadAll } from "./capability-loader.ts";
-import { getPersona, updatePersona } from "../db/config-store.ts";
+import { getPersona, updatePersona, getInstructionOverride, setInstructionOverride, clearInstructionOverride } from "../db/config-store.ts";
 import { createSchedule, deleteSchedule } from "../db/schedule-store.ts";
 import { getOrCreateDefault, saveWorkspace } from "../db/workspace-store.ts";
 
@@ -155,6 +155,28 @@ function validateManifest(entryId: string, raw: unknown): TemplateManifest {
     }
   }
 
+  // Validate skillOverrides if present
+  if (obj.skillOverrides !== undefined) {
+    if (!Array.isArray(obj.skillOverrides)) {
+      throw new Error(`Invalid template manifest for "${entryId}": "skillOverrides" must be an array`);
+    }
+    for (let i = 0; i < obj.skillOverrides.length; i++) {
+      const so = obj.skillOverrides[i] as Record<string, unknown>;
+      if (!so || typeof so !== "object") {
+        throw new Error(`Invalid template manifest for "${entryId}": skillOverrides[${i}] must be an object`);
+      }
+      if (typeof so.skillId !== "string" || !so.skillId.trim()) {
+        throw new Error(`Invalid template manifest for "${entryId}": skillOverrides[${i}].skillId must be a non-empty string`);
+      }
+      if (!SAFE_ENTRY_ID_RE.test(so.skillId)) {
+        throw new Error(`Invalid template manifest for "${entryId}": skillOverrides[${i}].skillId "${so.skillId}" contains invalid characters`);
+      }
+      if (typeof so.instructions !== "string") {
+        throw new Error(`Invalid template manifest for "${entryId}": skillOverrides[${i}].instructions must be a string`);
+      }
+    }
+  }
+
   // Validate pipeline if present
   if (obj.pipeline !== undefined) {
     if (typeof obj.pipeline !== "object" || obj.pipeline === null) {
@@ -246,6 +268,16 @@ async function installTemplate(
     }
   }
 
+  // Provision: apply skill instruction overrides (with backup for uninstall)
+  let previousSkillOverrides: Record<string, string | null> | undefined;
+  if (manifest.skillOverrides?.length) {
+    previousSkillOverrides = {};
+    for (const so of manifest.skillOverrides) {
+      previousSkillOverrides[so.skillId] = getInstructionOverride("skill", so.skillId);
+      setInstructionOverride("skill", so.skillId, so.instructions);
+    }
+  }
+
   // Provision: create schedules (disabled by default — user must review prompts and enable)
   if (manifest.schedules?.length) {
     const workspace = getOrCreateDefault("constellation");
@@ -296,6 +328,7 @@ async function installTemplate(
     provisionedScheduleIds: provisionedScheduleIds.length > 0 ? provisionedScheduleIds : undefined,
     provisionedPipelineId,
     previousPersona,
+    previousSkillOverrides,
   };
   lock.lastChecked = new Date().toISOString();
   writeLock(lock);
@@ -356,6 +389,16 @@ export async function installEntry(
   const resolvedKind = kind ?? entry.kind ?? "skill";
   if (resolvedKind === "template") {
     return installTemplate(entryId, entry, registryUrl, lock, installing);
+  }
+
+  // Guard: don't overwrite user-created skills/tools with registry entries
+  const { getSkill, getTool } = await import("./capability-loader.ts");
+  const existingCap = resolvedKind === "tool" ? getTool(entryId) : getSkill(entryId);
+  if (existingCap && existingCap.source === "user") {
+    throw new Error(`A user-created ${resolvedKind} "${entryId}" already exists. Rename or delete it before installing from registry.`);
+  }
+  if (existingCap && existingCap.source === "bundled") {
+    throw new Error(`Cannot install — "${entryId}" is a bundled ${resolvedKind} and cannot be overridden.`);
   }
 
   // Download content and verify integrity
@@ -454,6 +497,21 @@ export async function uninstallEntry(entryId: string): Promise<void> {
         updatePersona(info.previousPersona as Parameters<typeof updatePersona>[0]);
       } catch (err) {
         console.warn("[registry-manager] failed to restore previous persona:", err);
+      }
+    }
+
+    // Restore previous skill instruction overrides
+    if (info.previousSkillOverrides) {
+      for (const [skillId, prev] of Object.entries(info.previousSkillOverrides)) {
+        try {
+          if (prev === null) {
+            clearInstructionOverride("skill", skillId);
+          } else {
+            setInstructionOverride("skill", skillId, prev);
+          }
+        } catch (err) {
+          console.warn(`[registry-manager] failed to restore override for "${skillId}":`, err);
+        }
       }
     }
 

@@ -68,10 +68,15 @@ class McpManager {
         ? "npx.cmd"
         : tool.mcpServer.command;
 
-    // Resolve {{homedir}} placeholder in args
-    const resolvedArgs = tool.mcpServer.args.map((arg) =>
-      arg.replace(/\{\{homedir\}\}/g, homedir())
-    );
+    // Resolve placeholders in args
+    const resolvedArgs = tool.mcpServer.args
+      .map((arg) =>
+        arg
+          .replace(/\{\{homedir\}\}/g, homedir())
+          .replace(/\{\{cwd\}\}/g, process.cwd())
+          .replace(/\{\{tmp\}\}/g, process.platform === "win32" ? (process.env.TEMP ?? process.env.TMP ?? homedir()) : "/tmp")
+      )
+      .filter((arg) => arg.length > 0);
 
     const transport = new StdioClientTransport({
       command,

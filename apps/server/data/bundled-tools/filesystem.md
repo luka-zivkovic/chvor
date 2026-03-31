@@ -6,7 +6,7 @@ category: file
 icon: folder
 mcp:
   command: npx
-  args: ["-y", "@modelcontextprotocol/server-filesystem", "{{homedir}}"]
+  args: ["-y", "@modelcontextprotocol/server-filesystem", "{{homedir}}", "{{cwd}}", "{{tmp}}"]
   transport: stdio
 inputs:
   - name: path

@@ -36,6 +36,11 @@ export interface TemplatePersonaDef {
   exampleResponses?: ExampleResponse[];
 }
 
+export interface TemplateSkillOverride {
+  skillId: string;
+  instructions: string;
+}
+
 export interface TemplateManifest {
   name: string;
   description: string;
@@ -45,6 +50,7 @@ export interface TemplateManifest {
   tags?: string[];
 
   persona?: TemplatePersonaDef;
+  skillOverrides?: TemplateSkillOverride[];
 
   credentials?: TemplateCredentialDef[];
   schedules?: TemplateScheduleDef[];

@@ -32,10 +32,13 @@ import type { ScoreBreakdown } from "./memory-projections.ts";
 import { spreadActivation, strengthenCoAccessedEdges } from "./memory-graph.ts";
 import { computeTopicHash, updateAccessLogTopics, predictNextMemories } from "./memory-preloader.ts";
 import { getCognitiveMemoryConfig } from "../db/config-store.ts";
-import { getPersona, isCapabilityEnabled, getExtendedThinking, getBrainConfig, getSelfHealingEnabled, getPcControlEnabled } from "../db/config-store.ts";
+import { getPersona, isCapabilityEnabled, getExtendedThinking, getBrainConfig, getSelfHealingEnabled, getPcControlEnabled, getAllInstructionOverrides } from "../db/config-store.ts";
 import { storeMediaFromBase64 } from "./media-store.ts";
 
 export type EventEmitter = (event: ExecutionEvent) => void;
+
+/** PC control tools whose media (screenshots) should not be shown in the chat UI */
+const PC_INTERNAL_MEDIA_TOOLS = new Set(["native__pc_do", "native__pc_observe"]);
 
 /** @deprecated Use resolveRoleConfig from llm-router instead */
 export function resolveConfig(): ResolvedConfig {
@@ -193,22 +196,30 @@ function buildSystemPrompt(
   stableSections.push(`## Tool Usage\n\n${toolUsageLines.join("\n")}`);
 
   // Group skills by type for clearer system prompt sections
-  const promptSkills = skills.filter((s) => s.skillType === "prompt" && s.instructions.trim());
-  const workflowSkills = skills.filter((s) => s.skillType === "workflow" && s.instructions.trim());
-  const toolsWithInstructions = tools.filter((t) => t.instructions.trim());
+  // Precompute all instruction overrides in a single DB query to avoid N+1
+  const overrideMap = new Map<string, string>();
+  try {
+    for (const o of getAllInstructionOverrides()) overrideMap.set(`${o.kind}:${o.id}`, o.instructions);
+  } catch { /* fallback: no overrides */ }
+  const resolveInstructions = (kind: "skill" | "tool", id: string, original: string): string =>
+    overrideMap.get(`${kind}:${id}`) ?? original;
+
+  const promptSkills = skills.filter((s) => s.skillType === "prompt" && resolveInstructions("skill", s.id, s.instructions).trim());
+  const workflowSkills = skills.filter((s) => s.skillType === "workflow" && resolveInstructions("skill", s.id, s.instructions).trim());
+  const toolsWithInstructions = tools.filter((t) => resolveInstructions("tool", t.id, t.instructions).trim());
 
   if (promptSkills.length > 0) {
-    const lines = promptSkills.map((s) => `### ${s.metadata.name}\n${s.instructions}`).join("\n\n");
+    const lines = promptSkills.map((s) => `### ${s.metadata.name}\n${resolveInstructions("skill", s.id, s.instructions)}`).join("\n\n");
     stableSections.push(`## Behavioral Skills\n\n${lines}`);
   }
 
   if (workflowSkills.length > 0) {
-    const lines = workflowSkills.map((s) => `### ${s.metadata.name}\n${s.instructions}`).join("\n\n");
+    const lines = workflowSkills.map((s) => `### ${s.metadata.name}\n${resolveInstructions("skill", s.id, s.instructions)}`).join("\n\n");
     stableSections.push(`## Workflow Procedures\n\nFollow these step-by-step procedures when the user requests them. Use your available tools to execute each step.\n\n${lines}`);
   }
 
   if (toolsWithInstructions.length > 0) {
-    const lines = toolsWithInstructions.map((t) => `### ${t.metadata.name}\n${t.instructions}`).join("\n\n");
+    const lines = toolsWithInstructions.map((t) => `### ${t.metadata.name}\n${resolveInstructions("tool", t.id, t.instructions)}`).join("\n\n");
     stableSections.push(`## Available Tools\n\n${lines}`);
   }
 
@@ -468,7 +479,7 @@ export interface ConversationResult {
 }
 
 /** Extract media artifacts from an MCP/native tool result that has a .content array */
-function extractMedia(rawResult: unknown): MediaArtifact[] {
+function extractMedia(rawResult: unknown, opts?: { internal?: boolean }): MediaArtifact[] {
   if (rawResult == null || typeof rawResult !== "object") return [];
   const obj = rawResult as Record<string, unknown>;
   if (!Array.isArray(obj.content)) return [];
@@ -477,7 +488,9 @@ function extractMedia(rawResult: unknown): MediaArtifact[] {
   for (const item of obj.content) {
     if (item && typeof item === "object" && item.type === "image" && typeof item.data === "string" && typeof item.mimeType === "string") {
       try {
-        media.push(storeMediaFromBase64(item.data, item.mimeType));
+        const artifact = storeMediaFromBase64(item.data, item.mimeType);
+        if (opts?.internal) artifact.internal = true;
+        media.push(artifact);
       } catch (err) {
         console.error("[media] failed to store artifact:", err instanceof Error ? err.message : err);
       }
@@ -1063,7 +1076,7 @@ export async function executeConversation(
             channelType: options?.channelType,
             channelId: options?.channelId,
           });
-          const nativeMedia = extractMedia(nativeResult);
+          const nativeMedia = extractMedia(nativeResult, PC_INTERNAL_MEDIA_TOOLS.has(tc.toolName) ? { internal: true } : undefined);
           if (matchedIntegration) {
             emit({ type: "skill.completed", data: { nodeId: `api-${matchedIntegration.id}`, output: "" } });
           } else if (target) {

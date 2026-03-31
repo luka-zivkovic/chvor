@@ -3,6 +3,7 @@ import { TopBar } from "./HudOverlay";
 import { SlideOverPanel } from "./SlideOverPanel";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { BrainCanvas } from "../canvas/BrainCanvas";
+import { CanvasHint } from "../onboarding/CanvasHint";
 import { ChatPanel } from "../chat/ChatPanel";
 import { SettingsPanel } from "../panels/SettingsPanel";
 import { SchedulesPanel } from "../panels/SchedulesPanel";
@@ -228,6 +229,8 @@ export function MainLayout() {
         <BrainCanvas />
       </div>
 
+      {/* One-time hint after onboarding */}
+      <CanvasHint />
 
       {/* ─── Layer 1: Top Bar (40px) ─── */}
       <div

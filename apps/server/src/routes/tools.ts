@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadTools, getTool, reloadAll } from "../lib/capability-loader.ts";
 import { parseCapabilityMd } from "../lib/capability-parser.ts";
-import { isCapabilityEnabled, setCapabilityEnabled } from "../db/config-store.ts";
+import { assertSafeEntryId } from "../lib/registry-manager.ts";
+import { isCapabilityEnabled, setCapabilityEnabled, getInstructionOverride, setInstructionOverride, clearInstructionOverride } from "../db/config-store.ts";
 import { invalidateToolCache } from "../lib/tool-builder.ts";
 
 const tools = new Hono();
@@ -15,6 +16,7 @@ tools.get("/", (c) => {
     const allTools = loadTools().map((t) => ({
       ...t,
       enabled: isCapabilityEnabled("tool", t.id),
+      hasOverride: getInstructionOverride("tool", t.id) !== null,
     }));
     return c.json({ data: allTools });
   } catch (err) {
@@ -55,6 +57,39 @@ tools.patch("/:id/toggle", async (c) => {
   invalidateToolCache();
 
   return c.json({ data: { id, enabled } });
+});
+
+// GET /api/tools/:id/instructions — get original + override
+tools.get("/:id/instructions", (c) => {
+  const id = c.req.param("id");
+  try { assertSafeEntryId(id); } catch { return c.json({ error: "invalid id" }, 400); }
+  const tool = getTool(id);
+  if (!tool) return c.json({ error: "not found" }, 404);
+  const override = getInstructionOverride("tool", id);
+  return c.json({ data: { id, original: tool.instructions, override, hasOverride: override !== null } });
+});
+
+// PATCH /api/tools/:id/instructions — save instruction override
+tools.patch("/:id/instructions", async (c) => {
+  const id = c.req.param("id");
+  try { assertSafeEntryId(id); } catch { return c.json({ error: "invalid id" }, 400); }
+  const tool = getTool(id);
+  if (!tool) return c.json({ error: "not found" }, 404);
+  const body = await c.req.json() as { instructions?: string };
+  if (typeof body.instructions !== "string") return c.json({ error: "instructions must be a string" }, 400);
+  if (body.instructions.length > 500_000) return c.json({ error: "Instructions too large (max 500KB)" }, 400);
+  setInstructionOverride("tool", id, body.instructions);
+  return c.json({ data: { id, hasOverride: true } });
+});
+
+// DELETE /api/tools/:id/instructions — clear instruction override
+tools.delete("/:id/instructions", (c) => {
+  const id = c.req.param("id");
+  try { assertSafeEntryId(id); } catch { return c.json({ error: "invalid id" }, 400); }
+  const tool = getTool(id);
+  if (!tool) return c.json({ error: "not found" }, 404);
+  clearInstructionOverride("tool", id);
+  return c.json({ data: { id, hasOverride: false } });
 });
 
 // DELETE /api/tools/:id — delete tool file from disk (reject 403 if builtIn)

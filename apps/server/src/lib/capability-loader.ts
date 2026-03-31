@@ -78,12 +78,33 @@ export function loadAll(force = false): { skills: Skill[]; tools: Tool[] } {
 
   allCapabilities.push(...bundledSkills, ...bundledTools, ...userSkills, ...userTools);
 
-  cachedSkills = allCapabilities.filter((c): c is Skill => c.kind === "skill");
-  cachedTools = allCapabilities.filter((c): c is Tool => c.kind === "tool");
+  // Deduplicate by ID — priority: bundled > user > registry
+  const SOURCE_PRIORITY: Record<string, number> = { bundled: 3, user: 2, registry: 1 };
+  const deduped = new Map<string, Capability>();
+  for (const cap of allCapabilities) {
+    const existing = deduped.get(cap.id);
+    if (existing) {
+      const existingPriority = SOURCE_PRIORITY[existing.source] ?? 0;
+      const newPriority = SOURCE_PRIORITY[cap.source] ?? 0;
+      if (newPriority > existingPriority) {
+        console.warn(`[capability-loader] duplicate "${cap.id}": ${cap.source} overrides ${existing.source}`);
+        deduped.set(cap.id, cap);
+      } else {
+        console.warn(`[capability-loader] duplicate "${cap.id}": ${cap.source} shadowed by ${existing.source}`);
+      }
+    } else {
+      deduped.set(cap.id, cap);
+    }
+  }
+  const dedupedList = Array.from(deduped.values());
 
+  cachedSkills = dedupedList.filter((c): c is Skill => c.kind === "skill");
+  cachedTools = dedupedList.filter((c): c is Tool => c.kind === "tool");
+
+  const dupCount = allCapabilities.length - dedupedList.length;
   console.log(
-    `[capability-loader] loaded ${cachedSkills.length} skills (${bundledSkills.filter((c) => c.kind === "skill").length} bundled + ${userSkills.filter((c) => c.kind === "skill").length} user) ` +
-      `+ ${cachedTools.length} tools (${bundledTools.filter((c) => c.kind === "tool").length} bundled + ${userTools.filter((c) => c.kind === "tool").length} user)`,
+    `[capability-loader] loaded ${cachedSkills.length} skills + ${cachedTools.length} tools` +
+      (dupCount > 0 ? ` (${dupCount} duplicate(s) resolved)` : ""),
   );
 
   return { skills: cachedSkills, tools: cachedTools };

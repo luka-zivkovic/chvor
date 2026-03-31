@@ -29,7 +29,7 @@ export function VoicePhase({ direction, onBack, onNext }: Props) {
           </p>
         </motion.div>
 
-        <motion.div variants={staggerItem} className="max-h-[45vh] overflow-y-auto pr-1">
+        <motion.div variants={staggerItem} className="max-h-[30vh] sm:max-h-[40vh] overflow-y-auto pr-1">
           <VoiceSettingsContent compact />
         </motion.div>
 

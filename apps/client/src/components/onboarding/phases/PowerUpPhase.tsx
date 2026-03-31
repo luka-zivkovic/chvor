@@ -56,7 +56,7 @@ export function PowerUpPhase({ direction, onBack, onNext }: Props) {
             />
           </motion.div>
         ) : (
-          <motion.div variants={staggerItem} className="space-y-4 max-h-[45vh] overflow-y-auto pr-1">
+          <motion.div variants={staggerItem} className="space-y-4 max-h-[30vh] sm:max-h-[40vh] overflow-y-auto pr-1">
             {/* Featured integrations (credential-based) */}
             <div>
               <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">

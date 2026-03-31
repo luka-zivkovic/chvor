@@ -54,7 +54,7 @@ export function StreamingMessage({ content, tools }: Props) {
                   <span className="text-[10px] text-muted-foreground/50 animate-pulse">running...</span>
                 )}
               </div>
-              {tool.media?.filter((m) => m.mediaType === "image").map((m) => (
+              {tool.media?.filter((m) => m.mediaType === "image" && !m.internal).map((m) => (
                 <img
                   key={m.id}
                   src={m.url}
@@ -64,6 +64,17 @@ export function StreamingMessage({ content, tools }: Props) {
               ))}
             </div>
           ))}
+
+          {/* Processing spinner — visible when any tool is still running */}
+          {tools.some((t) => t.status === "running") && (
+            <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground/60">
+              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span>Processing…</span>
+            </div>
+          )}
         </div>
       )}
 

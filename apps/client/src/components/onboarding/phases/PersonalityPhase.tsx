@@ -88,7 +88,7 @@ export function PersonalityPhase({
             </div>
 
             {/* Preset cards */}
-            <div className="max-h-[32vh] overflow-y-auto space-y-2 pr-1">
+            <div className="max-h-[22vh] sm:max-h-[30vh] overflow-y-auto space-y-2 pr-1">
               {PRESETS.filter((p) => !tagFilter || p.tag === tagFilter).map((preset) => (
                 <button
                   key={preset.id}

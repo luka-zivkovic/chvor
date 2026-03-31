@@ -70,8 +70,9 @@ export async function validateFetchUrl(rawUrl: string): Promise<URL> {
     throw new Error(`Blocked protocol: ${parsed.protocol}`);
   }
   const { address } = await lookup(parsed.hostname);
-  if (PRIVATE_IP_RANGES.some((r) => r.test(address))) {
-    throw new Error(`Blocked private/internal address: ${parsed.hostname}`);
+  const { getAllowLocalhost } = await import("../db/config-store.ts");
+  if (!getAllowLocalhost() && PRIVATE_IP_RANGES.some((r) => r.test(address))) {
+    throw new Error(`Blocked private/internal address: ${parsed.hostname}. Enable "Allow localhost" in Settings → Permissions to access local services.`);
   }
   return parsed;
 }
@@ -319,6 +320,15 @@ async function handleCreateSkill(
   if (RESERVED_SKILL_IDS.has(id)) {
     return {
       content: [{ type: "text", text: `Skipped: "${id}" is reserved. First-run guidance is handled by the built-in Chvor Guide skill.` }],
+    };
+  }
+
+  // Guard: prevent overwriting bundled skills
+  const { getSkill: lookupSkill } = await import("./capability-loader.ts");
+  const existingSkill = lookupSkill(id);
+  if (existingSkill?.source === "bundled") {
+    return {
+      content: [{ type: "text", text: `Cannot create skill "${id}" — a bundled skill with this ID exists. Choose a different ID.` }],
     };
   }
 
@@ -872,6 +882,15 @@ async function handleCreateWorkflow(
     required: boolean;
     default?: string;
   }>;
+
+  // Guard: prevent overwriting bundled skills
+  const { getSkill: lookupWorkflowSkill } = await import("./capability-loader.ts");
+  const existingWf = lookupWorkflowSkill(id);
+  if (existingWf?.source === "bundled") {
+    return {
+      content: [{ type: "text", text: `Cannot create workflow "${id}" — a bundled skill with this ID exists. Choose a different ID.` }],
+    };
+  }
 
   // Build YAML frontmatter
   const frontmatter: string[] = [
@@ -3720,12 +3739,44 @@ const pcShellToolDef = tool({
   }),
 });
 
+// ── PC control loop detection ──────────────────────────────────────
+// Track consecutive pc_observe calls per session to detect screenshot loops.
+const pcObserveTracker = new Map<string, { count: number; lastResetAt: number }>();
+const PC_OBSERVE_LOOP_THRESHOLD = 3;
+const PC_OBSERVE_TRACKER_TTL_MS = 5 * 60 * 1000; // 5 min stale window
+const PC_OBSERVE_MAX_ENTRIES = 200; // prevent unbounded growth
+
+function getPcObserveTracker(sessionId: string) {
+  const now = Date.now();
+  // Periodic cleanup: evict stale entries when map grows large
+  if (pcObserveTracker.size > PC_OBSERVE_MAX_ENTRIES) {
+    for (const [key, val] of pcObserveTracker) {
+      if (now - val.lastResetAt > PC_OBSERVE_TRACKER_TTL_MS) pcObserveTracker.delete(key);
+    }
+  }
+  let entry = pcObserveTracker.get(sessionId);
+  if (!entry || now - entry.lastResetAt > PC_OBSERVE_TRACKER_TTL_MS) {
+    entry = { count: 0, lastResetAt: now };
+    pcObserveTracker.set(sessionId, entry);
+  }
+  return entry;
+}
+
+function resetPcObserveCount(sessionId: string) {
+  const entry = pcObserveTracker.get(sessionId);
+  if (entry) { entry.count = 0; entry.lastResetAt = Date.now(); }
+}
+
 async function handlePcDo(
   args: Record<string, unknown>,
   context?: NativeToolContext
 ): Promise<NativeToolResult> {
   const task = args.task as string;
   const targetId = args.targetId as string | undefined;
+
+  // Successful pc_do resets the observe loop counter
+  const sessionKey = context?.sessionId ?? "default";
+  resetPcObserveCount(sessionKey);
 
   let backend;
   try {
@@ -3836,6 +3887,11 @@ async function handlePcObserve(
 ): Promise<NativeToolResult> {
   const targetId = args.targetId as string | undefined;
 
+  // Loop detection: warn if observing too many times without taking action
+  const sessionKey = context?.sessionId ?? "default";
+  const tracker = getPcObserveTracker(sessionKey);
+  tracker.count++;
+
   let backend;
   try {
     backend = getBackend(targetId);
@@ -3884,6 +3940,14 @@ async function handlePcObserve(
       text: screenshot
         ? `Screenshot taken (${screenshot.width}×${screenshot.height}). Accessibility tree not available on this platform.`
         : "Failed to capture screen.",
+    });
+  }
+
+  // Loop detection warning
+  if (tracker.count >= PC_OBSERVE_LOOP_THRESHOLD) {
+    content.push({
+      type: "text",
+      text: `⚠ WARNING: You have observed the screen ${tracker.count} times without executing an action (pc_do). Either take a concrete action with pc_do, or tell the user what you see and what is blocking progress. Do NOT observe again without acting first.`,
     });
   }
 

@@ -33,6 +33,9 @@ export function PermissionsPanel() {
   // Shell Commands state
   const [shellApprovalMode, setShellApprovalMode] = useState<ShellApprovalMode>("dangerous_only");
 
+  // Network state
+  const [allowLocalhost, setAllowLocalhost] = useState(false);
+
   /* ─── Load configs on mount ─── */
   useEffect(() => {
     api.pc
@@ -48,6 +51,13 @@ export function PermissionsPanel() {
       .get()
       .then((cfg) => {
         setShellApprovalMode(cfg.approvalMode);
+      })
+      .catch(() => {});
+
+    api.securityConfig
+      .get()
+      .then((cfg) => {
+        setAllowLocalhost(cfg.allowLocalhost);
       })
       .catch(() => {});
   }, []);
@@ -74,6 +84,18 @@ export function PermissionsPanel() {
     } catch {
       setPcSafetyLevel(prev);
       toast.error("Failed to update safety level");
+    }
+  };
+
+  const handleLocalhostToggle = async () => {
+    const next = !allowLocalhost;
+    setAllowLocalhost(next);
+    try {
+      const result = await api.securityConfig.update({ allowLocalhost: next });
+      setAllowLocalhost(result.allowLocalhost);
+    } catch {
+      setAllowLocalhost(!next);
+      toast.error("Failed to update localhost access");
     }
   };
 
@@ -152,6 +174,26 @@ export function PermissionsPanel() {
               <option value="moderate_plus">Block moderate + dangerous — block most writes</option>
               <option value="block_all">Block all — no shell commands</option>
             </select>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── Network ─── */}
+      <section>
+        <h3 className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Network
+        </h3>
+        <div className="flex flex-col divide-y divide-border/30">
+          <div className="pb-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-foreground">Allow localhost access</p>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  Allow the AI to access localhost and private network addresses
+                </p>
+              </div>
+              <Toggle checked={allowLocalhost} onChange={handleLocalhostToggle} label="Toggle localhost access" />
+            </div>
           </div>
         </div>
       </section>

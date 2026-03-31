@@ -6,6 +6,7 @@ import { api } from "../../lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { ToolNodeData } from "../../stores/canvas-store";
+import { EditInstructionsDialog } from "../capabilities/EditInstructionsDialog";
 
 function statusDotClass(status: string): string {
   switch (status) {
@@ -25,6 +26,7 @@ export function ToolDetailPanel() {
   const nodes = useCanvasStore((s) => s.nodes);
   const { tools, fetchTools } = useToolStore();
   const [expanded, setExpanded] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   const node = nodes.find((n) => n.id === detailNodeId);
   if (!node) return <p className="text-xs text-muted-foreground">Node not found</p>;
@@ -95,6 +97,11 @@ export function ToolDetailPanel() {
             {tool.metadata.category && (
               <Badge variant="secondary" className="rounded-full text-[10px]">
                 {tool.metadata.category}
+              </Badge>
+            )}
+            {tool.metadata.author && (
+              <Badge variant="secondary" className="rounded-full text-[10px]">
+                by {tool.metadata.author}
               </Badge>
             )}
             <Badge variant="secondary" className="rounded-full text-[10px]">
@@ -186,24 +193,48 @@ export function ToolDetailPanel() {
 
       {/* Instructions (preview with expand) */}
       <section>
-        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Instructions
-        </h3>
+        <div className="mb-2 flex items-center gap-2">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Instructions
+          </h3>
+          {"hasOverride" in tool && (tool as { hasOverride?: boolean }).hasOverride && (
+            <Badge variant="secondary" className="rounded-full text-[9px]">Modified</Badge>
+          )}
+        </div>
         <div className="rounded-xl border border-border/50 bg-muted/20 p-3">
           <pre className={`text-[11px] leading-relaxed whitespace-pre-wrap text-foreground/70 ${!expanded ? "line-clamp-6" : "max-h-64 overflow-auto"}`}>
             {tool.instructions}
           </pre>
-          {tool.instructions.split("\n").length > 6 && (
+          <div className="mt-2 flex items-center gap-2">
+            {tool.instructions.split("\n").length > 6 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto p-0 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setExpanded(!expanded)}
+              >
+                {expanded ? "Show less" : "Show more"}
+              </Button>
+            )}
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="mt-1 h-auto p-0 text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => setExpanded(!expanded)}
+              className="h-6 text-[10px]"
+              onClick={() => setEditOpen(true)}
             >
-              {expanded ? "Show less" : "Show more"}
+              Edit Instructions
             </Button>
-          )}
+          </div>
         </div>
+        {editOpen && (
+          <EditInstructionsDialog
+            kind="tool"
+            id={tool.id}
+            name={tool.metadata.name}
+            onClose={() => setEditOpen(false)}
+            onSaved={() => { setEditOpen(false); fetchTools(); }}
+          />
+        )}
       </section>
 
       {/* Status */}
