@@ -140,7 +140,7 @@ export async function toolPublish(filePath: string): Promise<void> {
 }
 
 function getRegistryUrl(): string {
-  return process.env.CHVOR_REGISTRY_URL || "https://raw.githubusercontent.com/chvor-community/skill-registry/main";
+  return process.env.CHVOR_REGISTRY_URL || "https://registry.chvor.ai";
 }
 
 function assertValidRegistryUrl(url: string): void {

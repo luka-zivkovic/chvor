@@ -4,8 +4,7 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import type { RegistryIndex, RegistryEntryKind } from "@chvor/shared";
 
-const DEFAULT_REGISTRY_URL =
-  "https://raw.githubusercontent.com/chvor-community/skill-registry/main";
+const DEFAULT_REGISTRY_URL = "https://registry.chvor.ai";
 
 const FETCH_TIMEOUT_MS = 8_000;
 
