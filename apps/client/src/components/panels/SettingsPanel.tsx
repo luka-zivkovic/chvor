@@ -597,8 +597,37 @@ function BackupContent() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const handleExportTemplate = async () => {
+    try {
+      const yaml = await api.templates.exportYaml();
+      const blob = new Blob([yaml], { type: "text/yaml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "template.yaml";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Template exported");
+    } catch {
+      toast.error("Failed to export template");
+    }
+  };
+
   return (
     <div className="flex flex-col gap-5">
+      {/* Export as Template */}
+      <section>
+        <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+          Export as Template
+        </h3>
+        <p className="text-[10px] text-muted-foreground mb-2">
+          Export your current assistant configuration (persona, skills, tools, schedules) as a shareable template. Credential secrets are not included.
+        </p>
+        <Button size="sm" variant="outline" onClick={handleExportTemplate}>
+          Export Template
+        </Button>
+      </section>
+
       {/* Manual Backup / Restore */}
       <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
         Manual Backup & Restore

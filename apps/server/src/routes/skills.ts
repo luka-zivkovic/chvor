@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadSkills, getSkill, reloadAll } from "../lib/capability-loader.ts";
 import { parseCapabilityMd } from "../lib/capability-parser.ts";
-import { isCapabilityEnabled, setCapabilityEnabled, getConfig, setConfig } from "../db/config-store.ts";
+import { isCapabilityEnabled, setCapabilityEnabled, getConfig, setConfig, getInstructionOverride, setInstructionOverride, clearInstructionOverride } from "../db/config-store.ts";
 
 const skills = new Hono();
 
@@ -14,6 +14,7 @@ skills.get("/", (c) => {
     const allSkills = loadSkills().map((s) => ({
       ...s,
       enabled: isCapabilityEnabled("skill", s.id),
+      hasOverride: getInstructionOverride("skill", s.id) !== null,
     }));
     return c.json({ data: allSkills });
   } catch (err) {
@@ -74,6 +75,35 @@ skills.delete("/:id", (c) => {
   }
 });
 
+// GET /api/skills/:id/instructions — get original + override
+skills.get("/:id/instructions", (c) => {
+  const id = c.req.param("id");
+  const skill = getSkill(id);
+  if (!skill) return c.json({ error: "not found" }, 404);
+  const override = getInstructionOverride("skill", id);
+  return c.json({ data: { id, original: skill.instructions, override, hasOverride: override !== null } });
+});
+
+// PATCH /api/skills/:id/instructions — save instruction override
+skills.patch("/:id/instructions", async (c) => {
+  const id = c.req.param("id");
+  const skill = getSkill(id);
+  if (!skill) return c.json({ error: "not found" }, 404);
+  const body = await c.req.json() as { instructions?: string };
+  if (typeof body.instructions !== "string") return c.json({ error: "instructions must be a string" }, 400);
+  setInstructionOverride("skill", id, body.instructions);
+  return c.json({ data: { id, hasOverride: true } });
+});
+
+// DELETE /api/skills/:id/instructions — clear instruction override
+skills.delete("/:id/instructions", (c) => {
+  const id = c.req.param("id");
+  const skill = getSkill(id);
+  if (!skill) return c.json({ error: "not found" }, 404);
+  clearInstructionOverride("skill", id);
+  return c.json({ data: { id, hasOverride: false } });
+});
+
 // GET /api/skills/:id/export — download raw SKILL.md
 skills.get("/:id/export", (c) => {
   const id = c.req.param("id");
@@ -115,6 +145,12 @@ skills.post("/import", async (c) => {
 
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(slug)) {
       return c.json({ error: "Invalid skill name — cannot derive a safe file name" }, 400);
+    }
+
+    // Guard: reject if a bundled skill with the same ID exists
+    const existing = getSkill(slug);
+    if (existing?.source === "bundled") {
+      return c.json({ error: `Cannot import — a bundled skill "${slug}" already exists. Rename the skill.` }, 409);
     }
 
     const userDir = join(homedir(), ".chvor", "skills");

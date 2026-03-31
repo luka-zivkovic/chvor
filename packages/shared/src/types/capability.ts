@@ -120,6 +120,8 @@ export interface InstalledRegistryEntry {
   provisionedPipelineId?: string;
   /** Template-only: snapshot of persona config before template applied changes */
   previousPersona?: Record<string, unknown>;
+  /** Template-only: previous instruction overrides before template applied its own */
+  previousSkillOverrides?: Record<string, string | null>;
 }
 
 /** @deprecated Use InstalledRegistryEntry */

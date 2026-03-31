@@ -630,6 +630,18 @@ export function getAllMediaModelConfigs(): Record<MediaModelType, MediaModelConf
 // ── Media retention ──────────────────────────────────────────────
 
 /** Get media retention period in days. 0 = keep forever. Default: 7. */
+// ── Security: Localhost access ──────────────────────────────────────
+
+/** Whether the AI is allowed to fetch localhost / private network URLs. Default: false (blocked). */
+export function getAllowLocalhost(): boolean {
+  return (getConfig("security.allowLocalhost") ?? "false") === "true";
+}
+
+export function setAllowLocalhost(allow: boolean): boolean {
+  setConfig("security.allowLocalhost", String(allow));
+  return allow;
+}
+
 export function getMediaRetentionDays(): number {
   const raw = getConfig("media.retentionDays");
   if (raw == null) return 7;
@@ -642,4 +654,36 @@ export function setMediaRetentionDays(days: number): number {
   const clamped = Math.max(0, Math.floor(days));
   setConfig("media.retentionDays", String(clamped));
   return clamped;
+}
+
+// ── Instruction overrides ───────────────────────────────────────
+
+/** Get a user-defined instruction override for a skill or tool. Returns null if no override exists. */
+export function getInstructionOverride(kind: "skill" | "tool", id: string): string | null {
+  return getConfig(`${kind}.instructions.override.${id}`);
+}
+
+/** Save a user-defined instruction override for a skill or tool. */
+export function setInstructionOverride(kind: "skill" | "tool", id: string, instructions: string): void {
+  setConfig(`${kind}.instructions.override.${id}`, instructions);
+}
+
+/** Clear a user-defined instruction override, restoring original instructions. */
+export function clearInstructionOverride(kind: "skill" | "tool", id: string): void {
+  const db = getDb();
+  db.prepare("DELETE FROM config WHERE key = ?").run(`${kind}.instructions.override.${id}`);
+}
+
+/** Get all instruction overrides (for template export). */
+export function getAllInstructionOverrides(): Array<{ kind: "skill" | "tool"; id: string; instructions: string }> {
+  const db = getDb();
+  const rows = db.prepare(
+    "SELECT key, value FROM config WHERE key LIKE 'skill.instructions.override.%' OR key LIKE 'tool.instructions.override.%'"
+  ).all() as { key: string; value: string }[];
+  return rows.map((r) => {
+    // key format: "{kind}.instructions.override.{id}"
+    const kind = r.key.startsWith("skill.") ? "skill" as const : "tool" as const;
+    const id = r.key.replace(/^(skill|tool)\.instructions\.override\./, "");
+    return { kind, id, instructions: r.value };
+  });
 }

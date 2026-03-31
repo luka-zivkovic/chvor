@@ -131,9 +131,9 @@ export function OnboardingExperience({ onComplete }: Props) {
       {/* Orb — always visible, positioned in upper area */}
       <motion.div
         className="relative z-10 flex items-center justify-center"
-        style={{ marginTop: "16vh" }}
+        style={{ marginTop: "10vh" }}
         animate={{
-          marginTop: phase === 0 ? "35vh" : phase === 6 ? "12vh" : "16vh",
+          marginTop: phase === 0 ? "28vh" : phase === 6 ? "8vh" : "10vh",
         }}
         transition={{ type: "spring", stiffness: 80, damping: 20 }}
       >
@@ -163,7 +163,7 @@ export function OnboardingExperience({ onComplete }: Props) {
       </AnimatePresence>
 
       {/* Phase content panel */}
-      <div className="relative z-10 mt-10 w-full max-w-lg px-6">
+      <div className="relative z-10 mt-6 w-full max-w-2xl px-4 sm:px-6">
         <AnimatePresence mode="wait" custom={direction}>
           {phase === 1 && (
             <WelcomePhase

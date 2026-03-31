@@ -29,6 +29,8 @@ export interface MediaArtifact {
   mediaType: "image" | "audio" | "video" | "file";
   filename?: string;
   sizeBytes?: number;
+  /** If true, media is internal to AI processing and not shown in the chat UI (e.g. PC control screenshots) */
+  internal?: boolean;
 }
 
 export interface ToolActionSummary {

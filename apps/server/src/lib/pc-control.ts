@@ -361,7 +361,7 @@ export async function queryRemoteA11yTree(agentId: string, opts?: { maxDepth?: n
 
 /** Get the configured safety level for PC control */
 export function getPcSafetyLevel(): PcSafetyLevel {
-  return (getConfig("pc_safety_level") as PcSafetyLevel) ?? "supervised";
+  return (getConfig("pc_safety_level") as PcSafetyLevel) ?? "semi-autonomous";
 }
 
 /** Shutdown all agents — called on server shutdown */

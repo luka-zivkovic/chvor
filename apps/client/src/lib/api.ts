@@ -176,6 +176,15 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(values),
       }),
+    getInstructions: (id: string) =>
+      request<{ id: string; original: string; override: string | null; hasOverride: boolean }>(`/skills/${id}/instructions`),
+    updateInstructions: (id: string, instructions: string) =>
+      request<{ id: string; hasOverride: boolean }>(`/skills/${id}/instructions`, {
+        method: "PATCH",
+        body: JSON.stringify({ instructions }),
+      }),
+    resetInstructions: (id: string) =>
+      request<{ id: string; hasOverride: boolean }>(`/skills/${id}/instructions`, { method: "DELETE" }),
   },
 
   registry: {
@@ -245,6 +254,15 @@ export const api = {
       }),
     delete: (id: string) =>
       request<null>(`/tools/${id}`, { method: "DELETE" }),
+    getInstructions: (id: string) =>
+      request<{ id: string; original: string; override: string | null; hasOverride: boolean }>(`/tools/${id}/instructions`),
+    updateInstructions: (id: string, instructions: string) =>
+      request<{ id: string; hasOverride: boolean }>(`/tools/${id}/instructions`, {
+        method: "PATCH",
+        body: JSON.stringify({ instructions }),
+      }),
+    resetInstructions: (id: string) =>
+      request<{ id: string; hasOverride: boolean }>(`/tools/${id}/instructions`, { method: "DELETE" }),
   },
 
   schedules: {
@@ -426,6 +444,20 @@ export const api = {
     get: () => request<ShellConfig>("/config/shell"),
     update: (body: UpdateShellConfigRequest) =>
       request<ShellConfig>("/config/shell", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+  },
+
+  templates: {
+    exportYaml: () =>
+      fetch(`${BASE}/templates/export`, { credentials: "same-origin" }).then((r) => r.text()),
+  },
+
+  securityConfig: {
+    get: () => request<{ allowLocalhost: boolean }>("/config/security"),
+    update: (body: { allowLocalhost?: boolean }) =>
+      request<{ allowLocalhost: boolean }>("/config/security", {
         method: "PATCH",
         body: JSON.stringify(body),
       }),

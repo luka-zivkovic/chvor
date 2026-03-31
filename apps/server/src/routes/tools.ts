@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadTools, getTool, reloadAll } from "../lib/capability-loader.ts";
 import { parseCapabilityMd } from "../lib/capability-parser.ts";
-import { isCapabilityEnabled, setCapabilityEnabled } from "../db/config-store.ts";
+import { isCapabilityEnabled, setCapabilityEnabled, getInstructionOverride, setInstructionOverride, clearInstructionOverride } from "../db/config-store.ts";
 import { invalidateToolCache } from "../lib/tool-builder.ts";
 
 const tools = new Hono();
@@ -15,6 +15,7 @@ tools.get("/", (c) => {
     const allTools = loadTools().map((t) => ({
       ...t,
       enabled: isCapabilityEnabled("tool", t.id),
+      hasOverride: getInstructionOverride("tool", t.id) !== null,
     }));
     return c.json({ data: allTools });
   } catch (err) {
@@ -75,6 +76,35 @@ tools.delete("/:id", (c) => {
     console.error("[api] DELETE /tools/:id error:", err);
     return c.json({ error: String(err) }, 500);
   }
+});
+
+// GET /api/tools/:id/instructions — get original + override
+tools.get("/:id/instructions", (c) => {
+  const id = c.req.param("id");
+  const tool = getTool(id);
+  if (!tool) return c.json({ error: "not found" }, 404);
+  const override = getInstructionOverride("tool", id);
+  return c.json({ data: { id, original: tool.instructions, override, hasOverride: override !== null } });
+});
+
+// PATCH /api/tools/:id/instructions — save instruction override
+tools.patch("/:id/instructions", async (c) => {
+  const id = c.req.param("id");
+  const tool = getTool(id);
+  if (!tool) return c.json({ error: "not found" }, 404);
+  const body = await c.req.json() as { instructions?: string };
+  if (typeof body.instructions !== "string") return c.json({ error: "instructions must be a string" }, 400);
+  setInstructionOverride("tool", id, body.instructions);
+  return c.json({ data: { id, hasOverride: true } });
+});
+
+// DELETE /api/tools/:id/instructions — clear instruction override
+tools.delete("/:id/instructions", (c) => {
+  const id = c.req.param("id");
+  const tool = getTool(id);
+  if (!tool) return c.json({ error: "not found" }, 404);
+  clearInstructionOverride("tool", id);
+  return c.json({ data: { id, hasOverride: false } });
 });
 
 // GET /api/tools/:id/export — download raw .md file
