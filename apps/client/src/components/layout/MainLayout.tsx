@@ -19,8 +19,8 @@ import { IntegrationDetailPanel } from "../panels/IntegrationDetailPanel";
 import { ConversationsPanel } from "../panels/ConversationsPanel";
 import ActivityPanel from "../panels/ActivityPanel";
 import { EmotionHistoryPanel } from "../panels/EmotionHistoryPanel";
-import { PermissionsPanel } from "../panels/PermissionsPanel";
 import { CanvasPage } from "../canvas-page/CanvasPage";
+import { SettingsOverlay } from "../settings/SettingsOverlay";
 import { KnowledgePanel } from "../panels/KnowledgePanel";
 import { PcViewer } from "../pc-viewer/PcViewer";
 import { useUIStore } from "../../stores/ui-store";
@@ -35,7 +35,6 @@ const MOBILE_NAV_ITEMS: Array<{ panel: PanelId; label: string }> = [
   { panel: "persona", label: "Persona" },
   { panel: "memory", label: "Memory" },
   { panel: "knowledge", label: "Knowledge" },
-  { panel: "permissions", label: "Permissions" },
   { panel: "skills", label: "Skills" },
   { panel: "tools", label: "Tools" },
   { panel: "schedules", label: "Schedules" },
@@ -48,6 +47,7 @@ function MobileMenu() {
   const mobileMenuOpen = useUIStore((s) => s.mobileMenuOpen);
   const closeMobileMenu = useUIStore((s) => s.closeMobileMenu);
   const openPanel = useUIStore((s) => s.openPanel);
+  const openSettings = useUIStore((s) => s.openSettings);
 
   if (!mobileMenuOpen) return null;
 
@@ -61,7 +61,10 @@ function MobileMenu() {
         {MOBILE_NAV_ITEMS.map(({ panel, label }) => (
           <button
             key={panel}
-            onClick={() => { openPanel(panel); closeMobileMenu(); }}
+            onClick={() => {
+              if (panel === "settings") { openSettings(); } else { openPanel(panel); }
+              closeMobileMenu();
+            }}
             className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground text-left"
           >
             {label}
@@ -74,10 +77,9 @@ function MobileMenu() {
 
 const PANEL_META: Record<string, { title: string; subtitle: string; width?: number; info?: string }> = {
   brain: { title: "Brain", subtitle: "LLM, persona & memory", info: "Central AI configuration — model, behavior, persona, and memory." },
-  permissions: { title: "Permissions", subtitle: "PC control, shell, channels & media", info: "Control what your AI is allowed to do — PC access, shell commands, channels." },
   settings: { title: "Settings", subtitle: "API keys, voice, security & sessions", info: "API keys, voice, security, session lifecycle, and backups." },
-  schedules: { title: "Schedules", subtitle: "Automated tasks & pulse", width: 640, info: "Automated tasks that run on a cron schedule." },
-  webhooks: { title: "Webhooks", subtitle: "External event subscriptions", width: 640, info: "Incoming triggers from external services like GitHub or Notion." },
+  schedules: { title: "Schedules", subtitle: "Automated tasks & pulse", info: "Automated tasks that run on a cron schedule." },
+  webhooks: { title: "Webhooks", subtitle: "External event subscriptions", info: "Incoming triggers from external services like GitHub or Notion." },
   memory: { title: "Memory", subtitle: "Learned facts & context", info: "Facts your AI has learned and remembers across conversations." },
   knowledge: { title: "Knowledge", subtitle: "Documents, URLs & resources", info: "Ingested documents, URLs, and resources for context." },
   persona: { title: "Persona", subtitle: "Identity & directives", info: "Your AI's identity, tone, style, and communication boundaries." },
@@ -95,8 +97,6 @@ function PanelContent({ panel }: { panel: string }) {
   switch (panel) {
     case "brain":
       return <BrainPanel />;
-    case "permissions":
-      return <PermissionsPanel />;
     case "settings":
       return <SettingsPanel />;
     case "schedules":
@@ -296,6 +296,9 @@ export function MainLayout() {
 
       {/* ─── PC Viewer overlay ─── */}
       <PcViewer />
+
+      {/* ─── Full-screen Settings overlay ─── */}
+      <SettingsOverlay />
 
       {/* ─── Expand mode hint ─── */}
       {isExpanded && (

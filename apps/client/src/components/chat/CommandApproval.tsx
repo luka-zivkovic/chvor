@@ -20,13 +20,13 @@ export function CommandApproval({ approval, onSend }: Props) {
   const [responded, setResponded] = useState(false);
 
   const respond = useCallback(
-    (approved: boolean) => {
+    (approved: boolean, alwaysAllow?: boolean) => {
       if (respondedRef.current) return;
       respondedRef.current = true;
       setResponded(true);
       onSend({
         type: "command.respond",
-        data: { requestId: approval.requestId, approved },
+        data: { requestId: approval.requestId, approved, alwaysAllow },
       });
       respondToApproval(approval.requestId, approved);
     },
@@ -93,6 +93,12 @@ export function CommandApproval({ approval, onSend }: Props) {
           className="px-3 py-1 rounded text-xs font-medium bg-status-completed hover:bg-status-completed/90 text-primary-foreground transition-colors"
         >
           Approve
+        </button>
+        <button
+          onClick={() => respond(true, true)}
+          className="px-3 py-1 rounded text-xs font-medium bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 transition-colors"
+        >
+          Always Allow
         </button>
         <button
           onClick={() => respond(false)}

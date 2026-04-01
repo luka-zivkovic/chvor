@@ -12,6 +12,7 @@ export interface CommandApprovalRequest {
 export interface CommandApprovalResponse {
   requestId: string;
   approved: boolean;
+  alwaysAllow?: boolean;
 }
 
 export type ShellApprovalMode = "always_approve" | "moderate_plus" | "dangerous_only" | "block_all";
@@ -22,4 +23,25 @@ export interface ShellConfig {
 
 export interface UpdateShellConfigRequest {
   approvalMode?: ShellApprovalMode;
+}
+
+// ── Filesystem access config ──────────────────────────────────────
+
+export interface FilesystemConfig {
+  enabled: boolean;
+  readOnly: boolean;
+  allowedPaths: string[];
+}
+
+export interface UpdateFilesystemConfigRequest {
+  enabled?: boolean;
+  readOnly?: boolean;
+  allowedPaths?: string[];
+}
+
+// ── Trusted commands (Always Allow) ───────────────────────────────
+
+export interface TrustedCommandsConfig {
+  shell: string[];
+  pc: string[];
 }

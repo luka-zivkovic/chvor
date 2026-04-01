@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type PanelId = "brain" | "persona" | "memory" | "knowledge" | "permissions" | "schedules" | "webhooks" | "settings" | "skills" | "skill-detail" | "tools" | "tool-detail" | "integration-detail" | "conversations" | "activity" | "emotion-history";
+export type PanelId = "brain" | "persona" | "memory" | "knowledge" | "schedules" | "webhooks" | "settings" | "skills" | "skill-detail" | "tools" | "tool-detail" | "integration-detail" | "conversations" | "activity" | "emotion-history";
 export type BrainTab = "overview" | "models" | "persona" | "memory";
 export type LayoutMode = "default" | "canvas-expanded" | "canvas";
 
@@ -13,6 +13,8 @@ interface UIState {
   mobileMenuOpen: boolean;
   /** Node ID for detail panels (skill-detail, integration-detail) */
   detailNodeId: string | null;
+  /** Full-screen settings overlay */
+  settingsOpen: boolean;
   openPanel: (panel: PanelId) => void;
   closePanel: () => void;
   togglePanel: (panel: PanelId) => void;
@@ -25,6 +27,8 @@ interface UIState {
   closeMobileMenu: () => void;
   openCanvas: () => void;
   exitCanvas: () => void;
+  openSettings: () => void;
+  closeSettings: () => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -34,6 +38,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   chatCollapsed: false,
   mobileMenuOpen: false,
   detailNodeId: null,
+  settingsOpen: false,
   openPanel: (panel) => set({ activePanel: panel, detailNodeId: null }),
   closePanel: () => set({ activePanel: null, detailNodeId: null }),
   togglePanel: (panel) =>
@@ -53,4 +58,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   closeMobileMenu: () => set({ mobileMenuOpen: false }),
   openCanvas: () => set({ layoutMode: "canvas", activePanel: null }),
   exitCanvas: () => set({ layoutMode: "default" }),
+  openSettings: () => set({ settingsOpen: true, activePanel: null }),
+  closeSettings: () => set({ settingsOpen: false }),
 }));

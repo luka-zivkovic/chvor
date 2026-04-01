@@ -33,7 +33,7 @@ const RETENTION_OPTIONS = [
   { value: 0, label: "Forever" },
 ];
 
-function CredentialsContent() {
+export function CredentialsContent() {
   const { fetchAll, loading, error, credentials } = useCredentialStore();
   const { config: retention, fetchConfig, updateConfig } = useRetentionStore();
   const [showAdd, setShowAdd] = useState(false);
@@ -114,7 +114,7 @@ function CredentialsContent() {
   );
 }
 
-function SecurityContent() {
+export function SecurityContent() {
   const { authEnabled, checkStatus, apiKeys, fetchApiKeys } = useAuthStore();
   const [loading, setLoading] = useState(true);
 
@@ -357,7 +357,7 @@ const CHAT_TYPES: { id: ChatType; label: string }[] = [
   { id: "thread", label: "Threads" },
 ];
 
-function SessionsContent() {
+export function SessionsContent() {
   const { config, fetchConfig, updateConfig } = useSessionLifecycleStore();
   const [triggerInput, setTriggerInput] = useState("");
 
@@ -569,7 +569,7 @@ const MAX_AGE_OPTIONS = [
   { value: 0, label: "Forever" },
 ];
 
-function BackupContent() {
+export function BackupContent() {
   const {
     backups, config, creating, restoring, error,
     fetchBackups, fetchConfig, updateConfig, createBackup, deleteBackup, restoreBackup,

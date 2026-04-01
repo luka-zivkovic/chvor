@@ -17,6 +17,9 @@ import type {
   ShellConfig,
   ShellApprovalMode,
   UpdateShellConfigRequest,
+  FilesystemConfig,
+  UpdateFilesystemConfigRequest,
+  TrustedCommandsConfig,
   ChannelPolicy,
   UpdateChannelPolicyRequest,
   ChannelType,
@@ -30,6 +33,7 @@ import type {
   MediaTypeConfig,
 } from "@chvor/shared";
 import { getDb } from "./database.ts";
+import os from "node:os";
 
 const DEFAULTS: Record<string, string> = {
   "persona.profile":
@@ -637,6 +641,92 @@ export function getAllowLocalhost(): boolean {
 export function setAllowLocalhost(allow: boolean): boolean {
   setConfig("security.allowLocalhost", String(allow));
   return allow;
+}
+
+// ── Filesystem access config ──────────────────────────────────────
+
+export function getFilesystemConfig(): FilesystemConfig {
+  const parseEnabled = getConfig("filesystem.enabled");
+  const parseReadOnly = getConfig("filesystem.readOnly");
+  const rawPaths = getConfig("filesystem.allowedPaths");
+
+  let allowedPaths: string[];
+  if (!rawPaths) {
+    allowedPaths = [os.homedir()];
+  } else {
+    try {
+      const arr = JSON.parse(rawPaths);
+      allowedPaths = Array.isArray(arr) ? arr : [os.homedir()];
+    } catch {
+      allowedPaths = [os.homedir()];
+    }
+  }
+
+  return {
+    enabled: (parseEnabled ?? "true") === "true",
+    readOnly: (parseReadOnly ?? "false") === "true",
+    allowedPaths,
+  };
+}
+
+export function updateFilesystemConfig(updates: UpdateFilesystemConfigRequest): FilesystemConfig {
+  if (updates.enabled !== undefined) setConfig("filesystem.enabled", String(updates.enabled));
+  if (updates.readOnly !== undefined) setConfig("filesystem.readOnly", String(updates.readOnly));
+  if (updates.allowedPaths !== undefined) setConfig("filesystem.allowedPaths", JSON.stringify(updates.allowedPaths));
+  return getFilesystemConfig();
+}
+
+// ── Trusted commands (Always Allow) ──────────────────────────────
+
+function parseTrustedArray(key: string): string[] {
+  const raw = getConfig(key);
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+export function getTrustedCommands(): TrustedCommandsConfig {
+  return {
+    shell: parseTrustedArray("trusted.shell"),
+    pc: parseTrustedArray("trusted.pc"),
+  };
+}
+
+export function addTrustedCommand(kind: "shell" | "pc", pattern: string): TrustedCommandsConfig {
+  const current = getTrustedCommands();
+  const arr = kind === "shell" ? current.shell : current.pc;
+  if (!arr.includes(pattern)) arr.push(pattern);
+  setConfig(`trusted.${kind}`, JSON.stringify(arr));
+  return getTrustedCommands();
+}
+
+export function removeTrustedCommand(kind: "shell" | "pc", pattern: string): TrustedCommandsConfig {
+  const current = getTrustedCommands();
+  const arr = kind === "shell" ? current.shell : current.pc;
+  const filtered = arr.filter((p) => p !== pattern);
+  setConfig(`trusted.${kind}`, JSON.stringify(filtered));
+  return getTrustedCommands();
+}
+
+/** Check if a command matches a trusted pattern. */
+export function isTrustedCommand(command: string, isPc: boolean): boolean {
+  const trusted = getTrustedCommands();
+  if (isPc) {
+    const cleaned = command.replace(/^PC (Task|shell):\s*/i, "");
+    const firstWord = cleaned.split(/\s+/)[0]?.toLowerCase() ?? "";
+    return trusted.pc.some((p) => p.toLowerCase() === firstWord);
+  }
+  // Shell: match "binary subcommand" pattern (first 2 tokens)
+  const parts = command.trim().split(/\s+/);
+  for (let len = Math.min(parts.length, 2); len >= 1; len--) {
+    const candidate = parts.slice(0, len).join(" ");
+    if (trusted.shell.includes(candidate)) return true;
+  }
+  return false;
 }
 
 // ── Media retention ──────────────────────────────────────────────

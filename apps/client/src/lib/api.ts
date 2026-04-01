@@ -57,6 +57,9 @@ import type {
   RegistryEntry,
   SkillConfigParam,
   KnowledgeResource,
+  FilesystemConfig,
+  UpdateFilesystemConfigRequest,
+  TrustedCommandsConfig,
 } from "@chvor/shared";
 
 export interface ProvidersResponse {
@@ -463,6 +466,23 @@ export const api = {
       request<{ allowLocalhost: boolean }>("/config/security", {
         method: "PATCH",
         body: JSON.stringify(body),
+      }),
+    getFilesystem: () => request<FilesystemConfig>("/config/security/filesystem"),
+    updateFilesystem: (body: UpdateFilesystemConfigRequest) =>
+      request<FilesystemConfig>("/config/security/filesystem", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    getTrusted: () => request<TrustedCommandsConfig>("/config/security/trusted"),
+    addTrusted: (kind: "shell" | "pc", pattern: string) =>
+      request<TrustedCommandsConfig>("/config/security/trusted", {
+        method: "POST",
+        body: JSON.stringify({ kind, pattern }),
+      }),
+    removeTrusted: (kind: "shell" | "pc", pattern: string) =>
+      request<TrustedCommandsConfig>("/config/security/trusted", {
+        method: "DELETE",
+        body: JSON.stringify({ kind, pattern }),
       }),
   },
 

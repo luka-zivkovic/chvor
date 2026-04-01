@@ -10,7 +10,7 @@ import type { ExecutionEvent, GatewayServerEvent, A2UIComponentEntry } from "@ch
 import { surfaceExists, upsertSurface, updateBindings as updateSurfaceBindings, deleteSurface as deleteSurfaceFromDb, deleteAllSurfaces } from "../db/a2ui-store.ts";
 import { logError, formatUptime } from "./error-logger.ts";
 import type { ErrorCategory } from "./error-logger.ts";
-import { getSelfHealingEnabled, getPcControlEnabled, setConfig, getShellConfig as getShellApprovalConfig, isCapabilityEnabled } from "../db/config-store.ts";
+import { getSelfHealingEnabled, getPcControlEnabled, setConfig, getShellConfig as getShellApprovalConfig, isCapabilityEnabled, isTrustedCommand, addTrustedCommand } from "../db/config-store.ts";
 import { fetchRegistryIndex, readCachedIndex } from "./registry-client.ts";
 import { installEntry, uninstallEntry, readLock } from "./registry-manager.ts";
 import type { RegistryEntryKind } from "@chvor/shared";
@@ -1963,7 +1963,7 @@ const shellExecuteToolDef = tool({
 
 const pendingApprovals = new Map<
   string,
-  { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout> }
+  { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout>; command: string }
 >();
 
 async function requestApproval(
@@ -1972,6 +1972,12 @@ async function requestApproval(
   classification: ClassificationResult,
   context?: NativeToolContext
 ): Promise<{ approved: boolean; requestId: string }> {
+  // Check trusted commands — auto-approve if matched
+  const isPc = command.startsWith("PC Task:") || command.startsWith("PC shell:");
+  if (isTrustedCommand(command, isPc)) {
+    return { approved: true, requestId: "trusted-auto" };
+  }
+
   const requestId = randomUUID();
 
   // Send confirmation request via WS
@@ -2023,19 +2029,34 @@ async function requestApproval(
       resolve(false);
     }, APPROVAL_TIMEOUT_MS);
 
-    pendingApprovals.set(requestId, { resolve, timer });
+    pendingApprovals.set(requestId, { resolve, timer, command });
   });
 
   return { approved, requestId };
 }
 
 /** Called when user responds to a command.confirm event. */
-export function resolveApproval(requestId: string, approved: boolean): boolean {
+export function resolveApproval(requestId: string, approved: boolean, alwaysAllow?: boolean): boolean {
   const pending = pendingApprovals.get(requestId);
   if (!pending) return false;
 
   clearTimeout(pending.timer);
   pendingApprovals.delete(requestId);
+
+  // If approved with alwaysAllow, store the trusted pattern
+  if (approved && alwaysAllow && pending.command) {
+    const isPc = pending.command.startsWith("PC Task:") || pending.command.startsWith("PC shell:");
+    if (isPc) {
+      const cleaned = pending.command.replace(/^PC (Task|shell):\s*/i, "");
+      const firstWord = cleaned.split(/\s+/)[0]?.toLowerCase() ?? "";
+      if (firstWord) addTrustedCommand("pc", firstWord);
+    } else {
+      const parts = pending.command.trim().split(/\s+/);
+      const pattern = parts.slice(0, Math.min(parts.length, 2)).join(" ");
+      if (pattern) addTrustedCommand("shell", pattern);
+    }
+  }
+
   pending.resolve(approved);
   return true;
 }
