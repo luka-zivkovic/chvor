@@ -131,7 +131,7 @@ export function A2UIRenderer({ surfaceId, surface }: { surfaceId: string; surfac
       ) : (
         <A2UIErrorBoundary key={surfaceId} surfaceId={surfaceId}>
           <div className="a2ui-surface" role="region" aria-label={`Surface: ${surfaceId}`}>
-            {renderNode(surface.root, surface, new Set(), 0)}
+            {renderNode(surface.root!, surface, new Set(), 0)}
           </div>
         </A2UIErrorBoundary>
       )}
