@@ -54,6 +54,12 @@ export function CommandApproval({ approval, onSend }: Props) {
   const secs = seconds % 60;
   const timeStr = `${minutes}:${secs.toString().padStart(2, "0")}`;
 
+  // Derive the trusted pattern that "Always Allow" would store
+  const isPcCommand = approval.command.startsWith("PC Task:") || approval.command.startsWith("PC shell:");
+  const alwaysAllowPattern = isPcCommand
+    ? approval.command.replace(/^PC (Task|shell):\s*/i, "").split(/\s+/)[0]?.toLowerCase() ?? ""
+    : approval.command.trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
+
   const isDangerous = approval.tier === "dangerous";
   const tierColor = isDangerous ? "text-destructive" : "text-status-warning";
   const borderColor = isDangerous
@@ -97,6 +103,7 @@ export function CommandApproval({ approval, onSend }: Props) {
         <button
           onClick={() => respond(true, true)}
           className="px-3 py-1 rounded text-xs font-medium bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 transition-colors"
+          title={`Auto-approve future "${alwaysAllowPattern}" commands`}
         >
           Always Allow
         </button>

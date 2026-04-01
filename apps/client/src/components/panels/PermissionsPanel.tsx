@@ -278,6 +278,9 @@ export function PermissionsContent() {
         <h3 className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
           Filesystem Access
         </h3>
+        <p className="text-[10px] text-amber-500/80 mb-3">
+          These settings are advisory preferences. Server-side enforcement is not yet implemented.
+        </p>
         {fsConfig ? (
           <div className="flex flex-col divide-y divide-border/30">
             <div className="pb-3">

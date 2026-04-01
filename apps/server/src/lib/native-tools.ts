@@ -2052,7 +2052,7 @@ export function resolveApproval(requestId: string, approved: boolean, alwaysAllo
       if (firstWord) addTrustedCommand("pc", firstWord);
     } else {
       const parts = pending.command.trim().split(/\s+/);
-      const pattern = parts.slice(0, Math.min(parts.length, 2)).join(" ");
+      const pattern = parts.slice(0, Math.min(parts.length, 2)).join(" ").toLowerCase();
       if (pattern) addTrustedCommand("shell", pattern);
     }
   }

@@ -163,7 +163,7 @@ wsManager.onClientMessage((clientId, event) => {
       // TODO Phase 4: track per-workspace subscriptions
       break;
     case "command.respond": {
-      const resolved = resolveApproval(event.data.requestId, event.data.approved, event.data.alwaysAllow);
+      const resolved = resolveApproval(event.data.requestId, event.data.approved, !!event.data.alwaysAllow);
       if (!resolved) {
         wsManager.sendTo(clientId, {
           type: "error",

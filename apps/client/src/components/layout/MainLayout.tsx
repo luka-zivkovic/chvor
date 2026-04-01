@@ -5,7 +5,6 @@ import { ConnectionBanner } from "./ConnectionBanner";
 import { BrainCanvas } from "../canvas/BrainCanvas";
 import { CanvasHint } from "../onboarding/CanvasHint";
 import { ChatPanel } from "../chat/ChatPanel";
-import { SettingsPanel } from "../panels/SettingsPanel";
 import { SchedulesPanel } from "../panels/SchedulesPanel";
 import { WebhooksPanel } from "../panels/WebhooksPanel";
 import { MemoryPanel } from "../panels/MemoryPanel";
@@ -98,7 +97,7 @@ function PanelContent({ panel }: { panel: string }) {
     case "brain":
       return <BrainPanel />;
     case "settings":
-      return <SettingsPanel />;
+      return null; // Settings now uses SettingsOverlay; all entry points redirect to openSettings()
     case "schedules":
       return <SchedulesPanel />;
     case "webhooks":
