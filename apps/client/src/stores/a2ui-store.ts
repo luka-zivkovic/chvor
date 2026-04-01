@@ -95,11 +95,10 @@ export const useA2UIStore = create<A2UIState>((set, get) => ({
     let newComponents = merged_raw;
     if (keys.length > MAX_COMPONENTS_PER_SURFACE) {
       // Prune oldest components but always preserve the root
-      const pruned = keys.slice(-MAX_COMPONENTS_PER_SURFACE);
-      if (effectiveRoot && !pruned.includes(effectiveRoot)) {
-        pruned[0] = effectiveRoot;
-      }
-      newComponents = Object.fromEntries(pruned.map((k) => [k, merged_raw[k]]));
+      const withoutRoot = effectiveRoot ? keys.filter((k) => k !== effectiveRoot) : keys;
+      const kept = withoutRoot.slice(-(MAX_COMPONENTS_PER_SURFACE - (effectiveRoot ? 1 : 0)));
+      if (effectiveRoot) kept.unshift(effectiveRoot);
+      newComponents = Object.fromEntries(kept.map((k) => [k, merged_raw[k]]));
     }
 
     const rootValid = effectiveRoot ? effectiveRoot in newComponents : false;
