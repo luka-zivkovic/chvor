@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, memo } from "react";
 import { useA2UIStore } from "../../stores/a2ui-store";
 import { useUIStore } from "../../stores/ui-store";
 import { A2UIRenderer } from "../a2ui/A2UIRenderer";
 import { cn } from "@/lib/utils";
-import type { A2UISurfaceListItem, A2UISurface } from "@chvor/shared";
+import type { A2UISurfaceListItem } from "@chvor/shared";
 
 export function CanvasPage() {
   const exitCanvas = useUIStore((s) => s.exitCanvas);
@@ -14,10 +14,18 @@ export function CanvasPage() {
   const fetchSurface = useA2UIStore((s) => s.fetchSurface);
   const deleteSurface = useA2UIStore((s) => s.deleteSurfaceFromServer);
 
-  // Load surface list on mount
+  // Load surface list on mount and auto-select first surface if none active
   useEffect(() => {
-    fetchSurfaces();
-  }, [fetchSurfaces]);
+    let cancelled = false;
+    fetchSurfaces().then(() => {
+      if (cancelled) return;
+      const { activeSurfaceId, surfaceList } = useA2UIStore.getState();
+      if (!activeSurfaceId && surfaceList.length > 0) {
+        fetchSurface(surfaceList[0].id);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [fetchSurfaces, fetchSurface]);
 
   // Esc to exit
   useEffect(() => {
@@ -29,22 +37,22 @@ export function CanvasPage() {
   }, [exitCanvas]);
 
   return (
-    <div className="flex h-screen w-screen bg-background text-foreground">
+    <div className="flex h-dvh w-screen bg-background text-foreground">
       {/* Sidebar */}
-      <div className="flex w-64 shrink-0 flex-col border-r border-border bg-card">
+      <nav className="hidden sm:flex w-48 md:w-64 shrink-0 flex-col border-r border-border bg-card" aria-label="Surface list">
         {/* Sidebar header */}
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <button
             onClick={exitCanvas}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            title="Back to Brain"
+            aria-label="Back to Brain"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <line x1="19" y1="12" x2="5" y2="12" />
               <polyline points="12 19 5 12 12 5" />
             </svg>
           </button>
-          <span className="text-sm font-medium">A2UI Canvas</span>
+          <h2 className="text-sm font-medium">A2UI Canvas</h2>
         </div>
 
         {/* Surface list */}
@@ -57,23 +65,25 @@ export function CanvasPage() {
               </p>
             </div>
           ) : (
-            surfaceList.map((item) => (
-              <SurfaceListItem
-                key={item.id}
-                item={item}
-                active={item.id === activeSurfaceId}
-                onSelect={() => fetchSurface(item.id)}
-                onDelete={() => deleteSurface(item.id)}
-              />
-            ))
+            <ul className="flex flex-col gap-0.5" aria-label="Surfaces">
+              {surfaceList.map((item) => (
+                <SurfaceListItem
+                  key={item.id}
+                  item={item}
+                  active={item.id === activeSurfaceId}
+                  onSelect={fetchSurface}
+                  onDelete={deleteSurface}
+                />
+              ))}
+            </ul>
           )}
         </div>
-      </div>
+      </nav>
 
       {/* Main viewer */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden">
         {activeSurface ? (
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
             <A2UIRenderer surfaceId={activeSurface.surfaceId} surface={activeSurface} />
           </div>
         ) : (
@@ -87,12 +97,12 @@ export function CanvasPage() {
             </div>
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }
 
-function SurfaceListItem({
+const SurfaceListItem = memo(function SurfaceListItem({
   item,
   active,
   onSelect,
@@ -100,43 +110,39 @@ function SurfaceListItem({
 }: {
   item: A2UISurfaceListItem;
   active: boolean;
-  onSelect: () => void;
-  onDelete: () => void;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
 }) {
-  const [hovered, setHovered] = useState(false);
-
   return (
-    <div
+    <li
       className={cn(
-        "group flex items-center gap-2 rounded-md px-3 py-2 cursor-pointer transition-colors",
+        "group flex items-center gap-2 rounded-md transition-colors",
         active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
       )}
-      onClick={onSelect}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
-      <div className="flex-1 min-w-0">
+      <button
+        className="flex-1 min-w-0 px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-md"
+        aria-current={active ? "true" : undefined}
+        onClick={() => onSelect(item.id)}
+      >
         <p className="text-xs font-medium truncate">{item.title}</p>
         <p className="text-[10px] text-muted-foreground/60 truncate">
           {new Date(item.updatedAt).toLocaleDateString()}
         </p>
-      </div>
+      </button>
 
-      {hovered && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (window.confirm(`Delete surface "${item.title}"?`)) onDelete();
-          }}
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-destructive transition-colors"
-          title="Delete surface"
-        >
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <line x1="2" y1="2" x2="8" y2="8" />
-            <line x1="8" y1="2" x2="2" y2="8" />
-          </svg>
-        </button>
-      )}
-    </div>
+      <button
+        aria-label={`Delete surface ${item.title}`}
+        onClick={() => {
+          if (window.confirm(`Delete surface "${item.title}"?`)) onDelete(item.id);
+        }}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-muted-foreground hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-all mr-1"
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+          <line x1="2" y1="2" x2="8" y2="8" />
+          <line x1="8" y1="2" x2="2" y2="8" />
+        </svg>
+      </button>
+    </li>
   );
-}
+});

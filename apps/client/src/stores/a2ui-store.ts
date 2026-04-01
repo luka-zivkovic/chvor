@@ -89,13 +89,18 @@ export const useA2UIStore = create<A2UIState>((set, get) => ({
       ? { ...existing.components, ...incoming }
       : incoming;
 
-    const keys = Object.keys(merged_raw);
-    const newComponents = keys.length > MAX_COMPONENTS_PER_SURFACE
-      ? Object.fromEntries(keys.slice(-MAX_COMPONENTS_PER_SURFACE).map((k) => [k, merged_raw[k]]))
-      : merged_raw;
-
-    // If pruning removed the root, mark surface as not renderable
     const effectiveRoot = data.root ?? existing?.root ?? null;
+
+    const keys = Object.keys(merged_raw);
+    let newComponents = merged_raw;
+    if (keys.length > MAX_COMPONENTS_PER_SURFACE) {
+      // Prune oldest components but always preserve the root
+      const withoutRoot = effectiveRoot ? keys.filter((k) => k !== effectiveRoot) : keys;
+      const kept = withoutRoot.slice(-(MAX_COMPONENTS_PER_SURFACE - (effectiveRoot ? 1 : 0)));
+      if (effectiveRoot) kept.unshift(effectiveRoot);
+      newComponents = Object.fromEntries(kept.map((k) => [k, merged_raw[k]]));
+    }
+
     const rootValid = effectiveRoot ? effectiveRoot in newComponents : false;
 
     const merged: A2UISurface = existing

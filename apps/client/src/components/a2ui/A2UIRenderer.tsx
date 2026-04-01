@@ -64,8 +64,8 @@ function renderNode(
     }
   } catch {
     return (
-      <p className="text-xs text-destructive">
-        Error rendering component "{nodeId}"
+      <p role="alert" className="text-xs text-destructive">
+        Error rendering component &ldquo;{nodeId}&rdquo;
       </p>
     );
   }
@@ -98,9 +98,15 @@ class A2UIErrorBoundary extends Component<EBProps, EBState> {
   render() {
     if (this.state.error) {
       return (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-4">
+        <div role="alert" className="rounded-lg border border-destructive/50 bg-destructive/5 p-4">
           <p className="text-sm font-medium text-destructive">Surface render error</p>
           <p className="mt-1 text-xs text-muted-foreground">{this.state.error.message}</p>
+          <button
+            className="mt-2 text-xs text-muted-foreground underline hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
+            onClick={() => this.setState({ error: null })}
+          >
+            Retry
+          </button>
         </div>
       );
     }
@@ -111,17 +117,24 @@ class A2UIErrorBoundary extends Component<EBProps, EBState> {
 /* ─── Renderer ─── */
 
 export function A2UIRenderer({ surfaceId, surface }: { surfaceId: string; surface: A2UISurface }) {
-  if (!surface.root || !surface.rendering) {
-    return (
-      <p className="text-xs text-muted-foreground text-center py-8">
-        Building surface...
-      </p>
-    );
-  }
+  const isBuilding = !surface.root || !surface.rendering;
 
   return (
-    <A2UIErrorBoundary key={surfaceId} surfaceId={surfaceId}>
-      <div className="a2ui-surface">{renderNode(surface.root, surface, new Set(), 0)}</div>
-    </A2UIErrorBoundary>
+    <>
+      <p aria-live="polite" className="sr-only">
+        {isBuilding ? "Building surface" : "Surface ready"}
+      </p>
+      {isBuilding ? (
+        <p className="text-xs text-muted-foreground text-center py-8">
+          Building surface&hellip;
+        </p>
+      ) : (
+        <A2UIErrorBoundary key={surfaceId} surfaceId={surfaceId}>
+          <div className="a2ui-surface" role="region" aria-label={`Surface: ${surfaceId}`}>
+            {renderNode(surface.root!, surface, new Set(), 0)}
+          </div>
+        </A2UIErrorBoundary>
+      )}
+    </>
   );
 }
