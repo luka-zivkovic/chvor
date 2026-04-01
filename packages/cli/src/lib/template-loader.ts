@@ -5,7 +5,7 @@ import { parse as parseYaml } from "yaml";
 import type { TemplateManifest, TemplateIndexEntry } from "../types/template.js";
 import { getAppDir } from "./paths.js";
 
-const DEFAULT_REGISTRY_URL = "https://registry.chvor.ai";
+const DEFAULT_REGISTRY_URL = "https://registry.chvor.ai/v1";
 const FETCH_TIMEOUT_MS = 8_000;
 const SAFE_ENTRY_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
