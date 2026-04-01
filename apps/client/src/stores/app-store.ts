@@ -500,7 +500,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       case "a2ui.toast":
         import("sonner").then(({ toast }) => {
           toast.success(event.data.title ?? "Surface ready", {
-            action: { label: "Open Canvas", onClick: () => useUIStore.getState().openCanvas() },
+            action: { label: "Open Canvas", onClick: () => useUIStore.getState().openCanvas(event.data.surfaceId) },
           });
         }).catch(() => { /* sonner not available */ });
         break;

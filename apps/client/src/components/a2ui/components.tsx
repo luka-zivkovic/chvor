@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type {
   A2UITextComponent,
   A2UIColumnComponent,
@@ -73,8 +74,9 @@ export function A2UIColumn({
   renderNode: (nodeId: string, surface: A2UISurface, visited?: Set<string>, depth?: number) => React.ReactNode;
 }) {
   const align = ALIGN_MAP[spec.align ?? "start"] ?? "";
+  const gap = spec.gap ?? 8;
   return (
-    <div className={cn("flex flex-col", align)} style={{ gap: spec.gap ?? 8 }}>
+    <div className={cn("flex flex-col", align)} style={{ gap }}>
       {spec.children.explicitList.map((childId) => (
         <Child key={childId} nodeId={childId} surface={surface} renderNode={renderNode} />
       ))}
@@ -94,8 +96,9 @@ export function A2UIRow({
   renderNode: (nodeId: string, surface: A2UISurface, visited?: Set<string>, depth?: number) => React.ReactNode;
 }) {
   const align = ALIGN_MAP[spec.align ?? "start"] ?? "";
+  const gap = spec.gap ?? 8;
   return (
-    <div className={cn("flex flex-row flex-wrap", align)} style={{ gap: spec.gap ?? 8 }}>
+    <div className={cn("flex flex-row flex-wrap", align)} style={{ gap }}>
       {spec.children.explicitList.map((childId) => (
         <Child key={childId} nodeId={childId} surface={surface} renderNode={renderNode} />
       ))}
@@ -137,7 +140,7 @@ export function A2UIImage({
   return (
     <img
       src={src}
-      alt={spec.alt ?? ""}
+      alt={spec.alt || "Image"}
       width={spec.width}
       height={spec.height}
       className="rounded-lg border border-border max-w-full object-contain"
@@ -167,13 +170,14 @@ export function A2UITable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
+    <div className="overflow-x-auto rounded-lg border border-border" role="region" aria-label="Scrollable table">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted">
             {spec.columns.map((col) => (
               <th
                 key={col.key}
+                scope="col"
                 className="px-3 py-2 text-left text-xs font-medium text-muted-foreground"
               >
                 {col.label}
@@ -188,7 +192,7 @@ export function A2UITable({
               className="border-b border-border last:border-0 hover:bg-muted transition-colors"
             >
               {spec.columns.map((col) => (
-                <td key={col.key} className="px-3 py-2 text-foreground tabular-nums">
+                <td key={col.key} className="px-3 py-2 text-foreground tabular-nums max-w-xs truncate">
                   {row[col.key] != null ? String(row[col.key]) : ""}
                 </td>
               ))}
@@ -268,18 +272,21 @@ export function A2UIInput({
 }: {
   spec: A2UIInputComponent["Input"];
 }) {
+  const inputId = useId();
+
   return (
     <div className="flex flex-col gap-1.5">
       {spec.placeholder && (
-        <label className="text-xs font-medium text-muted-foreground">
+        <label htmlFor={inputId} className="text-xs font-medium text-muted-foreground">
           {spec.placeholder}
         </label>
       )}
       <input
+        id={inputId}
         type={spec.inputType ?? "text"}
         placeholder={spec.placeholder ?? ""}
         data-bind={spec.bindTo}
-        className="h-9 w-full rounded-md border border-border bg-input px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        className="h-9 w-full rounded-md border border-border bg-input px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
     </div>
   );
@@ -315,7 +322,9 @@ export function A2UIChart({
     );
   }
 
-  const maxVal = Math.max(...rawData.map((d) => d.value ?? 0), 1);
+  // Clamp negative values to 0 for chart rendering
+  const values = rawData.map((d) => Math.max(0, d.value ?? 0));
+  const maxVal = Math.max(...values, 1);
   const chartHeight = 140;
   const padTop = 10;
   const padBottom = 28;
@@ -325,6 +334,9 @@ export function A2UIChart({
   // Y-axis ticks
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(maxVal * f));
 
+  const chartTitle = spec.title ?? "Chart";
+  const dataDesc = rawData.map((d) => `${d.label ?? "?"}: ${d.value ?? 0}`).join(", ");
+
   if (spec.chartType === "line") {
     const contentWidth = rawData.length * 50;
     const width = padLeft + contentWidth + padRight;
@@ -333,7 +345,7 @@ export function A2UIChart({
     const points = rawData
       .map((d, i) => {
         const x = padLeft + i * 50 + 25;
-        const y = padTop + chartHeight - ((d.value ?? 0) / maxVal) * chartHeight;
+        const y = padTop + chartHeight - (values[i] / maxVal) * chartHeight;
         return `${x},${y}`;
       })
       .join(" ");
@@ -344,7 +356,8 @@ export function A2UIChart({
           <p className="text-sm font-medium text-foreground">{spec.title}</p>
         )}
         <div className="rounded-lg border border-border p-3">
-          <svg viewBox={`0 0 ${width} ${height}`} className="w-full max-w-lg">
+          <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label={`${chartTitle}: ${dataDesc}`}>
+            <title>{chartTitle}</title>
             {/* Grid lines */}
             {ticks.map((tick, i) => {
               const y = padTop + chartHeight - (tick / maxVal) * chartHeight;
@@ -382,7 +395,7 @@ export function A2UIChart({
             {/* Data points + labels */}
             {rawData.map((d, i) => {
               const x = padLeft + i * 50 + 25;
-              const y = padTop + chartHeight - ((d.value ?? 0) / maxVal) * chartHeight;
+              const y = padTop + chartHeight - (values[i] / maxVal) * chartHeight;
               return (
                 <g key={i}>
                   <circle cx={x} cy={y} r="3" fill={CHART_COLORS[0]} />
@@ -418,7 +431,8 @@ export function A2UIChart({
         <p className="text-sm font-medium text-foreground">{spec.title}</p>
       )}
       <div className="rounded-lg border border-border p-3">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full max-w-lg">
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label={`${chartTitle}: ${dataDesc}`}>
+          <title>{chartTitle}</title>
           {/* Grid lines */}
           {ticks.map((tick, i) => {
             const y = padTop + chartHeight - (tick / maxVal) * chartHeight;
@@ -456,7 +470,7 @@ export function A2UIChart({
           />
           {/* Bars */}
           {rawData.map((d, i) => {
-            const h = ((d.value ?? 0) / maxVal) * chartHeight;
+            const h = (values[i] / maxVal) * chartHeight;
             const x = padLeft + i * (barWidth + barGap) + barGap / 2;
             const y = padTop + chartHeight - h;
             const color = CHART_COLORS[i % CHART_COLORS.length];

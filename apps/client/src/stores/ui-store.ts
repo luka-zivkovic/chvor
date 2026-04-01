@@ -23,7 +23,7 @@ interface UIState {
   toggleChat: () => void;
   toggleMobileMenu: () => void;
   closeMobileMenu: () => void;
-  openCanvas: () => void;
+  openCanvas: (surfaceId?: string) => void;
   exitCanvas: () => void;
 }
 
@@ -51,6 +51,15 @@ export const useUIStore = create<UIState>((set, get) => ({
   toggleChat: () => set({ chatCollapsed: !get().chatCollapsed }),
   toggleMobileMenu: () => set({ mobileMenuOpen: !get().mobileMenuOpen }),
   closeMobileMenu: () => set({ mobileMenuOpen: false }),
-  openCanvas: () => set({ layoutMode: "canvas", activePanel: null }),
+  openCanvas: (surfaceId?: string) => {
+    set({ layoutMode: "canvas", activePanel: null });
+    if (surfaceId) {
+      import("./a2ui-store").then(({ useA2UIStore }) => {
+        useA2UIStore.getState().fetchSurface(surfaceId);
+      }).catch((err) => {
+        console.error("[ui] failed to load a2ui-store for auto-select:", err);
+      });
+    }
+  },
   exitCanvas: () => set({ layoutMode: "default" }),
 }));
