@@ -20,13 +20,13 @@ export function CommandApproval({ approval, onSend }: Props) {
   const [responded, setResponded] = useState(false);
 
   const respond = useCallback(
-    (approved: boolean) => {
+    (approved: boolean, alwaysAllow?: boolean) => {
       if (respondedRef.current) return;
       respondedRef.current = true;
       setResponded(true);
       onSend({
         type: "command.respond",
-        data: { requestId: approval.requestId, approved },
+        data: { requestId: approval.requestId, approved, alwaysAllow },
       });
       respondToApproval(approval.requestId, approved);
     },
@@ -53,6 +53,12 @@ export function CommandApproval({ approval, onSend }: Props) {
   const minutes = Math.floor(seconds / 60);
   const secs = seconds % 60;
   const timeStr = `${minutes}:${secs.toString().padStart(2, "0")}`;
+
+  // Derive the trusted pattern that "Always Allow" would store
+  const isPcCommand = /^PC (Task|shell):/i.test(approval.command);
+  const alwaysAllowPattern = isPcCommand
+    ? approval.command.replace(/^PC (Task|shell):\s*/i, "").split(/\s+/)[0]?.toLowerCase() ?? ""
+    : approval.command.trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
 
   const isDangerous = approval.tier === "dangerous";
   const tierColor = isDangerous ? "text-destructive" : "text-status-warning";
@@ -93,6 +99,13 @@ export function CommandApproval({ approval, onSend }: Props) {
           className="px-3 py-1 rounded text-xs font-medium bg-status-completed hover:bg-status-completed/90 text-primary-foreground transition-colors"
         >
           Approve
+        </button>
+        <button
+          onClick={() => respond(true, true)}
+          className="px-3 py-1 rounded text-xs font-medium bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 transition-colors"
+          title={`Auto-approve future "${alwaysAllowPattern}" commands`}
+        >
+          Always Allow
         </button>
         <button
           onClick={() => respond(false)}

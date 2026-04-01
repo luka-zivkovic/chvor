@@ -40,15 +40,6 @@ const NAV_ITEMS: { id: PanelId; label: string; icon: ReactNode }[] = [
     ),
   },
   {
-    id: "permissions",
-    label: "Permissions",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      </svg>
-    ),
-  },
-  {
     id: "schedules",
     label: "Schedules",
     icon: (
@@ -136,6 +127,8 @@ export function Sidebar() {
   const activePanel = useUIStore((s) => s.activePanel);
   const togglePanel = useUIStore((s) => s.togglePanel);
   const closePanel = useUIStore((s) => s.closePanel);
+  const settingsOpen = useUIStore((s) => s.settingsOpen);
+  const openSettings = useUIStore((s) => s.openSettings);
 
   return (
     <aside className="flex h-full w-14 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar py-3">
@@ -154,13 +147,14 @@ export function Sidebar() {
       {/* Nav items */}
       <nav className="flex flex-1 flex-col items-center gap-1">
         {NAV_ITEMS.map((item) => {
-          const isActive = activePanel === item.id;
+          const isSettings = item.id === "settings";
+          const isActive = isSettings ? settingsOpen : activePanel === item.id;
           return (
             <Button
               key={item.id}
               variant="ghost"
               size="icon"
-              onClick={() => togglePanel(item.id)}
+              onClick={() => isSettings ? openSettings() : togglePanel(item.id)}
               className={cn(
                 "group relative",
                 isActive

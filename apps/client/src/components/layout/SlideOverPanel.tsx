@@ -29,7 +29,7 @@ export function SlideOverPanel({
         "border-r border-border/50 backdrop-blur-xl"
       )}
       style={{
-        maxWidth: width ?? 520,
+        maxWidth: width ?? 560,
         background: "var(--glass-bg-strong)",
       }}
     >

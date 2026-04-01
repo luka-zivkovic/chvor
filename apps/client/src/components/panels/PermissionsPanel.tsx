@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
-import type { PcSafetyLevel, ShellApprovalMode } from "@chvor/shared";
+import type {
+  PcSafetyLevel,
+  ShellApprovalMode,
+  FilesystemConfig,
+  TrustedCommandsConfig,
+} from "@chvor/shared";
 
 /* ─── Reusable toggle switch ─── */
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
@@ -24,7 +29,20 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: () =
   );
 }
 
-export function PermissionsPanel() {
+const SAFETY_DESCRIPTIONS: Record<PcSafetyLevel, string> = {
+  supervised: "Every action requires your approval before execution. Safest option.",
+  "semi-autonomous": "Known-safe actions (keyboard shortcuts, simple clicks) auto-execute. Complex or LLM-planned actions require approval.",
+  autonomous: "All actions execute without approval. Use only in trusted environments.",
+};
+
+const SHELL_DESCRIPTIONS: Record<ShellApprovalMode, string> = {
+  always_approve: "All commands run immediately without asking. Only use if you trust the AI fully.",
+  dangerous_only: "Safe and moderate commands run freely. Dangerous commands (rm, sudo, etc.) require approval.",
+  moderate_plus: "Only safe read-only commands run freely. Anything that writes or modifies requires approval.",
+  block_all: "No shell commands can run. The AI cannot execute anything on your system.",
+};
+
+export function PermissionsContent() {
   // PC Control state
   const [pcEnabled, setPcEnabled] = useState(false);
   const [pcSafetyLevel, setPcSafetyLevel] = useState<PcSafetyLevel>("supervised");
@@ -35,6 +53,13 @@ export function PermissionsPanel() {
 
   // Network state
   const [allowLocalhost, setAllowLocalhost] = useState(false);
+
+  // Filesystem state
+  const [fsConfig, setFsConfig] = useState<FilesystemConfig | null>(null);
+  const [newPath, setNewPath] = useState("");
+
+  // Trusted commands state
+  const [trusted, setTrusted] = useState<TrustedCommandsConfig | null>(null);
 
   /* ─── Load configs on mount ─── */
   useEffect(() => {
@@ -49,16 +74,22 @@ export function PermissionsPanel() {
 
     api.shellConfig
       .get()
-      .then((cfg) => {
-        setShellApprovalMode(cfg.approvalMode);
-      })
+      .then((cfg) => setShellApprovalMode(cfg.approvalMode))
       .catch(() => {});
 
     api.securityConfig
       .get()
-      .then((cfg) => {
-        setAllowLocalhost(cfg.allowLocalhost);
-      })
+      .then((cfg) => setAllowLocalhost(cfg.allowLocalhost))
+      .catch(() => {});
+
+    api.securityConfig
+      .getFilesystem()
+      .then(setFsConfig)
+      .catch(() => {});
+
+    api.securityConfig
+      .getTrusted()
+      .then(setTrusted)
       .catch(() => {});
   }, []);
 
@@ -110,6 +141,44 @@ export function PermissionsPanel() {
     }
   };
 
+  const handleFsUpdate = async (updates: Partial<FilesystemConfig>) => {
+    if (!fsConfig) return;
+    const prev = { ...fsConfig };
+    setFsConfig({ ...fsConfig, ...updates });
+    try {
+      const result = await api.securityConfig.updateFilesystem(updates);
+      setFsConfig(result);
+    } catch {
+      setFsConfig(prev);
+      toast.error("Failed to update filesystem config");
+    }
+  };
+
+  const handleAddPath = () => {
+    const p = newPath.trim();
+    if (!p || !fsConfig) return;
+    if (fsConfig.allowedPaths.includes(p)) {
+      toast.error("Path already in list");
+      return;
+    }
+    handleFsUpdate({ allowedPaths: [...fsConfig.allowedPaths, p] });
+    setNewPath("");
+  };
+
+  const handleRemovePath = (path: string) => {
+    if (!fsConfig) return;
+    handleFsUpdate({ allowedPaths: fsConfig.allowedPaths.filter((p) => p !== path) });
+  };
+
+  const handleRemoveTrusted = async (kind: "shell" | "pc", pattern: string) => {
+    try {
+      const result = await api.securityConfig.removeTrusted(kind, pattern);
+      setTrusted(result);
+    } catch {
+      toast.error("Failed to remove trusted command");
+    }
+  };
+
   return (
     <div className="flex flex-col gap-7">
       {/* ─── PC Control ─── */}
@@ -136,10 +205,13 @@ export function PermissionsPanel() {
                   onChange={(e) => handlePcSafetyChange(e.target.value as PcSafetyLevel)}
                   className="w-full rounded border border-border/40 bg-transparent px-2 py-1.5 text-[11px] text-foreground"
                 >
-                  <option value="supervised">Supervised — approve every action</option>
-                  <option value="semi-autonomous">Semi-autonomous — auto-approve safe actions</option>
-                  <option value="autonomous">Autonomous — no approval needed</option>
+                  <option value="supervised">Supervised</option>
+                  <option value="semi-autonomous">Semi-autonomous</option>
+                  <option value="autonomous">Autonomous</option>
                 </select>
+                <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+                  {SAFETY_DESCRIPTIONS[pcSafetyLevel]}
+                </p>
                 {!pcLocalAvailable && (
                   <p className="mt-1.5 text-[10px] text-amber-500/80">
                     No local backend detected. Install the PC agent for full control.
@@ -169,11 +241,14 @@ export function PermissionsPanel() {
               onChange={(e) => handleShellApprovalChange(e.target.value as ShellApprovalMode)}
               className="mt-2 w-full rounded border border-border/40 bg-transparent px-2 py-1.5 text-[11px] text-foreground"
             >
-              <option value="always_approve">Always approve — run any command</option>
-              <option value="dangerous_only">Block dangerous — block rm, sudo, etc.</option>
-              <option value="moderate_plus">Block moderate + dangerous — block most writes</option>
-              <option value="block_all">Block all — no shell commands</option>
+              <option value="always_approve">Always approve</option>
+              <option value="dangerous_only">Block dangerous</option>
+              <option value="moderate_plus">Block moderate + dangerous</option>
+              <option value="block_all">Block all</option>
             </select>
+            <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+              {SHELL_DESCRIPTIONS[shellApprovalMode]}
+            </p>
           </div>
         </div>
       </section>
@@ -196,6 +271,168 @@ export function PermissionsPanel() {
             </div>
           </div>
         </div>
+      </section>
+
+      {/* ─── Filesystem ─── */}
+      <section>
+        <h3 className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Filesystem Access
+        </h3>
+        <p className="text-[10px] text-amber-500/80 mb-3">
+          These settings are advisory preferences. Server-side enforcement is not yet implemented.
+        </p>
+        {fsConfig ? (
+          <div className="flex flex-col divide-y divide-border/30">
+            <div className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-foreground">Enable filesystem access</p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    Allow the AI to read and write files on your system
+                  </p>
+                </div>
+                <Toggle
+                  checked={fsConfig.enabled}
+                  onChange={() => handleFsUpdate({ enabled: !fsConfig.enabled })}
+                  label="Toggle filesystem access"
+                />
+              </div>
+
+              {fsConfig.enabled && (
+                <div className="mt-3 flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Read-only mode</p>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        Restrict the AI to only reading files, no writing
+                      </p>
+                    </div>
+                    <Toggle
+                      checked={fsConfig.readOnly}
+                      onChange={() => handleFsUpdate({ readOnly: !fsConfig.readOnly })}
+                      label="Toggle read-only mode"
+                    />
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium text-foreground mb-2">Allowed directories</p>
+                    <p className="text-[10px] text-muted-foreground/70 mb-2">
+                      The AI can only access files within these directories.
+                    </p>
+                    <div className="flex flex-col gap-1.5 mb-2">
+                      {fsConfig.allowedPaths.map((path) => (
+                        <div
+                          key={path}
+                          className="flex items-center justify-between rounded-md border border-border/40 px-2.5 py-1.5"
+                        >
+                          <span className="font-mono text-[10px] text-foreground/80 truncate mr-2">{path}</span>
+                          <button
+                            onClick={() => handleRemovePath(path)}
+                            className="shrink-0 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+                            aria-label={`Remove ${path}`}
+                          >
+                            x
+                          </button>
+                        </div>
+                      ))}
+                      {fsConfig.allowedPaths.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground/50">No allowed directories. AI cannot access any files.</p>
+                      )}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        className="flex-1 rounded border border-border/40 bg-transparent px-2 py-1.5 text-[11px] text-foreground font-mono"
+                        placeholder="/path/to/directory"
+                        value={newPath}
+                        onChange={(e) => setNewPath(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); handleAddPath(); }
+                        }}
+                      />
+                      <button
+                        onClick={handleAddPath}
+                        className="shrink-0 rounded border border-border/40 px-3 py-1.5 text-[10px] font-medium text-foreground hover:bg-white/5 transition-colors"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="text-[10px] text-muted-foreground">Loading...</p>
+        )}
+      </section>
+
+      {/* ─── Trusted Commands ─── */}
+      <section>
+        <h3 className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Trusted Commands
+        </h3>
+        <p className="text-[10px] text-muted-foreground/70 mb-3">
+          Commands you've marked as "Always Allow" will auto-approve without prompting.
+          Remove them here to require approval again.
+        </p>
+        {trusted ? (
+          <div className="flex flex-col gap-3">
+            {/* Shell */}
+            <div>
+              <p className="text-[10px] font-medium text-muted-foreground mb-1.5">Shell</p>
+              {trusted.shell.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {trusted.shell.map((pattern) => (
+                    <span
+                      key={pattern}
+                      className="inline-flex items-center gap-1 rounded-md bg-muted/50 border border-border/30 px-2 py-0.5 font-mono text-[10px] text-foreground"
+                    >
+                      {pattern}
+                      <button
+                        onClick={() => handleRemoveTrusted("shell", pattern)}
+                        className="text-muted-foreground hover:text-destructive transition-colors"
+                        aria-label={`Remove trusted pattern: ${pattern}`}
+                      >
+                        x
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[10px] text-muted-foreground/50">No trusted shell commands.</p>
+              )}
+            </div>
+
+            {/* PC */}
+            <div>
+              <p className="text-[10px] font-medium text-muted-foreground mb-1.5">PC Control</p>
+              {trusted.pc.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {trusted.pc.map((pattern) => (
+                    <span
+                      key={pattern}
+                      className="inline-flex items-center gap-1 rounded-md bg-muted/50 border border-border/30 px-2 py-0.5 font-mono text-[10px] text-foreground"
+                    >
+                      {pattern}
+                      <button
+                        onClick={() => handleRemoveTrusted("pc", pattern)}
+                        className="text-muted-foreground hover:text-destructive transition-colors"
+                        aria-label={`Remove trusted pattern: ${pattern}`}
+                      >
+                        x
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[10px] text-muted-foreground/50">No trusted PC actions.</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="text-[10px] text-muted-foreground">Loading...</p>
+        )}
       </section>
 
       {/* ─── Channel Access ─── */}
