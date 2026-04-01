@@ -696,10 +696,16 @@ export function getTrustedCommands(): TrustedCommandsConfig {
   };
 }
 
+const MAX_TRUSTED_PATTERNS = 100;
+
 export function addTrustedCommand(kind: "shell" | "pc", pattern: string): TrustedCommandsConfig {
   const current = getTrustedCommands();
   const arr = kind === "shell" ? current.shell : current.pc;
-  if (!arr.includes(pattern)) arr.push(pattern);
+  if (arr.includes(pattern)) return current;
+  if (arr.length >= MAX_TRUSTED_PATTERNS) {
+    throw new Error(`Too many trusted ${kind} patterns (max ${MAX_TRUSTED_PATTERNS})`);
+  }
+  arr.push(pattern);
   setConfig(`trusted.${kind}`, JSON.stringify(arr));
   return getTrustedCommands();
 }

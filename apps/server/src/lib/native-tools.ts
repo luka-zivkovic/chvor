@@ -1961,6 +1961,8 @@ const shellExecuteToolDef = tool({
 
 // --- Approval system ---
 
+const MAX_PENDING_APPROVALS = 50;
+
 const pendingApprovals = new Map<
   string,
   { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout>; command: string }
@@ -1973,9 +1975,14 @@ async function requestApproval(
   context?: NativeToolContext
 ): Promise<{ approved: boolean; requestId: string }> {
   // Check trusted commands — auto-approve if matched
-  const isPc = command.startsWith("PC Task:") || command.startsWith("PC shell:");
+  const isPc = /^PC (Task|shell):/i.test(command);
   if (isTrustedCommand(command, isPc)) {
     return { approved: true, requestId: "trusted-auto" };
+  }
+
+  // Prevent unbounded growth of pending approvals
+  if (pendingApprovals.size >= MAX_PENDING_APPROVALS) {
+    return { approved: false, requestId: "limit-exceeded" };
   }
 
   const requestId = randomUUID();
@@ -2045,7 +2052,7 @@ export function resolveApproval(requestId: string, approved: boolean, alwaysAllo
 
   // If approved with alwaysAllow, store the trusted pattern
   if (approved && alwaysAllow && pending.command) {
-    const isPc = pending.command.startsWith("PC Task:") || pending.command.startsWith("PC shell:");
+    const isPc = /^PC (Task|shell):/i.test(pending.command);
     if (isPc) {
       const cleaned = pending.command.replace(/^PC (Task|shell):\s*/i, "");
       const firstWord = cleaned.split(/\s+/)[0]?.toLowerCase() ?? "";

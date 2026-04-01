@@ -55,7 +55,7 @@ export function CommandApproval({ approval, onSend }: Props) {
   const timeStr = `${minutes}:${secs.toString().padStart(2, "0")}`;
 
   // Derive the trusted pattern that "Always Allow" would store
-  const isPcCommand = approval.command.startsWith("PC Task:") || approval.command.startsWith("PC shell:");
+  const isPcCommand = /^PC (Task|shell):/i.test(approval.command);
   const alwaysAllowPattern = isPcCommand
     ? approval.command.replace(/^PC (Task|shell):\s*/i, "").split(/\s+/)[0]?.toLowerCase() ?? ""
     : approval.command.trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();

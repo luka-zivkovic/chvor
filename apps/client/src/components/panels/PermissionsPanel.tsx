@@ -329,6 +329,7 @@ export function PermissionsContent() {
                           <button
                             onClick={() => handleRemovePath(path)}
                             className="shrink-0 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+                            aria-label={`Remove ${path}`}
                           >
                             x
                           </button>
@@ -391,6 +392,7 @@ export function PermissionsContent() {
                       <button
                         onClick={() => handleRemoveTrusted("shell", pattern)}
                         className="text-muted-foreground hover:text-destructive transition-colors"
+                        aria-label={`Remove trusted pattern: ${pattern}`}
                       >
                         x
                       </button>
@@ -416,6 +418,7 @@ export function PermissionsContent() {
                       <button
                         onClick={() => handleRemoveTrusted("pc", pattern)}
                         className="text-muted-foreground hover:text-destructive transition-colors"
+                        aria-label={`Remove trusted pattern: ${pattern}`}
                       >
                         x
                       </button>
