@@ -117,19 +117,24 @@ class A2UIErrorBoundary extends Component<EBProps, EBState> {
 /* ─── Renderer ─── */
 
 export function A2UIRenderer({ surfaceId, surface }: { surfaceId: string; surface: A2UISurface }) {
-  if (!surface.root || !surface.rendering) {
-    return (
-      <p aria-live="polite" className="text-xs text-muted-foreground text-center py-8">
-        Building surface&hellip;
-      </p>
-    );
-  }
+  const isBuilding = !surface.root || !surface.rendering;
 
   return (
-    <A2UIErrorBoundary key={surfaceId} surfaceId={surfaceId}>
-      <div className="a2ui-surface" role="region" aria-label={`Surface: ${surfaceId}`}>
-        {renderNode(surface.root, surface, new Set(), 0)}
-      </div>
-    </A2UIErrorBoundary>
+    <>
+      <p aria-live="polite" className="sr-only">
+        {isBuilding ? "Building surface" : "Surface ready"}
+      </p>
+      {isBuilding ? (
+        <p className="text-xs text-muted-foreground text-center py-8">
+          Building surface&hellip;
+        </p>
+      ) : (
+        <A2UIErrorBoundary key={surfaceId} surfaceId={surfaceId}>
+          <div className="a2ui-surface" role="region" aria-label={`Surface: ${surfaceId}`}>
+            {renderNode(surface.root, surface, new Set(), 0)}
+          </div>
+        </A2UIErrorBoundary>
+      )}
+    </>
   );
 }

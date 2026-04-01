@@ -112,11 +112,10 @@ export function isSafeImageSrc(src: string): boolean {
   if (!src) return false;
   const trimmed = src.trim();
   if (!trimmed) return false;
-  // Allow http(s), data:image/*, and relative paths
+  // Allow http(s) and data:image/*
   if (/^https?:\/\//i.test(trimmed)) return true;
   if (/^data:image\//i.test(trimmed)) return true;
-  if (trimmed.startsWith("/") || trimmed.startsWith("./")) return true;
-  // Block javascript:, data:text/html, and other schemes
+  // Block relative paths (could hit internal API routes), javascript:, data:text/html, etc.
   return false;
 }
 

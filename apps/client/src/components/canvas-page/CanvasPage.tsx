@@ -1,4 +1,4 @@
-import { useEffect, useCallback, memo } from "react";
+import { useEffect, memo } from "react";
 import { useA2UIStore } from "../../stores/a2ui-store";
 import { useUIStore } from "../../stores/ui-store";
 import { A2UIRenderer } from "../a2ui/A2UIRenderer";
@@ -16,12 +16,15 @@ export function CanvasPage() {
 
   // Load surface list on mount and auto-select first surface if none active
   useEffect(() => {
+    let cancelled = false;
     fetchSurfaces().then(() => {
+      if (cancelled) return;
       const { activeSurfaceId, surfaceList } = useA2UIStore.getState();
       if (!activeSurfaceId && surfaceList.length > 0) {
         fetchSurface(surfaceList[0].id);
       }
     });
+    return () => { cancelled = true; };
   }, [fetchSurfaces, fetchSurface]);
 
   // Esc to exit
@@ -32,10 +35,6 @@ export function CanvasPage() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [exitCanvas]);
-
-  // Memoized callbacks for list items (Phase 3: perf)
-  const handleSelect = useCallback((id: string) => fetchSurface(id), [fetchSurface]);
-  const handleDelete = useCallback((id: string) => deleteSurface(id), [deleteSurface]);
 
   return (
     <div className="flex h-dvh w-screen bg-background text-foreground">
@@ -57,7 +56,7 @@ export function CanvasPage() {
         </div>
 
         {/* Surface list */}
-        <div className="flex-1 overflow-y-auto p-2" role="listbox" aria-label="Surfaces">
+        <div className="flex-1 overflow-y-auto p-2">
           {surfaceList.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
               <p className="text-xs text-muted-foreground">No surfaces yet</p>
@@ -66,15 +65,17 @@ export function CanvasPage() {
               </p>
             </div>
           ) : (
-            surfaceList.map((item) => (
-              <SurfaceListItem
-                key={item.id}
-                item={item}
-                active={item.id === activeSurfaceId}
-                onSelect={handleSelect}
-                onDelete={handleDelete}
-              />
-            ))
+            <ul className="flex flex-col gap-0.5" aria-label="Surfaces">
+              {surfaceList.map((item) => (
+                <SurfaceListItem
+                  key={item.id}
+                  item={item}
+                  active={item.id === activeSurfaceId}
+                  onSelect={fetchSurface}
+                  onDelete={deleteSurface}
+                />
+              ))}
+            </ul>
           )}
         </div>
       </nav>
@@ -113,44 +114,35 @@ const SurfaceListItem = memo(function SurfaceListItem({
   onDelete: (id: string) => void;
 }) {
   return (
-    <button
-      role="option"
-      aria-selected={active}
+    <li
       className={cn(
-        "group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        "group flex items-center gap-2 rounded-md transition-colors",
         active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
       )}
-      onClick={() => onSelect(item.id)}
     >
-      <div className="flex-1 min-w-0">
+      <button
+        className="flex-1 min-w-0 px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-md"
+        aria-current={active ? "true" : undefined}
+        onClick={() => onSelect(item.id)}
+      >
         <p className="text-xs font-medium truncate">{item.title}</p>
         <p className="text-[10px] text-muted-foreground/60 truncate">
           {new Date(item.updatedAt).toLocaleDateString()}
         </p>
-      </div>
+      </button>
 
-      <span
-        role="button"
-        tabIndex={0}
+      <button
         aria-label={`Delete surface ${item.title}`}
-        onClick={(e) => {
-          e.stopPropagation();
+        onClick={() => {
           if (window.confirm(`Delete surface "${item.title}"?`)) onDelete(item.id);
         }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            e.stopPropagation();
-            if (window.confirm(`Delete surface "${item.title}"?`)) onDelete(item.id);
-          }
-        }}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-muted-foreground hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-all"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-muted-foreground hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-all mr-1"
       >
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
           <line x1="2" y1="2" x2="8" y2="8" />
           <line x1="8" y1="2" x2="2" y2="8" />
         </svg>
-      </span>
-    </button>
+      </button>
+    </li>
   );
 });
