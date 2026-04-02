@@ -935,3 +935,113 @@ export function pruneAccessLog(maxAgeDays: number = 90): number {
   return result.changes;
 }
 
+// ─── Graph & Statistics (Memory Insights Dashboard) ────────
+
+export function getMemoryGraph(): import("@chvor/shared").MemoryGraphExport {
+  const db = getDb();
+  const nodeRows = db.prepare(
+    `SELECT id, abstract, category, space, strength, decay_rate, access_count,
+            last_accessed_at, confidence, provenance, emotional_valence,
+            emotional_intensity, source_channel, created_at
+     FROM memory_nodes WHERE strength >= 0.05 ORDER BY created_at`
+  ).all() as MemoryNodeRow[];
+
+  const nodes = nodeRows.map((row) => ({
+    id: row.id,
+    abstract: row.abstract,
+    category: row.category as import("@chvor/shared").MemoryCategory,
+    space: row.space as import("@chvor/shared").MemorySpace,
+    strength: row.strength,
+    decayRate: row.decay_rate,
+    accessCount: row.access_count,
+    lastAccessedAt: row.last_accessed_at,
+    confidence: row.confidence,
+    provenance: row.provenance as import("@chvor/shared").MemoryProvenance,
+    emotionalValence: row.emotional_valence,
+    emotionalIntensity: row.emotional_intensity,
+    sourceChannel: row.source_channel,
+    createdAt: row.created_at,
+  }));
+
+  const edgeRows = db.prepare("SELECT * FROM memory_edges").all() as EdgeRow[];
+  const edges = edgeRows.map((row) => ({
+    id: row.id,
+    sourceId: row.source_id,
+    targetId: row.target_id,
+    relation: row.relation as import("@chvor/shared").EdgeRelation,
+    weight: row.weight,
+    createdAt: row.created_at,
+  }));
+
+  return { nodes, edges };
+}
+
+export function getMemoryStats(): import("@chvor/shared").MemoryStats {
+  const db = getDb();
+
+  const totalMemories = (db.prepare("SELECT COUNT(*) as c FROM memory_nodes").get() as { c: number }).c;
+  const totalEdges = (db.prepare("SELECT COUNT(*) as c FROM memory_edges").get() as { c: number }).c;
+
+  const categoryBreakdown = db.prepare(
+    "SELECT category, COUNT(*) as count FROM memory_nodes GROUP BY category ORDER BY count DESC"
+  ).all() as Array<{ category: string; count: number }>;
+
+  const provenanceBreakdown = db.prepare(
+    "SELECT provenance, COUNT(*) as count FROM memory_nodes GROUP BY provenance ORDER BY count DESC"
+  ).all() as Array<{ provenance: string; count: number }>;
+
+  const relationBreakdown = db.prepare(
+    "SELECT relation, COUNT(*) as count FROM memory_edges GROUP BY relation ORDER BY count DESC"
+  ).all() as Array<{ relation: string; count: number }>;
+
+  const strengthDistribution = db.prepare(`
+    SELECT
+      CASE
+        WHEN strength < 0.2 THEN '0.0-0.2'
+        WHEN strength < 0.4 THEN '0.2-0.4'
+        WHEN strength < 0.6 THEN '0.4-0.6'
+        WHEN strength < 0.8 THEN '0.6-0.8'
+        ELSE '0.8-1.0'
+      END as bucket,
+      COUNT(*) as count
+    FROM memory_nodes GROUP BY bucket ORDER BY bucket
+  `).all() as Array<{ bucket: string; count: number }>;
+
+  const avgRow = db.prepare(
+    "SELECT AVG(strength) as avgStrength, AVG(confidence) as avgConfidence FROM memory_nodes"
+  ).get() as { avgStrength: number | null; avgConfidence: number | null };
+
+  const dateRow = db.prepare(
+    "SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM memory_nodes"
+  ).get() as { oldest: string | null; newest: string | null };
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const recentCount7d = (db.prepare(
+    "SELECT COUNT(*) as c FROM memory_nodes WHERE created_at > ?"
+  ).get(sevenDaysAgo) as { c: number }).c;
+
+  const weakCount = (db.prepare(
+    "SELECT COUNT(*) as c FROM memory_nodes WHERE strength < 0.2"
+  ).get() as { c: number }).c;
+
+  const topAccessed = db.prepare(
+    "SELECT id, abstract, access_count FROM memory_nodes ORDER BY access_count DESC LIMIT 5"
+  ).all() as Array<{ id: string; abstract: string; access_count: number }>;
+
+  return {
+    totalMemories,
+    totalEdges,
+    categoryBreakdown,
+    provenanceBreakdown,
+    relationBreakdown,
+    strengthDistribution,
+    avgStrength: avgRow.avgStrength ?? 0,
+    avgConfidence: avgRow.avgConfidence ?? 0,
+    oldestMemory: dateRow.oldest,
+    newestMemory: dateRow.newest,
+    recentCount7d,
+    weakCount,
+    topAccessed: topAccessed.map((r) => ({ id: r.id, abstract: r.abstract, accessCount: r.access_count })),
+  };
+}
+

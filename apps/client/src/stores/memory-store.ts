@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Memory } from "@chvor/shared";
+import type { Memory, MemoryGraphNode, MemoryEdge, MemoryStats } from "@chvor/shared";
 import { api } from "../lib/api";
 
 interface MemoryState {
@@ -7,17 +7,31 @@ interface MemoryState {
   loading: boolean;
   error: string | null;
 
+  // Graph & stats for Memory Insights Dashboard
+  graphNodes: MemoryGraphNode[];
+  graphEdges: MemoryEdge[];
+  stats: MemoryStats | null;
+  graphLoading: boolean;
+  statsLoading: boolean;
+
   fetchAll: () => Promise<void>;
   addMemory: (content: string) => Promise<void>;
   removeMemory: (id: string) => void;
   updateMemory: (id: string, content: string) => void;
   clearAll: () => Promise<void>;
+  fetchGraph: () => Promise<void>;
+  fetchStats: () => Promise<void>;
 }
 
 export const useMemoryStore = create<MemoryState>((set) => ({
   memories: [],
   loading: false,
   error: null,
+  graphNodes: [],
+  graphEdges: [],
+  stats: null,
+  graphLoading: false,
+  statsLoading: false,
 
   fetchAll: async () => {
     set({ loading: true, error: null });
@@ -57,6 +71,26 @@ export const useMemoryStore = create<MemoryState>((set) => ({
       set({ memories: [] });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  fetchGraph: async () => {
+    set({ graphLoading: true });
+    try {
+      const data = await api.memories.graph();
+      set({ graphNodes: data.nodes, graphEdges: data.edges, graphLoading: false });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err), graphLoading: false });
+    }
+  },
+
+  fetchStats: async () => {
+    set({ statsLoading: true });
+    try {
+      const stats = await api.memories.stats();
+      set({ stats, statsLoading: false });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err), statsLoading: false });
     }
   },
 }));

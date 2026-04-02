@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { api } from "../../lib/api";
+import type { DaemonConfig, DaemonPresence, DaemonTask } from "@chvor/shared";
 
 const INTERVAL_OPTIONS = [
   { value: 15, label: "15 min" },
@@ -97,6 +99,179 @@ function PulseSection() {
   );
 }
 
+const DAEMON_PRESENCE_LABELS: Record<DaemonPresence["state"], string> = {
+  idle: "Idle",
+  working: "Working",
+  remediating: "Remediating",
+  consolidating: "Consolidating",
+  sleeping: "Sleeping",
+};
+
+const DAEMON_PRESENCE_COLORS: Record<DaemonPresence["state"], string> = {
+  idle: "bg-muted-foreground",
+  working: "bg-primary",
+  remediating: "bg-amber-500",
+  consolidating: "bg-blue-500",
+  sleeping: "bg-muted-foreground/50",
+};
+
+function DaemonSection() {
+  const [config, setConfig] = useState<DaemonConfig | null>(null);
+  const [presence, setPresence] = useState<DaemonPresence | null>(null);
+  const [tasks, setTasks] = useState<DaemonTask[]>([]);
+
+  useEffect(() => {
+    api.daemon.getConfig().then(setConfig).catch(() => {});
+    api.daemon.getPresence().then(setPresence).catch(() => {});
+    api.daemon.listTasks().then(setTasks).catch(() => {});
+  }, []);
+
+  // Refresh presence & tasks periodically when enabled
+  useEffect(() => {
+    if (!config?.enabled) return;
+    const id = setInterval(() => {
+      api.daemon.getPresence().then(setPresence).catch(() => {});
+      api.daemon.listTasks().then(setTasks).catch(() => {});
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [config?.enabled]);
+
+  if (!config) return null;
+
+  const updateConfig = async (updates: Partial<DaemonConfig>) => {
+    try {
+      const updated = await api.daemon.updateConfig(updates);
+      setConfig(updated);
+    } catch {
+      // silent
+    }
+  };
+
+  const toggles: {
+    key: keyof Pick<DaemonConfig, "taskQueue" | "autoRemediate" | "idleActions" | "wakeOnWebhook">;
+    label: string;
+    description: string;
+  }[] = [
+    { key: "taskQueue", label: "Task Queue", description: "Process queued tasks automatically" },
+    { key: "autoRemediate", label: "Auto-Remediate", description: "Fix detected issues without prompting" },
+    { key: "idleActions", label: "Idle Actions", description: "Run maintenance tasks when idle" },
+    { key: "wakeOnWebhook", label: "Wake on Webhook", description: "Resume from sleep on incoming webhooks" },
+  ];
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              Daemon
+            </h3>
+            <p className="mt-0.5 text-[10px] text-muted-foreground/70">
+              Always-on autonomous mode
+            </p>
+          </div>
+          <Badge
+            variant={config.enabled ? "success" : "secondary"}
+            className="cursor-pointer"
+            onClick={() => updateConfig({ enabled: !config.enabled })}
+          >
+            {config.enabled ? "Active" : "Off"}
+          </Badge>
+        </div>
+
+        {config.enabled && (
+          <>
+            {/* Presence indicator */}
+            {presence && (
+              <>
+                <Separator className="mt-3" />
+                <div className="flex items-center gap-2 pt-2">
+                  <span
+                    className={cn(
+                      "inline-block h-2 w-2 rounded-full",
+                      DAEMON_PRESENCE_COLORS[presence.state],
+                    )}
+                  />
+                  <span className="text-[10px] font-medium text-foreground">
+                    {DAEMON_PRESENCE_LABELS[presence.state]}
+                  </span>
+                  {presence.currentTask && (
+                    <span className="truncate text-[10px] text-muted-foreground">
+                      — {presence.currentTask.title}
+                    </span>
+                  )}
+                  {presence.queueDepth > 0 && (
+                    <Badge variant="secondary" className="ml-auto text-[9px]">
+                      {presence.queueDepth} queued
+                    </Badge>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Toggle switches */}
+            <Separator className="mt-3" />
+            <div className="mt-1">
+              {toggles.map(({ key, label, description }) => (
+                <div key={key} className="flex items-center justify-between py-2">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">{label}</p>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">{description}</p>
+                  </div>
+                  <button
+                    role="switch"
+                    aria-checked={config[key]}
+                    onClick={() => updateConfig({ [key]: !config[key] })}
+                    className={cn(
+                      "relative inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200",
+                      config[key] ? "bg-primary" : "bg-muted-foreground/25",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "pointer-events-none block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform duration-200",
+                        config[key] ? "translate-x-[14px]" : "translate-x-[2px]",
+                      )}
+                    />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Task queue list */}
+            {tasks.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                {tasks.slice(0, 5).map((task) => (
+                  <div
+                    key={task.id}
+                    className="flex items-center justify-between rounded bg-muted/30 px-2 py-1.5"
+                  >
+                    <span className="truncate text-[10px] text-foreground">
+                      {task.title}
+                    </span>
+                    <Badge
+                      variant={
+                        task.status === "completed"
+                          ? "success"
+                          : task.status === "failed"
+                            ? "destructive"
+                            : "secondary"
+                      }
+                      className="text-[9px]"
+                    >
+                      {task.status}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function StatBox({
   value,
   label,
@@ -145,6 +320,7 @@ export function SchedulesPanel() {
   return (
     <div className="flex flex-col gap-5">
       <PulseSection />
+      <DaemonSection />
 
       {/* Stats row */}
       {schedules.length > 0 && (

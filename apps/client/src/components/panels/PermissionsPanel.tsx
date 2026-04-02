@@ -6,6 +6,8 @@ import type {
   ShellApprovalMode,
   FilesystemConfig,
   TrustedCommandsConfig,
+  SandboxConfig,
+  SandboxStatus,
 } from "@chvor/shared";
 
 /* ─── Reusable toggle switch ─── */
@@ -61,6 +63,11 @@ export function PermissionsContent() {
   // Trusted commands state
   const [trusted, setTrusted] = useState<TrustedCommandsConfig | null>(null);
 
+  // Code Sandbox state
+  const [sandboxConfig, setSandboxConfig] = useState<SandboxConfig | null>(null);
+  const [sandboxStatus, setSandboxStatus] = useState<SandboxStatus | null>(null);
+  const [pullingImages, setPullingImages] = useState(false);
+
   /* ─── Load configs on mount ─── */
   useEffect(() => {
     api.pc
@@ -90,6 +97,16 @@ export function PermissionsContent() {
     api.securityConfig
       .getTrusted()
       .then(setTrusted)
+      .catch(() => {});
+
+    api.sandboxConfig
+      .get()
+      .then(setSandboxConfig)
+      .catch(() => {});
+
+    api.sandboxConfig
+      .status()
+      .then(setSandboxStatus)
       .catch(() => {});
   }, []);
 
@@ -176,6 +193,33 @@ export function PermissionsContent() {
       setTrusted(result);
     } catch {
       toast.error("Failed to remove trusted command");
+    }
+  };
+
+  const handleSandboxUpdate = async (updates: Partial<SandboxConfig>) => {
+    if (!sandboxConfig) return;
+    const prev = { ...sandboxConfig };
+    setSandboxConfig({ ...sandboxConfig, ...updates });
+    try {
+      const result = await api.sandboxConfig.update(updates);
+      setSandboxConfig(result);
+    } catch {
+      setSandboxConfig(prev);
+      toast.error("Failed to update sandbox config");
+    }
+  };
+
+  const handlePullImages = async () => {
+    setPullingImages(true);
+    try {
+      await api.sandboxConfig.pull();
+      toast.success("Images pulled successfully");
+      const status = await api.sandboxConfig.status();
+      setSandboxStatus(status);
+    } catch {
+      toast.error("Failed to pull sandbox images");
+    } finally {
+      setPullingImages(false);
     }
   };
 
@@ -469,6 +513,145 @@ export function PermissionsContent() {
             </p>
           </div>
         </div>
+      </section>
+
+      {/* ─── Code Sandbox ─── */}
+      <section>
+        <h3 className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Code Sandbox
+        </h3>
+        {sandboxConfig ? (
+          <div className="flex flex-col divide-y divide-border/30">
+            {/* Enable / disable */}
+            <div className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-foreground">Enable sandbox</p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    Run code in isolated Docker containers
+                  </p>
+                </div>
+                <Toggle
+                  checked={sandboxConfig.enabled}
+                  onChange={() => handleSandboxUpdate({ enabled: !sandboxConfig.enabled })}
+                  label="Toggle code sandbox"
+                />
+              </div>
+            </div>
+
+            {sandboxConfig.enabled && (
+              <>
+                {/* Docker status */}
+                <div className="py-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Docker status</p>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        {sandboxStatus
+                          ? sandboxStatus.dockerAvailable
+                            ? `Docker running \u2014 ${sandboxStatus.imagesAvailable.length} image(s) ready`
+                            : "Docker not available"
+                          : "Checking..."}
+                      </p>
+                    </div>
+                    {sandboxStatus && (
+                      <span
+                        className={`inline-block h-2 w-2 rounded-full ${
+                          sandboxStatus.dockerAvailable ? "bg-green-500" : "bg-red-500"
+                        }`}
+                        aria-label={sandboxStatus.dockerAvailable ? "Docker running" : "Docker offline"}
+                      />
+                    )}
+                  </div>
+
+                  {/* Pull images */}
+                  <button
+                    onClick={handlePullImages}
+                    disabled={pullingImages}
+                    className="mt-2 rounded border border-border/40 px-3 py-1.5 text-[10px] font-medium text-foreground hover:bg-white/5 transition-colors disabled:opacity-50"
+                  >
+                    {pullingImages ? "Pulling..." : "Pull images"}
+                  </button>
+                </div>
+
+                {/* Resource limits */}
+                <div className="py-3">
+                  <p className="text-xs font-medium text-foreground mb-2">Resource limits</p>
+
+                  <div className="flex flex-col gap-2.5">
+                    {/* Memory limit */}
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] text-muted-foreground">Memory limit</label>
+                      <select
+                        value={sandboxConfig.memoryLimitMb}
+                        onChange={(e) => handleSandboxUpdate({ memoryLimitMb: Number(e.target.value) })}
+                        className="rounded border border-input bg-transparent px-2 py-0.5 font-mono text-[10px] text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <option value={256}>256 MB</option>
+                        <option value={512}>512 MB</option>
+                        <option value={1024}>1 GB</option>
+                        <option value={2048}>2 GB</option>
+                        <option value={4096}>4 GB</option>
+                      </select>
+                    </div>
+
+                    {/* Timeout */}
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] text-muted-foreground">Execution timeout</label>
+                      <select
+                        value={sandboxConfig.timeoutMs / 1000}
+                        onChange={(e) => handleSandboxUpdate({ timeoutMs: Number(e.target.value) * 1000 })}
+                        className="rounded border border-input bg-transparent px-2 py-0.5 font-mono text-[10px] text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <option value={10}>10s</option>
+                        <option value={30}>30s</option>
+                        <option value={60}>60s</option>
+                        <option value={120}>120s</option>
+                        <option value={300}>300s</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Network access */}
+                <div className="py-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Network access</p>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        Allow containers to access the network
+                      </p>
+                    </div>
+                    <Toggle
+                      checked={!sandboxConfig.networkDisabled}
+                      onChange={() => handleSandboxUpdate({ networkDisabled: !sandboxConfig.networkDisabled })}
+                      label="Toggle sandbox network access"
+                    />
+                  </div>
+                </div>
+
+                {/* Workspace mount */}
+                <div className="py-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Workspace mount</p>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        Mount project workspace into the container
+                      </p>
+                    </div>
+                    <Toggle
+                      checked={sandboxConfig.workspaceMountEnabled}
+                      onChange={() => handleSandboxUpdate({ workspaceMountEnabled: !sandboxConfig.workspaceMountEnabled })}
+                      label="Toggle workspace mount"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <p className="text-[10px] text-muted-foreground">Loading...</p>
+        )}
       </section>
     </div>
   );

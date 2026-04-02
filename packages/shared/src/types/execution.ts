@@ -93,6 +93,9 @@ export type ExecutionEvent =
   | { type: "pc.pipeline.start"; data: { targetId: string; task: string } }
   | { type: "pc.pipeline.layer"; data: { targetId: string; layer: import("./pc-control.js").PipelineLayer; status: "trying" | "success" | "fallthrough" } }
   | { type: "pc.pipeline.complete"; data: { targetId: string; layer: import("./pc-control.js").PipelineLayer; success: boolean } }
+  | { type: "sandbox.started"; data: { nodeId: string; language: import("./sandbox.js").SandboxLanguage } }
+  | { type: "sandbox.completed"; data: { nodeId: string; exitCode: number; durationMs: number } }
+  | { type: "sandbox.failed"; data: { nodeId: string; error: string } }
   | { type: "execution.tokenBudget"; data: TokenBudgetInfo }
   | { type: "execution.completed"; data: { output: unknown } }
   | { type: "execution.failed"; data: { error: string } };

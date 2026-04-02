@@ -3,6 +3,10 @@ import type {
   UpdatePersonaRequest,
   PulseConfig,
   UpdatePulseRequest,
+  SandboxConfig,
+  UpdateSandboxConfigRequest,
+  DaemonConfig,
+  UpdateDaemonConfigRequest,
   RetentionConfig,
   UpdateRetentionRequest,
   BrainConfig,
@@ -785,4 +789,74 @@ export function getAllInstructionOverrides(): Array<{ kind: "skill" | "tool"; id
     const id = r.key.slice(prefixLen);
     return { kind, id, instructions: r.value };
   });
+}
+
+// ── Sandbox (Docker) config ────────────────────────────────────
+
+const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
+  enabled: false,
+  memoryLimitMb: 256,
+  cpuQuota: 50000,
+  timeoutMs: 30000,
+  networkDisabled: true,
+  workspaceMountEnabled: false,
+};
+
+export function getSandboxConfig(): SandboxConfig {
+  const raw = getConfig("sandbox.config");
+  if (!raw) return { ...DEFAULT_SANDBOX_CONFIG };
+  try {
+    return { ...DEFAULT_SANDBOX_CONFIG, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_SANDBOX_CONFIG };
+  }
+}
+
+export function updateSandboxConfig(updates: UpdateSandboxConfigRequest): SandboxConfig {
+  const current = getSandboxConfig();
+  if (updates.enabled !== undefined) current.enabled = updates.enabled;
+  if (updates.memoryLimitMb !== undefined) current.memoryLimitMb = Math.max(64, Math.min(4096, updates.memoryLimitMb));
+  if (updates.cpuQuota !== undefined) current.cpuQuota = Math.max(10000, Math.min(200000, updates.cpuQuota));
+  if (updates.timeoutMs !== undefined) current.timeoutMs = Math.max(5000, Math.min(120000, updates.timeoutMs));
+  if (updates.networkDisabled !== undefined) current.networkDisabled = updates.networkDisabled;
+  if (updates.workspaceMountEnabled !== undefined) current.workspaceMountEnabled = updates.workspaceMountEnabled;
+  setConfig("sandbox.config", JSON.stringify(current));
+  return current;
+}
+
+export function isSandboxEnabled(): boolean {
+  return getSandboxConfig().enabled;
+}
+
+// ── Daemon (Always-On) config ──────────────────────────────────
+
+const DEFAULT_DAEMON_CONFIG: DaemonConfig = {
+  enabled: false,
+  autoRemediate: false,
+  idleActions: false,
+  taskQueue: false,
+  wakeOnWebhook: false,
+  maxConcurrentTasks: 1,
+};
+
+export function getDaemonConfig(): DaemonConfig {
+  const raw = getConfig("daemon.config");
+  if (!raw) return { ...DEFAULT_DAEMON_CONFIG };
+  try {
+    return { ...DEFAULT_DAEMON_CONFIG, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_DAEMON_CONFIG };
+  }
+}
+
+export function updateDaemonConfig(updates: UpdateDaemonConfigRequest): DaemonConfig {
+  const current = getDaemonConfig();
+  if (updates.enabled !== undefined) current.enabled = updates.enabled;
+  if (updates.autoRemediate !== undefined) current.autoRemediate = updates.autoRemediate;
+  if (updates.idleActions !== undefined) current.idleActions = updates.idleActions;
+  if (updates.taskQueue !== undefined) current.taskQueue = updates.taskQueue;
+  if (updates.wakeOnWebhook !== undefined) current.wakeOnWebhook = updates.wakeOnWebhook;
+  if (updates.maxConcurrentTasks !== undefined) current.maxConcurrentTasks = Math.max(1, Math.min(5, updates.maxConcurrentTasks));
+  setConfig("daemon.config", JSON.stringify(current));
+  return current;
 }

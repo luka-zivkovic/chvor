@@ -661,6 +661,28 @@ export function getDb(): Database.Database {
     console.log("[db] migration v14 applied: system_jobs table for persistent periodic jobs");
   }
 
+  if (currentVersion < 15) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS daemon_tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'user',
+        priority INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'queued',
+        progress TEXT,
+        result TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_daemon_tasks_status ON daemon_tasks(status, priority DESC, created_at);
+    `);
+    db.pragma("user_version = 15");
+    console.log("[db] migration v15 applied: daemon_tasks table for always-on daemon");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }

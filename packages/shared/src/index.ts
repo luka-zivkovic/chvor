@@ -25,6 +25,8 @@ export * from "./types/session-lifecycle.js";
 export * from "./types/auth.js";
 export * from "./types/backup.js";
 export * from "./types/pc-control.js";
+export * from "./types/sandbox.js";
+export * from "./types/daemon.js";
 
 // Lib
 export * from "./lib/validate-skill.js";

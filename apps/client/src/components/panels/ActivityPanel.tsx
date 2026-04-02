@@ -11,6 +11,7 @@ const SOURCE_META: Record<ActivitySource, { label: string; color: string }> = {
   "credential-access": { label: "cred", color: "text-purple-400" },
   webhook: { label: "webhook", color: "text-cyan-400" },
   "pc-control": { label: "pc", color: "text-emerald-400" },
+  daemon: { label: "daemon", color: "text-indigo-400" },
 };
 
 function formatRelativeTime(iso: string): string {

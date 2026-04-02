@@ -1,4 +1,4 @@
-export type ActivitySource = "pulse" | "schedule" | "self-healing" | "workflow" | "credential-access" | "webhook" | "pc-control";
+export type ActivitySource = "pulse" | "schedule" | "self-healing" | "workflow" | "credential-access" | "webhook" | "pc-control" | "daemon";
 
 export interface ActivityEntry {
   id: string;

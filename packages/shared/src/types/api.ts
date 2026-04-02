@@ -88,7 +88,9 @@ export type GatewayServerEvent =
   | { type: "pc.connected"; data: import("./pc-control.js").PcAgentInfo }
   | { type: "pc.disconnected"; data: { id: string } }
   | { type: "pc.frame"; data: { agentId: string; screenshot: string; width: number; height: number; mimeType: string } }
-  | { type: "pc.localAvailable"; data: { available: boolean; hostname: string; os: string } };
+  | { type: "pc.localAvailable"; data: { available: boolean; hostname: string; os: string } }
+  | { type: "daemon.presence"; data: import("./daemon.js").DaemonPresence }
+  | { type: "daemon.taskUpdate"; data: import("./daemon.js").DaemonTask };
 
 export interface ConversationSummary {
   id: string;

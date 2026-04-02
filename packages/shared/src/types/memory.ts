@@ -82,3 +82,44 @@ export interface CreateMemoryRequest {
 export interface UpdateMemoryRequest {
   content: string;
 }
+
+// ─── Graph Visualization Types ─────────────────────────────
+
+/** Lightweight memory node for graph visualization (no content tiers or embeddings) */
+export interface MemoryGraphNode {
+  id: string;
+  abstract: string;
+  category: MemoryCategory;
+  space: MemorySpace;
+  strength: number;
+  decayRate: number;
+  accessCount: number;
+  lastAccessedAt: string | null;
+  confidence: number;
+  provenance: MemoryProvenance;
+  emotionalValence: number | null;
+  emotionalIntensity: number | null;
+  sourceChannel: string;
+  createdAt: string;
+}
+
+export interface MemoryGraphExport {
+  nodes: MemoryGraphNode[];
+  edges: MemoryEdge[];
+}
+
+export interface MemoryStats {
+  totalMemories: number;
+  totalEdges: number;
+  categoryBreakdown: Array<{ category: string; count: number }>;
+  provenanceBreakdown: Array<{ provenance: string; count: number }>;
+  relationBreakdown: Array<{ relation: string; count: number }>;
+  strengthDistribution: Array<{ bucket: string; count: number }>;
+  avgStrength: number;
+  avgConfidence: number;
+  oldestMemory: string | null;
+  newestMemory: string | null;
+  recentCount7d: number;
+  weakCount: number;
+  topAccessed: Array<{ id: string; abstract: string; accessCount: number }>;
+}
