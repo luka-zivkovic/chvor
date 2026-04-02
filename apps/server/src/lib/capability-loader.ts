@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import type { Skill, Tool, Capability } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
 import { parseCapabilityMd } from "./capability-parser.ts";
-import { getInstalledRegistryIds } from "./registry-manager.ts";
+import { getInstalledRegistryIds, compareSemver } from "./registry-manager.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +33,14 @@ function scanDir(dir: string, source: "bundled" | "user"): Capability[] {
     }
   }
   return capabilities;
+}
+
+/** Returns raw bundled capabilities (skills + tools) without dedup or caching. */
+export function getBundledCapabilities(): Capability[] {
+  return [
+    ...scanDir(BUNDLED_SKILLS_DIR, "bundled"),
+    ...scanDir(BUNDLED_TOOLS_DIR, "bundled"),
+  ];
 }
 
 export function loadAll(force = false): { skills: Skill[]; tools: Tool[] } {
@@ -78,22 +86,43 @@ export function loadAll(force = false): { skills: Skill[]; tools: Tool[] } {
 
   allCapabilities.push(...bundledSkills, ...bundledTools, ...userSkills, ...userTools);
 
-  // Deduplicate by ID — priority: bundled > user > registry
+  // Deduplicate by ID — version-aware for bundled vs registry, priority-based otherwise
   const SOURCE_PRIORITY: Record<string, number> = { bundled: 3, user: 2, registry: 1 };
   const deduped = new Map<string, Capability>();
   for (const cap of allCapabilities) {
     const existing = deduped.get(cap.id);
-    if (existing) {
-      const existingPriority = SOURCE_PRIORITY[existing.source] ?? 0;
-      const newPriority = SOURCE_PRIORITY[cap.source] ?? 0;
-      if (newPriority > existingPriority) {
-        console.warn(`[capability-loader] duplicate "${cap.id}": ${cap.source} overrides ${existing.source}`);
-        deduped.set(cap.id, cap);
-      } else {
-        console.warn(`[capability-loader] duplicate "${cap.id}": ${cap.source} shadowed by ${existing.source}`);
-      }
-    } else {
+    if (!existing) {
       deduped.set(cap.id, cap);
+      continue;
+    }
+
+    // Special case: bundled vs registry — version-based resolution
+    // Registry wins if strictly newer; bundled wins on tie or if newer
+    if (
+      (existing.source === "bundled" && cap.source === "registry") ||
+      (existing.source === "registry" && cap.source === "bundled")
+    ) {
+      const bundled = existing.source === "bundled" ? existing : cap;
+      const registry = existing.source === "registry" ? existing : cap;
+      const cmp = compareSemver(registry.metadata.version, bundled.metadata.version);
+      if (cmp > 0) {
+        console.warn(`[capability-loader] "${cap.id}": registry v${registry.metadata.version} overrides bundled v${bundled.metadata.version}`);
+        deduped.set(cap.id, registry);
+      } else {
+        console.warn(`[capability-loader] "${cap.id}": bundled v${bundled.metadata.version} takes precedence over registry v${registry.metadata.version}`);
+        deduped.set(cap.id, bundled);
+      }
+      continue;
+    }
+
+    // Default: source priority
+    const existingPriority = SOURCE_PRIORITY[existing.source] ?? 0;
+    const newPriority = SOURCE_PRIORITY[cap.source] ?? 0;
+    if (newPriority > existingPriority) {
+      console.warn(`[capability-loader] duplicate "${cap.id}": ${cap.source} overrides ${existing.source}`);
+      deduped.set(cap.id, cap);
+    } else {
+      console.warn(`[capability-loader] duplicate "${cap.id}": ${cap.source} shadowed by ${existing.source}`);
     }
   }
   const dedupedList = Array.from(deduped.values());

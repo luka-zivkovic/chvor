@@ -76,9 +76,9 @@ export function getInstalledRegistryIds(): Set<string> {
   return new Set(Object.keys(readLock().installed));
 }
 
-function compareSemver(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
+export function compareSemver(a: string, b: string): number {
+  const pa = a.split(".").map((x) => Number(x) || 0);
+  const pb = b.split(".").map((x) => Number(x) || 0);
   for (let i = 0; i < 3; i++) {
     const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
     if (diff !== 0) return diff;
@@ -397,8 +397,14 @@ export async function installEntry(
   if (existingCap && existingCap.source === "user") {
     throw new Error(`A user-created ${resolvedKind} "${entryId}" already exists. Rename or delete it before installing from registry.`);
   }
-  if (existingCap && existingCap.source === "bundled") {
-    throw new Error(`Cannot install — "${entryId}" is a bundled ${resolvedKind} and cannot be overridden.`);
+  // Allow registry to shadow bundled when the registry version is strictly newer
+  const isShadowingBundled = existingCap?.source === "bundled";
+  if (isShadowingBundled) {
+    if (compareSemver(entry.version, existingCap.metadata.version) <= 0) {
+      throw new Error(
+        `Cannot install — registry version ${entry.version} of "${entryId}" is not newer than bundled version ${existingCap.metadata.version}.`,
+      );
+    }
   }
 
   // Download content and verify integrity
@@ -424,6 +430,7 @@ export async function installEntry(
     sha256,
     source: "registry",
     userModified: false,
+    ...(isShadowingBundled ? { shadowsBundled: true } : {}),
   };
   lock.lastChecked = new Date().toISOString();
   writeLock(lock);
@@ -547,11 +554,15 @@ export async function uninstallEntry(entryId: string): Promise<void> {
   }
 
   // Remove from lockfile
+  const wasShadowingBundled = info.shadowsBundled ?? false;
   delete lock.installed[entryId];
   writeLock(lock);
 
-  // Reload
+  // Reload — if this was shadowing a bundled entry, the bundled version is automatically restored
   reloadAll();
+  if (wasShadowingBundled) {
+    console.log(`[registry-manager] uninstalled registry override of bundled ${info.kind} "${entryId}" — bundled version restored`);
+  }
 }
 
 /** @deprecated Use uninstallEntry */
@@ -565,6 +576,10 @@ export interface UpdateInfo {
   current: string;
   available: string;
   userModified: boolean;
+  /** True when the entry being updated is a bundled skill/tool (not yet in lock) */
+  isBundled?: boolean;
+  /** The version shipped with the app, if this is a bundled entry */
+  bundledVersion?: string;
 }
 
 export async function checkForUpdates(): Promise<UpdateInfo[]> {
@@ -602,6 +617,29 @@ export async function checkForUpdates(): Promise<UpdateInfo[]> {
     }
   }
 
+  // Also check bundled capabilities for available registry updates
+  const { getBundledCapabilities } = await import("./capability-loader.ts");
+  const bundled = getBundledCapabilities();
+  for (const cap of bundled) {
+    // Skip if already covered by a registry install in the lock
+    if (lock.installed[cap.id]) continue;
+
+    const entry = index.entries.find((e) => e.id === cap.id);
+    if (!entry) continue;
+
+    if (compareSemver(entry.version, cap.metadata.version) > 0) {
+      updates.push({
+        id: cap.id,
+        kind: entry.kind ?? (cap.kind as RegistryEntryKind),
+        current: cap.metadata.version,
+        available: entry.version,
+        userModified: false,
+        isBundled: true,
+        bundledVersion: cap.metadata.version,
+      });
+    }
+  }
+
   lock.lastChecked = new Date().toISOString();
   writeLock(lock);
 
@@ -616,6 +654,13 @@ export async function updateEntry(
   const lock = readLock();
   const info = lock.installed[entryId];
   if (!info) {
+    // Check if this is a bundled entry being updated from registry for the first time
+    const { getBundledCapabilities } = await import("./capability-loader.ts");
+    const bundled = getBundledCapabilities().find((c) => c.id === entryId);
+    if (bundled) {
+      await installEntry(entryId, bundled.kind as RegistryEntryKind);
+      return { updated: true, conflict: false };
+    }
     throw new Error(`"${entryId}" is not installed from registry`);
   }
 
@@ -668,6 +713,7 @@ export async function updateEntry(
     sha256,
     source: "registry",
     userModified: false,
+    ...(info.shadowsBundled ? { shadowsBundled: true } : {}),
   };
   writeLock(lock);
 

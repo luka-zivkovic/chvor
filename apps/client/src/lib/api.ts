@@ -230,7 +230,7 @@ export const api = {
         method: "DELETE",
       }),
     checkUpdates: () =>
-      request<Array<{ id: string; kind: string; current: string; available: string; userModified: boolean }>>("/registry/updates"),
+      request<Array<{ id: string; kind: string; current: string; available: string; userModified: boolean; isBundled?: boolean; bundledVersion?: string }>>("/registry/updates"),
     update: (id: string, force?: boolean) =>
       request<{ id: string; updated: boolean; conflict: boolean }>("/registry/update", {
         method: "POST",

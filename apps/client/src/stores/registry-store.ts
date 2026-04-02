@@ -5,6 +5,8 @@ import { api } from "../lib/api";
 export type RegistryEntryWithStatus = RegistryEntry & {
   installed: boolean;
   installedVersion: string | null;
+  hasBundledVersion?: boolean;
+  bundledVersion?: string | null;
 };
 
 export interface UpdateInfo {
@@ -13,6 +15,8 @@ export interface UpdateInfo {
   current: string;
   available: string;
   userModified: boolean;
+  isBundled?: boolean;
+  bundledVersion?: string;
 }
 
 interface RegistryState {

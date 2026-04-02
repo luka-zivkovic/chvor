@@ -112,6 +112,8 @@ export interface InstalledRegistryEntry {
   sha256: string;
   source: "registry";
   userModified: boolean;
+  /** True when this registry entry overrides a bundled skill/tool of the same ID */
+  shadowsBundled?: boolean;
   /** Template-only: IDs of skills/tools installed as part of this template */
   includedEntries?: string[];
   /** Template-only: IDs of schedules provisioned by this template */
