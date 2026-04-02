@@ -683,6 +683,17 @@ export function getDb(): Database.Database {
     console.log("[db] migration v15 applied: daemon_tasks table for always-on daemon");
   }
 
+  if (currentVersion < 16) {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_memory_nodes_category ON memory_nodes(category);
+      CREATE INDEX IF NOT EXISTS idx_memory_nodes_strength ON memory_nodes(strength);
+      CREATE INDEX IF NOT EXISTS idx_memory_nodes_created_at ON memory_nodes(created_at);
+      CREATE INDEX IF NOT EXISTS idx_memory_edges_source_target ON memory_edges(source_id, target_id);
+    `);
+    db.pragma("user_version = 16");
+    console.log("[db] migration v16 applied: memory indexes for graph & stats queries");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }

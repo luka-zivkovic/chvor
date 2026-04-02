@@ -37,16 +37,23 @@ daemon.get("/tasks", (c) => {
   }
 });
 
+const MAX_TITLE_LENGTH = 200;
+const MAX_PROMPT_LENGTH = 10_000;
+
 daemon.post("/tasks", async (c) => {
   try {
     const body = (await c.req.json()) as CreateDaemonTaskRequest;
     if (!body.title?.trim() || !body.prompt?.trim()) {
       return c.json({ error: "title and prompt are required" }, 400);
     }
+    const title = body.title.trim().slice(0, MAX_TITLE_LENGTH);
+    const prompt = body.prompt.trim().slice(0, MAX_PROMPT_LENGTH);
+    const priority = Math.max(0, Math.min(3, Math.floor(Number(body.priority ?? 1)) || 1));
+
     const task = createDaemonTask({
-      title: body.title.trim(),
-      prompt: body.prompt.trim(),
-      priority: body.priority,
+      title,
+      prompt,
+      priority,
       source: "user",
     });
     return c.json({ data: task }, 201);

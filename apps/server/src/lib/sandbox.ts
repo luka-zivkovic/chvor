@@ -39,6 +39,9 @@ export async function initDocker(): Promise<void> {
     dockerVersion = result.version;
     if (dockerAvailable) {
       console.log(`[sandbox] Docker ${dockerVersion} detected`);
+      if (process.env.DOCKER_HOST?.startsWith("tcp://")) {
+        console.warn("[sandbox] WARNING: Docker connected via unencrypted TCP — only use on trusted local networks");
+      }
       await cleanupOrphans();
     } else {
       console.log("[sandbox] Docker not available — sandbox execution disabled");
@@ -107,7 +110,7 @@ export async function executeInSandbox(opts: {
   const startTime = Date.now();
 
   // ── Guards ───────────────────────────────────────────────
-  if (code.length > MAX_CODE_LENGTH) {
+  if (Buffer.byteLength(code, "utf8") > MAX_CODE_LENGTH) {
     throw new Error(`Code exceeds maximum length (${MAX_CODE_LENGTH} bytes)`);
   }
 
@@ -291,6 +294,8 @@ function dockerRequest(
     const bodyStr = body ? JSON.stringify(body) : undefined;
 
     // TCP transport (e.g., DOCKER_HOST=tcp://localhost:2375)
+    // WARNING: TCP transport uses unencrypted HTTP with no authentication.
+    // Only use with trusted local connections. For remote Docker hosts, use TLS.
     if (dockerHost && dockerHost.startsWith("tcp://")) {
       const url = new URL(path, dockerHost.replace("tcp://", "http://"));
       const options: import("node:http").RequestOptions = {

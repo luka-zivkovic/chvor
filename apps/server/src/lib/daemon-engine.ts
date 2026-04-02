@@ -3,7 +3,7 @@ import type { WSManager } from "../gateway/ws.ts";
 import type { DaemonPresence, DaemonTask } from "@chvor/shared";
 import { initPulse, shutdownPulse, setEscalationHandler } from "./pulse-engine.ts";
 import { getDaemonConfig } from "../db/config-store.ts";
-import { claimNextTask, updateDaemonTask, createDaemonTask, getQueueDepth, pruneDaemonTasks } from "../db/daemon-store.ts";
+import { claimNextTask, updateDaemonTask, createDaemonTask, getQueueDepth, pruneDaemonTasks, listDaemonTasks } from "../db/daemon-store.ts";
 import { insertActivity } from "../db/activity-store.ts";
 import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
 
@@ -11,11 +11,16 @@ let wsRef: WSManager | null = null;
 let currentTask: DaemonTask | null = null;
 let consecutiveIdle = 0;
 let lastPruneDate: string | null = null;
+let taskTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
 const DAEMON_JOB_ID = "daemon-tick";
 const TICK_INTERVAL_MS = 60_000; // 60 seconds
 const TASK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max per task
+const STUCK_TASK_THRESHOLD_MS = TASK_TIMEOUT_MS * 2; // 10 minutes
 const MAX_RETRIES = 2;
+const MAX_ESCALATION_TASKS_PER_WINDOW = 3;
+const ESCALATION_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const escalationTimestamps: number[] = [];
 
 export async function initDaemon(ws: WSManager): Promise<void> {
   wsRef = ws;
@@ -52,6 +57,16 @@ export function syncDaemon(): void {
 }
 
 export function shutdownDaemon(): void {
+  // Cancel any running task's timeout
+  if (taskTimeoutHandle) {
+    clearTimeout(taskTimeoutHandle);
+    taskTimeoutHandle = null;
+  }
+  // Mark any running task as cancelled so it doesn't linger
+  if (currentTask) {
+    updateDaemonTask(currentTask.id, { status: "cancelled" });
+    currentTask = null;
+  }
   stopPeriodicJob(DAEMON_JOB_ID);
   shutdownPulse();
   console.log("[daemon] shutdown");
@@ -85,6 +100,9 @@ async function daemonTick(): Promise<void> {
     if (pruned > 0) console.log(`[daemon] pruned ${pruned} old tasks`);
   }
 
+  // Stuck task watchdog: fail tasks stuck in 'running' for too long
+  recoverStuckTasks();
+
   // Process task queue
   if (config.taskQueue && !currentTask) {
     const task = claimNextTask();
@@ -97,7 +115,7 @@ async function daemonTick(): Promise<void> {
         const { executeConversation } = await import("./orchestrator.ts");
         const noop = () => {};
 
-        // Race execution against timeout
+        // Race execution against timeout, with proper cleanup
         const execPromise = executeConversation(
           [{
             id: randomUUID(),
@@ -108,9 +126,9 @@ async function daemonTick(): Promise<void> {
           }],
           noop as any,
         );
-        const timeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), TASK_TIMEOUT_MS)
-        );
+        const timeoutPromise = new Promise<null>((resolve) => {
+          taskTimeoutHandle = setTimeout(() => resolve(null), TASK_TIMEOUT_MS);
+        });
 
         const result = await Promise.race([execPromise, timeoutPromise]);
 
@@ -151,6 +169,11 @@ async function daemonTick(): Promise<void> {
           console.error(`[daemon] task permanently failed: ${task.title}`, error);
         }
       } finally {
+        // Always clear timeout handle to prevent leaks
+        if (taskTimeoutHandle) {
+          clearTimeout(taskTimeoutHandle);
+          taskTimeoutHandle = null;
+        }
         currentTask = null;
         broadcastPresence();
       }
@@ -177,30 +200,74 @@ async function daemonTick(): Promise<void> {
   }
 }
 
+/** Recover tasks stuck in 'running' state (e.g., after a crash or hang). */
+function recoverStuckTasks(): void {
+  const running = listDaemonTasks({ status: "running", limit: 10 });
+  const now = Date.now();
+  for (const task of running) {
+    // Skip the task we're actively running
+    if (currentTask && task.id === currentTask.id) continue;
+    const startedAt = task.startedAt ? new Date(task.startedAt).getTime() : 0;
+    if (startedAt > 0 && now - startedAt > STUCK_TASK_THRESHOLD_MS) {
+      updateDaemonTask(task.id, {
+        status: "failed",
+        error: `Stuck task recovered: exceeded ${STUCK_TASK_THRESHOLD_MS / 1000}s without completion`,
+      });
+      console.log(`[daemon] recovered stuck task: ${task.title} (started ${task.startedAt})`);
+    }
+  }
+}
+
 // ─── Escalation Handler ────────────────────────────────────
+
+/** Sanitize LLM output before embedding in task prompts to prevent prompt injection. */
+function sanitizeEscalationText(raw: string): string {
+  return raw
+    .replace(/[^\x20-\x7E\n]/g, "") // strip non-printable / non-ASCII
+    .slice(0, 500); // hard limit on embedded text
+}
+
+/** Rate-limit escalation task creation to prevent flooding. */
+function canCreateEscalationTask(): boolean {
+  const now = Date.now();
+  while (escalationTimestamps.length > 0 && escalationTimestamps[0]! < now - ESCALATION_WINDOW_MS) {
+    escalationTimestamps.shift();
+  }
+  if (escalationTimestamps.length >= MAX_ESCALATION_TASKS_PER_WINDOW) return false;
+  escalationTimestamps.push(now);
+  return true;
+}
 
 function handleEscalation(resultText: string, _healthContext: string): void {
   const config = getDaemonConfig();
   if (!config.enabled || !config.autoRemediate) return;
 
+  if (!canCreateEscalationTask()) {
+    console.log("[daemon] escalation rate limit reached, skipping");
+    return;
+  }
+
+  const sanitized = sanitizeEscalationText(resultText);
+
   if (resultText.startsWith("[CRITICAL]")) {
     // Check for MCP server issues
-    const mcpMatch = resultText.match(/MCP.*?(?:down|failed|disconnected).*?:\s*(.+?)(?:\)|,|$)/i);
+    const mcpMatch = resultText.match(/MCP.*?(?:down|failed|disconnected)/i);
     if (mcpMatch) {
       createDaemonTask({
-        title: `Auto-remediate: restart MCP server`,
-        prompt: `A critical health alert was raised: "${resultText}". Attempt to reconnect the failed MCP server. Use the available tools to diagnose and fix the issue.`,
+        title: "Auto-remediate: restart MCP server",
+        prompt: `A critical health alert was raised. The pulse system detected an MCP server issue. Attempt to reconnect the failed MCP server using available diagnostic tools. Alert summary: ${sanitized}`,
         source: "pulse",
         priority: 3,
       });
       console.log("[daemon] queued MCP remediation task from pulse escalation");
+      return; // only one task per escalation
     }
   }
 
   if (resultText.includes("webhook") || resultText.includes("Webhook")) {
     createDaemonTask({
-      title: `Auto-remediate: webhook failure`,
-      prompt: `A health alert flagged webhook issues: "${resultText}". Investigate and attempt to resolve.`,
+      title: "Auto-remediate: webhook failure",
+      prompt: `A health alert flagged webhook delivery issues. Investigate webhook configuration and attempt to resolve. Alert summary: ${sanitized}`,
       source: "pulse",
       priority: 2,
     });

@@ -836,7 +836,6 @@ const DEFAULT_DAEMON_CONFIG: DaemonConfig = {
   idleActions: false,
   taskQueue: false,
   wakeOnWebhook: false,
-  maxConcurrentTasks: 1,
 };
 
 export function getDaemonConfig(): DaemonConfig {
@@ -856,7 +855,6 @@ export function updateDaemonConfig(updates: UpdateDaemonConfigRequest): DaemonCo
   if (updates.idleActions !== undefined) current.idleActions = updates.idleActions;
   if (updates.taskQueue !== undefined) current.taskQueue = updates.taskQueue;
   if (updates.wakeOnWebhook !== undefined) current.wakeOnWebhook = updates.wakeOnWebhook;
-  if (updates.maxConcurrentTasks !== undefined) current.maxConcurrentTasks = Math.max(1, Math.min(5, updates.maxConcurrentTasks));
   setConfig("daemon.config", JSON.stringify(current));
   return current;
 }

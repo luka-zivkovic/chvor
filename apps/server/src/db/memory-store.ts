@@ -963,19 +963,23 @@ export function getMemoryGraph(limit: number = 500): import("@chvor/shared").Mem
     createdAt: row.created_at,
   }));
 
-  // Only include edges between nodes in the result set
-  const nodeIds = new Set(nodes.map((n) => n.id));
-  const edgeRows = db.prepare("SELECT * FROM memory_edges").all() as EdgeRow[];
-  const edges = edgeRows
-    .filter((row) => nodeIds.has(row.source_id) && nodeIds.has(row.target_id))
-    .map((row) => ({
-      id: row.id,
-      sourceId: row.source_id,
-      targetId: row.target_id,
-      relation: row.relation as import("@chvor/shared").EdgeRelation,
-      weight: row.weight,
-      createdAt: row.created_at,
-    }));
+  // Only include edges between nodes in the result set — filter in SQL, not JS
+  const nodeIds = nodes.map((n) => n.id);
+  let edgeRows: EdgeRow[] = [];
+  if (nodeIds.length > 0) {
+    const placeholders = nodeIds.map(() => "?").join(",");
+    edgeRows = db.prepare(
+      `SELECT * FROM memory_edges WHERE source_id IN (${placeholders}) AND target_id IN (${placeholders})`
+    ).all(...nodeIds, ...nodeIds) as EdgeRow[];
+  }
+  const edges = edgeRows.map((row) => ({
+    id: row.id,
+    sourceId: row.source_id,
+    targetId: row.target_id,
+    relation: row.relation as import("@chvor/shared").EdgeRelation,
+    weight: row.weight,
+    createdAt: row.created_at,
+  }));
 
   return { nodes, edges };
 }

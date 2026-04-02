@@ -550,7 +550,7 @@ process.on("SIGINT", async () => {
   clearInterval(logRotationTimer);
   shutdownKeepAwake();
   shutdownScheduler();
-  shutdownDaemon();
+  // Daemon shutdown moved after gateway/MCP so running tasks can still use them
   shutdownManifest();
   stopPeriodicCleanup();
   stopDailyResetCheck();
@@ -562,6 +562,7 @@ process.on("SIGINT", async () => {
   stopAllPeriodicJobs();
   await shutdownAllBrowsers();
   shutdownPcAgents();
+  shutdownDaemon();
   await gateway.stopAll();
   await mcpManager.shutdown();
   process.exit(0);
@@ -572,7 +573,6 @@ process.on("SIGTERM", async () => {
   clearInterval(logRotationTimer);
   shutdownKeepAwake();
   shutdownScheduler();
-  shutdownDaemon();
   shutdownManifest();
   stopPeriodicCleanup();
   stopDailyResetCheck();
@@ -584,6 +584,7 @@ process.on("SIGTERM", async () => {
   stopAllPeriodicJobs();
   await shutdownAllBrowsers();
   shutdownPcAgents();
+  shutdownDaemon();
   await gateway.stopAll();
   await mcpManager.shutdown();
   process.exit(0);

@@ -630,22 +630,7 @@ export function PermissionsContent() {
                   </div>
                 </div>
 
-                {/* Workspace mount */}
-                <div className="py-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-foreground">Workspace mount</p>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        Mount project workspace into the container
-                      </p>
-                    </div>
-                    <Toggle
-                      checked={sandboxConfig.workspaceMountEnabled}
-                      onChange={() => handleSandboxUpdate({ workspaceMountEnabled: !sandboxConfig.workspaceMountEnabled })}
-                      label="Toggle workspace mount"
-                    />
-                  </div>
-                </div>
+                {/* Workspace mount — hidden until safely implemented with path validation */}
               </>
             )}
           </div>

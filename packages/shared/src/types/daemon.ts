@@ -24,7 +24,6 @@ export interface DaemonConfig {
   idleActions: boolean;
   taskQueue: boolean;
   wakeOnWebhook: boolean;
-  maxConcurrentTasks: number;
 }
 
 export interface DaemonPresence {
@@ -46,5 +45,4 @@ export interface UpdateDaemonConfigRequest {
   idleActions?: boolean;
   taskQueue?: boolean;
   wakeOnWebhook?: boolean;
-  maxConcurrentTasks?: number;
 }
