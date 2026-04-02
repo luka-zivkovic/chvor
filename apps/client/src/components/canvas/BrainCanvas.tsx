@@ -38,6 +38,7 @@ import { CanvasContextMenu } from "./CanvasContextMenu";
 import type { ContextMenuState } from "./CanvasContextMenu";
 import { GhostHubNode } from "./GhostHubNode";
 import { A2UICanvasNode } from "./A2UICanvasNode";
+import { ThoughtStreamCanvas } from "./ThoughtStreamCanvas";
 
 const nodeTypes = { brain: BrainNode, skill: SkillNode, tool: ToolNode, integration: IntegrationNode, "skills-hub": SkillsHubNode, "tools-hub": ToolsHubNode, "connections-hub": ConnectionsHubNode, "integrations-hub": IntegrationsHubNode, "schedule-hub": ScheduleHubNode, schedule: ScheduleNode, "webhooks-hub": WebhooksHubNode, webhook: WebhookNode, trigger: TriggerNode, output: OutputNode, "ghost-hub": GhostHubNode, "a2ui-canvas": A2UICanvasNode };
 const edgeTypes = { animated: AnimatedEdge };
@@ -334,6 +335,7 @@ export function BrainCanvas() {
   return (
     <div className="relative h-full w-full" tabIndex={-1} style={{ background: "var(--canvas-bg)" }}>
       <CanvasAtmosphere />
+      <ThoughtStreamCanvas rfInstance={rfInstanceRef} />
       <ReactFlow
         nodes={nodes}
         edges={edges}
