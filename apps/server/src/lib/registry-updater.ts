@@ -6,7 +6,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 type BroadcastFn = (event: {
   type: "registry.updatesAvailable";
-  data: { count: number; entries: { id: string; kind: string; current: string; available: string }[]; skills: { id: string; current: string; available: string }[] };
+  data: { count: number; entries: { id: string; kind: string; current: string; available: string; isBundled?: boolean }[]; skills: { id: string; current: string; available: string }[] };
 }) => void;
 
 export function startAutoUpdate(
@@ -44,6 +44,7 @@ async function runCheck(broadcast: BroadcastFn): Promise<void> {
             kind: u.kind,
             current: u.current,
             available: u.available,
+            isBundled: u.isBundled,
           })),
           // backward compat
           skills: updates.map((u) => ({

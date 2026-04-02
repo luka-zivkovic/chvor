@@ -9,6 +9,7 @@ import {
   readLock,
   assertSafeEntryId,
 } from "../lib/registry-manager.ts";
+import { getBundledCapabilities } from "../lib/capability-loader.ts";
 import type { RegistryEntry, RegistryEntryKind } from "@chvor/shared";
 
 const registry = new Hono();
@@ -54,12 +55,17 @@ registry.get("/search", async (c) => {
       );
     }
 
-    // Annotate with install status
+    // Annotate with install status and bundled info
     const lock = readLock();
+    const bundledMap = new Map(
+      getBundledCapabilities().map((c) => [c.id, c.metadata.version]),
+    );
     const annotated = results.map((e) => ({
       ...e,
       installed: !!lock.installed[e.id],
       installedVersion: lock.installed[e.id]?.version ?? null,
+      hasBundledVersion: bundledMap.has(e.id),
+      bundledVersion: bundledMap.get(e.id) ?? null,
     }));
 
     return c.json({ data: annotated });
@@ -85,6 +91,7 @@ registry.get("/entry/:id", async (c) => {
 
     const lock = readLock();
     const installInfo = lock.installed[id] ?? null;
+    const bundled = getBundledCapabilities().find((c) => c.id === id);
 
     return c.json({
       data: {
@@ -92,6 +99,8 @@ registry.get("/entry/:id", async (c) => {
         installed: !!installInfo,
         installedVersion: installInfo?.version ?? null,
         userModified: installInfo?.userModified ?? false,
+        hasBundledVersion: !!bundled,
+        bundledVersion: bundled?.metadata.version ?? null,
       },
     });
   } catch (err) {
@@ -161,8 +170,10 @@ registry.delete("/entry/:id", async (c) => {
   try {
     const id = c.req.param("id");
     assertSafeEntryId(id);
+    const lock = readLock();
+    const wasShadowingBundled = lock.installed[id]?.shadowsBundled ?? false;
     await uninstallEntry(id);
-    return c.json({ data: { id, uninstalled: true } });
+    return c.json({ data: { id, uninstalled: true, restoredBundled: wasShadowingBundled } });
   } catch (err) {
     console.error("[api] DELETE /registry/entry error:", err);
     return c.json({ error: String(err) }, 500);
