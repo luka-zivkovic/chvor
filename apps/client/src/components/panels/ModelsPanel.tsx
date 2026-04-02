@@ -2,11 +2,11 @@ import { useEffect, useState, useRef } from "react";
 import { toast } from "sonner";
 import { useModelsStore } from "../../stores/models-store";
 import { useCredentialStore } from "../../stores/credential-store";
-import { useUIStore } from "../../stores/ui-store";
 import { api } from "../../lib/api";
 import { cn } from "@/lib/utils";
 import type { ModelRole, ModelDef, LLMProviderDef, EmbeddingProviderDef, RoleFallbackEntry } from "@chvor/shared";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
+import { AddCredentialDialog } from "@/components/credentials/AddCredentialDialog";
 
 function formatCtx(tokens: number): string {
   if (tokens >= 1_000_000) return `${tokens / 1_000_000}M`;
@@ -260,7 +260,8 @@ function RoleSelector({
   description: string;
 }) {
   const { roles, defaults, setRole } = useModelsStore();
-  const { credentials, llmProviders } = useCredentialStore();
+  const { credentials, llmProviders, fetchAll } = useCredentialStore();
+  const [credDialogType, setCredDialogType] = useState<string | null>(null);
 
   const config = roles[role];
   const effectiveConfig = config ?? defaults[role] ?? null;
@@ -345,7 +346,7 @@ function RoleSelector({
                   key={p.id}
                   onClick={() => {
                     if (!configured) {
-                      useUIStore.getState().openPanel("settings");
+                      setCredDialogType(p.credentialType);
                       return;
                     }
                     if (!isActive) handleProviderSwitch(p);
@@ -435,6 +436,17 @@ function RoleSelector({
           No providers available
         </p>
       )}
+
+      {credDialogType && (
+        <AddCredentialDialog
+          initialCredType={credDialogType}
+          filter="llm"
+          onClose={() => {
+            setCredDialogType(null);
+            fetchAll();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -447,9 +459,10 @@ interface EmbeddingHealth {
 
 function EmbeddingsSection() {
   const { embedding, setEmbedding, reembedStatus, triggerReembed, pollReembedStatus } = useModelsStore();
-  const { credentials, embeddingProviders } = useCredentialStore();
+  const { credentials, embeddingProviders, fetchAll } = useCredentialStore();
 
   const [showWarning, setShowWarning] = useState(false);
+  const [credDialogType, setCredDialogType] = useState<string | null>(null);
   const [pendingProvider, setPendingProvider] = useState<{ providerId: string; model: string } | null>(null);
   const [health, setHealth] = useState<EmbeddingHealth | null>(null);
   const [modelStatus, setModelStatus] = useState<{ status: string; percent: number; error?: string } | null>(null);
@@ -541,12 +554,18 @@ function EmbeddingsSection() {
           return (
             <button
               key={p.id}
-              onClick={() => hasCreds && !isActive && handleProviderSwitch(p)}
-              title={!hasCreds ? `Add ${p.credentialType} API key in Credentials tab` : undefined}
+              onClick={() => {
+                if (!hasCreds) {
+                  setCredDialogType(p.credentialType);
+                  return;
+                }
+                if (!isActive) handleProviderSwitch(p);
+              }}
+              title={!hasCreds ? `${p.name} — needs API key` : undefined}
               className={cn(
                 "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-all",
                 !hasCreds
-                  ? "border-border/30 text-muted-foreground/40 cursor-not-allowed"
+                  ? "border-border/30 text-muted-foreground/50 hover:border-border/50 hover:text-muted-foreground"
                   : isActive
                     ? "border-primary/60 bg-primary/10 text-foreground"
                     : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
@@ -712,6 +731,17 @@ function EmbeddingsSection() {
           </div>
         )}
       </div>
+
+      {credDialogType && (
+        <AddCredentialDialog
+          initialCredType={credDialogType}
+          filter="llm"
+          onClose={() => {
+            setCredDialogType(null);
+            fetchAll();
+          }}
+        />
+      )}
     </div>
   );
 }
