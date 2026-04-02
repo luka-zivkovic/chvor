@@ -556,7 +556,7 @@ function EmbeddingsSection() {
               key={p.id}
               onClick={() => {
                 if (!hasCreds) {
-                  setCredDialogType(p.credentialType);
+                  if (p.credentialType) setCredDialogType(p.credentialType);
                   return;
                 }
                 if (!isActive) handleProviderSwitch(p);
@@ -735,7 +735,7 @@ function EmbeddingsSection() {
       {credDialogType && (
         <AddCredentialDialog
           initialCredType={credDialogType}
-          filter="llm"
+          filter="all"
           onClose={() => {
             setCredDialogType(null);
             fetchAll();

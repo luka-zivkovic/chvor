@@ -30,7 +30,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  const { providers: allProviders, addCredential, updateCredential } = useCredentialStore();
+  const { providers: allProviders, embeddingProviders, addCredential, updateCredential } = useCredentialStore();
   const providers = allProviders.filter((p) => {
     if (filter === "all") return true;
     const isLLM = "models" in p;
@@ -65,12 +65,13 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
   const initializedRef = useRef(false);
   useEffect(() => {
     if (initializedRef.current) return;
-    if (allProviders.length === 0) return;
+    if (allProviders.length === 0 && embeddingProviders.length === 0) return;
 
     const credType = isEditMode ? editCredential.type : initialCredType;
     if (!credType) return;
 
-    const match = allProviders.find((p) => p.credentialType === credType);
+    const match = allProviders.find((p) => p.credentialType === credType)
+      ?? embeddingProviders.find((p) => p.credentialType === credType);
     if (match) {
       setSelectedProvider(match);
       if (!isEditMode) {
