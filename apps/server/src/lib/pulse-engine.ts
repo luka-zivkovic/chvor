@@ -15,6 +15,14 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let wsRef: WSManager | null = null;
 let consecutiveSilent = 0;
 
+// Escalation callback — set by daemon engine for auto-remediation
+let onEscalation: ((resultText: string, healthContext: string) => void) | null = null;
+
+/** Register an escalation handler (called when pulse detects non-silent alerts). */
+export function setEscalationHandler(handler: (resultText: string, healthContext: string) => void): void {
+  onEscalation = handler;
+}
+
 const PULSE_SYSTEM = `You are a health monitoring system. Review the system status below and decide if anything needs the user's attention.
 
 Severity guide:
@@ -184,6 +192,9 @@ async function runPulse(): Promise<void> {
       content,
     });
     wsRef?.broadcast({ type: "activity.new", data: entry });
+
+    // Notify daemon for auto-remediation
+    onEscalation?.(resultText, healthContext);
 
     recordPulseRun(resultText, null);
 

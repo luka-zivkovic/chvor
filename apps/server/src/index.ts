@@ -23,6 +23,7 @@ import { initScheduler, shutdownScheduler } from "./lib/scheduler.ts";
 import { initWebhookExecutor } from "./lib/webhook-executor.ts";
 import pulseRoute from "./routes/pulse.ts";
 import { initPulse, shutdownPulse } from "./lib/pulse-engine.ts";
+import { initDaemon, shutdownDaemon } from "./lib/daemon-engine.ts";
 import sessionsRoute from "./routes/sessions.ts";
 import llmConfig from "./routes/llm-config.ts";
 import modelsConfig from "./routes/models-config.ts";
@@ -58,6 +59,9 @@ import mediaConfigRoute from "./routes/media-config.ts";
 import registryRoute from "./routes/registry.ts";
 import pcControlRoute from "./routes/pc-control.ts";
 import socialRoute from "./routes/social.ts";
+import sandboxRoute from "./routes/sandbox.ts";
+import daemonRoute from "./routes/daemon.ts";
+import { initDocker } from "./lib/sandbox.ts";
 import { handlePcAgentConnection, handlePcAgentMessage, handlePcAgentClose, onPcAgentEvent, onPcFrame, shutdownPcAgents, initLocalBackend } from "./lib/pc-control.ts";
 import { getPcControlEnabled } from "./db/config-store.ts";
 import { initActivityTable } from "./db/activity-store.ts";
@@ -275,6 +279,8 @@ app.route("/api/auth", authRoute);
 app.route("/api/backup", backupRoute);
 app.route("/api/pc", pcControlRoute);
 app.route("/api/social", socialRoute);
+app.route("/api/config/sandbox", sandboxRoute);
+app.route("/api/daemon", daemonRoute);
 
 // Serve TTS audio files (no auth — ephemeral UUIDs)
 app.get("/audio/:filename", (c) => {
@@ -505,12 +511,15 @@ initScheduler(wsManager, channelSenderFn).catch((err) =>
   console.error("[scheduler] init failed:", err)
 );
 initWebhookExecutor(wsManager, channelSenderFn);
-initPulse(wsManager).catch((err) =>
-  console.error("[pulse] init failed:", err)
+initDaemon(wsManager).catch((err) =>
+  console.error("[daemon] init failed:", err)
 );
 
 // Initialize local PC backend if available (fire-and-forget)
 initLocalBackend().catch((err) => console.error("[pc-control] local backend init failed:", err));
+
+// Initialize Docker sandbox detection (fire-and-forget)
+initDocker().catch((err) => console.error("[sandbox] Docker detection failed:", err));
 
 startBrowserSweep();
 startAudioCleanup();
@@ -541,7 +550,7 @@ process.on("SIGINT", async () => {
   clearInterval(logRotationTimer);
   shutdownKeepAwake();
   shutdownScheduler();
-  shutdownPulse();
+  // Daemon shutdown moved after gateway/MCP so running tasks can still use them
   shutdownManifest();
   stopPeriodicCleanup();
   stopDailyResetCheck();
@@ -553,6 +562,7 @@ process.on("SIGINT", async () => {
   stopAllPeriodicJobs();
   await shutdownAllBrowsers();
   shutdownPcAgents();
+  shutdownDaemon();
   await gateway.stopAll();
   await mcpManager.shutdown();
   process.exit(0);
@@ -563,7 +573,6 @@ process.on("SIGTERM", async () => {
   clearInterval(logRotationTimer);
   shutdownKeepAwake();
   shutdownScheduler();
-  shutdownPulse();
   shutdownManifest();
   stopPeriodicCleanup();
   stopDailyResetCheck();
@@ -575,6 +584,7 @@ process.on("SIGTERM", async () => {
   stopAllPeriodicJobs();
   await shutdownAllBrowsers();
   shutdownPcAgents();
+  shutdownDaemon();
   await gateway.stopAll();
   await mcpManager.shutdown();
   process.exit(0);

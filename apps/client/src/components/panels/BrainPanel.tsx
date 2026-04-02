@@ -6,7 +6,7 @@ import { useModelsStore } from "../../stores/models-store";
 import { useCredentialStore } from "../../stores/credential-store";
 import { useUIStore } from "../../stores/ui-store";
 import { ModelsPanel } from "./ModelsPanel";
-import { MemoryPanel } from "./MemoryPanel";
+import { MemoryInsightsDashboard } from "../memory/MemoryInsightsDashboard";
 import { PersonaPanel } from "./PersonaPanel";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/api";
@@ -415,7 +415,7 @@ export function BrainPanel() {
         {brainTab === "overview" && <BrainConfigContent />}
         {brainTab === "models" && <ModelsPanel />}
         {brainTab === "persona" && <PersonaPanel />}
-        {brainTab === "memory" && <MemoryPanel />}
+        {brainTab === "memory" && <MemoryInsightsDashboard />}
       </div>
     </div>
   );

@@ -9,6 +9,8 @@ import {
   deleteAllMemories,
   getEdgesForMemory,
   getNeighborMemories,
+  getMemoryGraph,
+  getMemoryStats,
 } from "../db/memory-store.ts";
 
 const memories = new Hono();
@@ -36,6 +38,23 @@ memories.post("/", async (c) => {
       confidence: 1.0,
     });
     return c.json({ data: memory }, 201);
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
+memories.get("/graph", (c) => {
+  try {
+    const limit = Math.min(parseInt(c.req.query("limit") ?? "500", 10) || 500, 1000);
+    return c.json({ data: getMemoryGraph(limit) });
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
+memories.get("/stats", (c) => {
+  try {
+    return c.json({ data: getMemoryStats() });
   } catch (err) {
     return c.json({ error: String(err) }, 500);
   }

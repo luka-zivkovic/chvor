@@ -60,6 +60,16 @@ import type {
   FilesystemConfig,
   UpdateFilesystemConfigRequest,
   TrustedCommandsConfig,
+  SandboxConfig,
+  UpdateSandboxConfigRequest,
+  SandboxStatus,
+  DaemonConfig,
+  UpdateDaemonConfigRequest,
+  DaemonPresence,
+  DaemonTask,
+  CreateDaemonTaskRequest,
+  MemoryGraphExport,
+  MemoryStats,
 } from "@chvor/shared";
 
 export interface ProvidersResponse {
@@ -329,6 +339,8 @@ export const api = {
     delete: (id: string) =>
       request<null>(`/memories/${id}`, { method: "DELETE" }),
     deleteAll: () => request<null>("/memories", { method: "DELETE" }),
+    graph: () => request<MemoryGraphExport>("/memories/graph"),
+    stats: () => request<MemoryStats>("/memories/stats"),
   },
 
   knowledge: {
@@ -450,6 +462,41 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
+  },
+
+  sandboxConfig: {
+    get: () => request<SandboxConfig>("/config/sandbox"),
+    update: (body: UpdateSandboxConfigRequest) =>
+      request<SandboxConfig>("/config/sandbox", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    status: () => request<SandboxStatus>("/config/sandbox/status"),
+    pull: (language?: string) =>
+      request<Record<string, string>>("/config/sandbox/pull", {
+        method: "POST",
+        body: JSON.stringify({ language }),
+      }),
+  },
+
+  daemon: {
+    getConfig: () => request<DaemonConfig>("/daemon/config"),
+    updateConfig: (body: UpdateDaemonConfigRequest) =>
+      request<DaemonConfig>("/daemon/config", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    getPresence: () => request<DaemonPresence>("/daemon/presence"),
+    listTasks: (status?: string) =>
+      request<DaemonTask[]>(`/daemon/tasks${status ? `?status=${status}` : ""}`),
+    createTask: (body: CreateDaemonTaskRequest) =>
+      request<DaemonTask>("/daemon/tasks", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    getTask: (id: string) => request<DaemonTask>(`/daemon/tasks/${id}`),
+    cancelTask: (id: string) =>
+      request<null>(`/daemon/tasks/${id}`, { method: "DELETE" }),
   },
 
   templates: {
