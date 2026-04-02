@@ -111,6 +111,7 @@ var counter = 0
 func walkElement(_ element: AXUIElement, depth: Int) -> [String: Any]? {
     if depth > maxDepth || counter >= maxNodes { return nil }
     counter += 1
+    let nodeId = counter
 
     // Role
     let rawRole = (getAttr(element, kAXRoleAttribute as String) as? String) ?? "unknown"
@@ -174,7 +175,7 @@ func walkElement(_ element: AXUIElement, depth: Int) -> [String: Any]? {
 
     // Build node dict
     var node: [String: Any] = [
-        "id": counter,
+        "id": nodeId,
         "role": role,
         "name": name,
     ]
@@ -190,20 +191,25 @@ func walkElement(_ element: AXUIElement, depth: Int) -> [String: Any]? {
 // Main
 // ---------------------------------------------------------------------------
 
+func writeJSON(_ obj: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: obj) else {
+        // Last resort: write a bare error string
+        FileHandle.standardError.write(Data("json_serialization_failed".utf8))
+        return
+    }
+    FileHandle.standardOutput.write(data)
+}
+
 // Check accessibility trust (don't prompt — let the caller handle that)
 let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): false] as CFDictionary
 guard AXIsProcessTrustedWithOptions(opts) else {
-    let err: [String: Any] = ["error": "accessibility_not_trusted"]
-    let data = try! JSONSerialization.data(withJSONObject: err)
-    FileHandle.standardOutput.write(data)
+    writeJSON(["error": "accessibility_not_trusted"])
     exit(1)
 }
 
 // Get frontmost application
 guard let frontApp = NSWorkspace.shared.frontmostApplication else {
-    let err: [String: Any] = ["error": "no_frontmost_app"]
-    let data = try! JSONSerialization.data(withJSONObject: err)
-    FileHandle.standardOutput.write(data)
+    writeJSON(["error": "no_frontmost_app"])
     exit(1)
 }
 
@@ -212,9 +218,7 @@ let appElement = AXUIElementCreateApplication(pid)
 
 // Walk the tree
 guard let root = walkElement(appElement, depth: 0) else {
-    let err: [String: Any] = ["error": "empty_tree"]
-    let data = try! JSONSerialization.data(withJSONObject: err)
-    FileHandle.standardOutput.write(data)
+    writeJSON(["error": "empty_tree"])
     exit(1)
 }
 
@@ -225,8 +229,7 @@ let tree: [String: Any] = [
     "nodeCount": counter,
 ]
 
-let jsonData = try! JSONSerialization.data(withJSONObject: tree)
-FileHandle.standardOutput.write(jsonData)
+writeJSON(tree)
 `;
 
 export async function queryA11yTreeDarwin(opts?: { maxDepth?: number }): Promise<A11yTree | null> {
