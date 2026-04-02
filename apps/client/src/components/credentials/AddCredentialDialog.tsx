@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { AnyProviderDef, CredentialSummary } from "@chvor/shared";
+import type { AnyProviderDef, EmbeddingProviderDef, CredentialSummary } from "@chvor/shared";
 import { useCredentialStore } from "../../stores/credential-store";
 import { api } from "../../lib/api";
 import { Button } from "@/components/ui/button";
@@ -30,8 +30,12 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  const { providers: allProviders, addCredential, updateCredential } = useCredentialStore();
-  const providers = allProviders.filter((p) => {
+  const { providers: allProviders, embeddingProviders, addCredential, updateCredential } = useCredentialStore();
+  // Embedding providers with credentials that aren't already covered by an LLM provider
+  const extraEmbedding = embeddingProviders.filter(
+    (ep) => ep.credentialType && !allProviders.some((p) => p.credentialType === ep.credentialType),
+  );
+  const providers = [...allProviders, ...extraEmbedding].filter((p) => {
     if (filter === "all") return true;
     const isLLM = "models" in p;
     return filter === "llm" ? isLLM : !isLLM;
@@ -41,7 +45,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
 
   const [step, setStep] = useState<Step>(isEditMode ? "fill-fields" : "pick-provider");
   const [selectedProvider, setSelectedProvider] =
-    useState<AnyProviderDef | null>(null);
+    useState<AnyProviderDef | EmbeddingProviderDef | null>(null);
   const [name, setName] = useState(isEditMode ? editCredential.name : "");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<{
@@ -65,12 +69,13 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
   const initializedRef = useRef(false);
   useEffect(() => {
     if (initializedRef.current) return;
-    if (allProviders.length === 0) return;
+    if (allProviders.length === 0 && embeddingProviders.length === 0) return;
 
     const credType = isEditMode ? editCredential.type : initialCredType;
     if (!credType) return;
 
-    const match = allProviders.find((p) => p.credentialType === credType);
+    const match = allProviders.find((p) => p.credentialType === credType)
+      ?? embeddingProviders.find((p) => p.credentialType === credType);
     if (match) {
       setSelectedProvider(match);
       if (!isEditMode) {
@@ -86,7 +91,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editCredential, initialCredType, allProviders]);
 
-  const selectProvider = (provider: AnyProviderDef) => {
+  const selectProvider = (provider: AnyProviderDef | EmbeddingProviderDef) => {
     setSelectedProvider(provider);
     setName(provider.name);
     const defaults: Record<string, string> = {};
@@ -119,7 +124,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
           updateCredential(editCredential.id, { testStatus: "success" });
         }
       } else {
-        const credType = isEditMode ? editCredential.type : selectedProvider!.credentialType;
+        const credType = isEditMode ? editCredential.type : selectedProvider!.credentialType!;
         const result = await api.credentials.test({
           type: credType,
           data: fields,
@@ -160,7 +165,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
         const updated = await api.credentials.update(editCredential.id, body);
         updateCredential(editCredential.id, updated);
       } else {
-        if (!selectedProvider) return;
+        if (!selectedProvider || !selectedProvider.credentialType) return;
         const summary = await api.credentials.create({
           name: name.trim(),
           type: selectedProvider.credentialType,
@@ -180,12 +185,16 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
   const hasNewFields = Object.values(fields).some((v) => v.trim());
   const canSave = isEditMode
     ? name.trim() && (name.trim() !== editCredential.name || hasNewFields)
-    : selectedProvider?.requiredFields
-        .filter((f) => !f.optional)
-        .every((f) => fields[f.key]?.trim()) && name.trim();
+    : ("requiredFields" in (selectedProvider ?? {})
+        ? (selectedProvider as AnyProviderDef).requiredFields
+            .filter((f) => !f.optional)
+            .every((f) => fields[f.key]?.trim())
+        : true) && name.trim();
 
   // Determine which fields to render
-  const providerFields = selectedProvider?.requiredFields ?? [];
+  const providerFields = selectedProvider && "requiredFields" in selectedProvider
+    ? selectedProvider.requiredFields
+    : [];
   // For edit mode without a matching provider, derive fields from the credential's redactedFields
   const editFallbackFields = isEditMode && providerFields.length === 0
     ? Object.keys(editCredential.redactedFields ?? {}).map((key) => ({
@@ -198,9 +207,11 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
   const fieldsToRender = providerFields.length > 0 ? providerFields : editFallbackFields;
 
   // Can test: in edit mode always (test saved), in create mode when all non-optional fields filled
-  const canTest = isEditMode || (selectedProvider?.requiredFields
-    .filter((f) => !f.optional)
-    .every((f) => fields[f.key]?.trim()) ?? false);
+  const canTest = isEditMode || ("requiredFields" in (selectedProvider ?? {})
+    ? (selectedProvider as AnyProviderDef).requiredFields
+        .filter((f) => !f.optional)
+        .every((f) => fields[f.key]?.trim())
+    : true);
 
   // WhatsApp uses QR pairing instead of field form
   if (selectedProvider?.credentialType === "whatsapp" || initialCredType === "whatsapp") {
@@ -229,7 +240,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
                   onClick={() => selectProvider(p)}
                 >
                   <div className="flex items-center gap-2.5">
-                    <ProviderIcon icon={p.icon} size={20} className="shrink-0 text-foreground/80" />
+                    <ProviderIcon icon={p.icon ?? p.id} size={20} className="shrink-0 text-foreground/80" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
                         <p className="text-sm font-medium">{p.name}</p>
@@ -274,7 +285,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
                 </Button>
               )}
               {selectedProvider && (
-                <ProviderIcon icon={selectedProvider.icon} size={16} className="text-foreground/70" />
+                <ProviderIcon icon={selectedProvider.icon ?? selectedProvider.id} size={16} className="text-foreground/70" />
               )}
               <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                 {isEditMode ? "Edit Credential" : selectedProvider?.name ?? "Credential"}
