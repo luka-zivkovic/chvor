@@ -52,17 +52,19 @@ function MemoryNode({ data }: NodeProps) {
 
 const nodeTypes = { memory: MemoryNode };
 
+const MAX_VISIBLE_NODES = 100;
+
 export function MemoryGraphView() {
   const { graphNodes, graphEdges, graphLoading } = useMemoryStore();
 
-  const { nodes, edges } = useMemo(() => {
-    if (graphNodes.length === 0) return { nodes: [], edges: [] };
+  const { nodes, edges, totalCount } = useMemo(() => {
+    if (graphNodes.length === 0) return { nodes: [], edges: [], totalCount: 0 };
 
     // Simple radial layout grouped by category
     const categories = [...new Set(graphNodes.map((n) => n.category))];
     const limitedNodes = graphNodes
       .sort((a, b) => b.strength - a.strength)
-      .slice(0, 100);
+      .slice(0, MAX_VISIBLE_NODES);
 
     const rfNodes: Node[] = limitedNodes.map((n, i) => {
       const catIdx = categories.indexOf(n.category);
@@ -99,7 +101,7 @@ export function MemoryGraphView() {
         labelStyle: { fontSize: 8, fill: "#9ca3af" },
       }));
 
-    return { nodes: rfNodes, edges: rfEdges };
+    return { nodes: rfNodes, edges: rfEdges, totalCount: graphNodes.length };
   }, [graphNodes, graphEdges]);
 
   if (graphLoading) return <p className="text-xs text-muted-foreground">Loading graph...</p>;
@@ -116,6 +118,12 @@ export function MemoryGraphView() {
   }
 
   return (
+    <div className="flex flex-col gap-1">
+      {totalCount > MAX_VISIBLE_NODES && (
+        <p className="text-[9px] text-muted-foreground/60 text-right">
+          Showing {MAX_VISIBLE_NODES} of {totalCount} memories (strongest)
+        </p>
+      )}
     <div className="h-[400px] rounded-md border border-border/30 bg-muted/5">
       <ReactFlow
         nodes={nodes}
@@ -129,6 +137,7 @@ export function MemoryGraphView() {
         <Background gap={20} size={1} />
         <Controls showInteractive={false} className="!bg-background !border-border !shadow-sm" />
       </ReactFlow>
+    </div>
     </div>
   );
 }

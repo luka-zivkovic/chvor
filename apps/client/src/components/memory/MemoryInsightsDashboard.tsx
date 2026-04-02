@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useMemoryStore } from "../../stores/memory-store";
 import { MemoryList } from "./MemoryList";
 import { MemoryStatsView } from "./MemoryStatsView";
@@ -19,6 +19,7 @@ export function MemoryInsightsDashboard() {
   const { memories, loading, error, fetchAll, fetchGraph, fetchStats, addMemory } = useMemoryStore();
   const [newFact, setNewFact] = useState("");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   useEffect(() => {
     fetchAll();
@@ -26,16 +27,25 @@ export function MemoryInsightsDashboard() {
     fetchStats();
   }, [fetchAll, fetchGraph, fetchStats]);
 
-  const handleAddFact = () => {
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 200);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const handleAddFact = useCallback(() => {
     if (newFact.trim()) {
       addMemory(newFact.trim());
       setNewFact("");
     }
-  };
+  }, [newFact, addMemory]);
 
-  const filtered = search
-    ? memories.filter((m) => m.abstract.toLowerCase().includes(search.toLowerCase()))
-    : memories;
+  const filtered = useMemo(
+    () => debouncedSearch
+      ? memories.filter((m) => m.abstract.toLowerCase().includes(debouncedSearch.toLowerCase()))
+      : memories,
+    [memories, debouncedSearch],
+  );
 
   return (
     <div className="flex flex-col gap-4">

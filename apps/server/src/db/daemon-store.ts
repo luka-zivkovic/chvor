@@ -70,18 +70,22 @@ export function listDaemonTasks(filter?: { status?: DaemonTaskStatus; limit?: nu
 
 export function claimNextTask(): DaemonTask | null {
   const db = getDb();
-  const now = new Date().toISOString();
-  // Two-step claim for SQLite < 3.35 compatibility (no RETURNING)
-  const next = db.prepare(
-    "SELECT id FROM daemon_tasks WHERE status = 'queued' ORDER BY priority DESC, created_at ASC LIMIT 1"
-  ).get() as { id: string } | undefined;
-  if (!next) return null;
+  // Atomic claim via transaction to prevent TOCTOU race
+  const claim = db.transaction(() => {
+    const now = new Date().toISOString();
+    const next = db.prepare(
+      "SELECT id FROM daemon_tasks WHERE status = 'queued' ORDER BY priority DESC, created_at ASC LIMIT 1"
+    ).get() as { id: string } | undefined;
+    if (!next) return null;
 
-  db.prepare(
-    "UPDATE daemon_tasks SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'"
-  ).run(now, next.id);
+    const result = db.prepare(
+      "UPDATE daemon_tasks SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'"
+    ).run(now, next.id);
 
-  return getDaemonTask(next.id);
+    if (result.changes === 0) return null; // claimed by another process
+    return getDaemonTask(next.id);
+  });
+  return claim();
 }
 
 export function updateDaemonTask(id: string, updates: {

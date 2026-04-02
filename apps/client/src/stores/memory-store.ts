@@ -75,7 +75,7 @@ export const useMemoryStore = create<MemoryState>((set) => ({
   },
 
   fetchGraph: async () => {
-    set({ graphLoading: true });
+    set({ graphLoading: true, error: null });
     try {
       const data = await api.memories.graph();
       set({ graphNodes: data.nodes, graphEdges: data.edges, graphLoading: false });
@@ -85,7 +85,7 @@ export const useMemoryStore = create<MemoryState>((set) => ({
   },
 
   fetchStats: async () => {
-    set({ statsLoading: true });
+    set({ statsLoading: true, error: null });
     try {
       const stats = await api.memories.stats();
       set({ stats, statsLoading: false });

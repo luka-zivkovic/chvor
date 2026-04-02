@@ -40,7 +40,7 @@ export async function initDocker(): Promise<void> {
     if (dockerAvailable) {
       console.log(`[sandbox] Docker ${dockerVersion} detected`);
       if (process.env.DOCKER_HOST?.startsWith("tcp://")) {
-        console.warn("[sandbox] WARNING: Docker connected via unencrypted TCP — only use on trusted local networks");
+        console.warn("[sandbox] Docker connected via TCP (DOCKER_TLS_VERIFY opt-in required)");
       }
       await cleanupOrphans();
     } else {
@@ -293,16 +293,25 @@ function dockerRequest(
     const dockerHost = process.env.DOCKER_HOST;
     const bodyStr = body ? JSON.stringify(body) : undefined;
 
-    // TCP transport (e.g., DOCKER_HOST=tcp://localhost:2375)
-    // WARNING: TCP transport uses unencrypted HTTP with no authentication.
-    // Only use with trusted local connections. For remote Docker hosts, use TLS.
+    // TCP transport — blocked unless explicitly opted-in via DOCKER_TLS_VERIFY
+    // Unencrypted TCP exposes the Docker API to network-level MITM attacks.
     if (dockerHost && dockerHost.startsWith("tcp://")) {
+      if (process.env.DOCKER_TLS_VERIFY !== "1") {
+        reject(new Error(
+          "Unencrypted TCP Docker connections are blocked for security. " +
+          "Set DOCKER_TLS_VERIFY=1 to opt-in (only on trusted local networks), " +
+          "or use the default Unix socket / named pipe transport."
+        ));
+        return;
+      }
+
       const url = new URL(path, dockerHost.replace("tcp://", "http://"));
       const options: import("node:http").RequestOptions = {
         hostname: url.hostname,
         port: url.port || 2375,
         path: url.pathname + url.search,
         method,
+        timeout: DOCKER_REQUEST_TIMEOUT_MS,
         headers: bodyStr
           ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) }
           : {},
@@ -313,6 +322,7 @@ function dockerRequest(
         res.on("data", (chunk) => chunks.push(chunk));
         res.on("end", () => resolve({ status: res.statusCode ?? 500, body: Buffer.concat(chunks) }));
       });
+      req.on("timeout", () => { req.destroy(); reject(new Error("Docker request timed out")); });
       req.on("error", reject);
       if (bodyStr) req.write(bodyStr);
       req.end();
@@ -336,6 +346,11 @@ function dockerRequest(
           bodyStr ?? "",
         ];
         socket.write(lines.join("\r\n"));
+      });
+
+      socket.setTimeout(DOCKER_REQUEST_TIMEOUT_MS, () => {
+        socket.destroy();
+        reject(new Error("Docker request timed out"));
       });
 
       const chunks: Buffer[] = [];
@@ -362,6 +377,7 @@ function dockerRequest(
       socketPath,
       path,
       method,
+      timeout: DOCKER_REQUEST_TIMEOUT_MS,
       headers: bodyStr
         ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) }
         : {},
@@ -372,6 +388,7 @@ function dockerRequest(
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => resolve({ status: res.statusCode ?? 500, body: Buffer.concat(chunks) }));
     });
+    req.on("timeout", () => { req.destroy(); reject(new Error("Docker request timed out")); });
     req.on("error", reject);
     if (bodyStr) req.write(bodyStr);
     req.end();

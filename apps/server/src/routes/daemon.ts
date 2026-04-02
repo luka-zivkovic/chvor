@@ -26,10 +26,17 @@ daemon.get("/presence", (c) => {
   return c.json({ data: getDaemonPresence() });
 });
 
+const VALID_TASK_STATUSES = new Set<string>(["queued", "running", "completed", "failed", "cancelled"]);
+const MAX_TASK_LIMIT = 1000;
+
 daemon.get("/tasks", (c) => {
   try {
-    const status = c.req.query("status") as DaemonTaskStatus | undefined;
-    const limit = parseInt(c.req.query("limit") ?? "50", 10);
+    const statusRaw = c.req.query("status");
+    if (statusRaw && !VALID_TASK_STATUSES.has(statusRaw)) {
+      return c.json({ error: `invalid status: must be one of ${[...VALID_TASK_STATUSES].join(", ")}` }, 400);
+    }
+    const status = statusRaw as DaemonTaskStatus | undefined;
+    const limit = Math.min(Math.max(1, parseInt(c.req.query("limit") ?? "50", 10) || 50), MAX_TASK_LIMIT);
     const tasks = listDaemonTasks({ status, limit });
     return c.json({ data: tasks });
   } catch (err) {
