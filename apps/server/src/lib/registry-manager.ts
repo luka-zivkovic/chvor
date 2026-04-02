@@ -77,7 +77,8 @@ export function getInstalledRegistryIds(): Set<string> {
 }
 
 // Re-export for backward compat — canonical implementation lives in semver.ts
-export { compareSemver } from "./semver.ts";
+import { compareSemver } from "./semver.ts";
+export { compareSemver };
 
 /**
  * Runtime validation of a parsed template manifest.
