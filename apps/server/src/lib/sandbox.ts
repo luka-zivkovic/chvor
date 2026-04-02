@@ -19,9 +19,16 @@ const LANGUAGE_IMAGES: Record<SandboxLanguage, string> = {
 const CONTAINER_LABEL = "chvor.sandbox";
 const API_VERSION = "v1.45";
 const MAX_OUTPUT_BYTES = 50_000;
+const MAX_CODE_LENGTH = 100_000; // 100KB max code input
+const MAX_CONCURRENT = 3;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const MAX_EXECUTIONS_PER_WINDOW = 10;
+const DOCKER_REQUEST_TIMEOUT_MS = 60_000; // 60s hard timeout for any Docker API call
 
 let dockerAvailable = false;
 let dockerVersion: string | undefined;
+let activeContainers = 0;
+const executionTimestamps: number[] = [];
 
 // ─── Public API ────────────────────────────────────────────
 
@@ -93,12 +100,38 @@ export async function executeInSandbox(opts: {
   language: SandboxLanguage;
   code: string;
   config: SandboxConfig;
-  workspacePath?: string;
 }): Promise<SandboxExecutionResult> {
-  const { language, code, config, workspacePath } = opts;
+  const { language, code, config } = opts;
   const image = LANGUAGE_IMAGES[language];
   const containerName = `chvor-sandbox-${randomUUID().slice(0, 8)}`;
   const startTime = Date.now();
+
+  // ── Guards ───────────────────────────────────────────────
+  if (code.length > MAX_CODE_LENGTH) {
+    throw new Error(`Code exceeds maximum length (${MAX_CODE_LENGTH} bytes)`);
+  }
+
+  if (activeContainers >= MAX_CONCURRENT) {
+    throw new Error(`Too many concurrent sandbox executions (max ${MAX_CONCURRENT})`);
+  }
+
+  // Rate limit: sliding window
+  const now = Date.now();
+  while (executionTimestamps.length > 0 && executionTimestamps[0]! < now - RATE_LIMIT_WINDOW_MS) {
+    executionTimestamps.shift();
+  }
+  if (executionTimestamps.length >= MAX_EXECUTIONS_PER_WINDOW) {
+    throw new Error(`Rate limit exceeded: max ${MAX_EXECUTIONS_PER_WINDOW} executions per minute`);
+  }
+  executionTimestamps.push(now);
+
+  // Verify image exists locally before creating container
+  const available = await listAvailableImages();
+  if (!available.includes(language)) {
+    throw new Error(`Docker image for "${language}" is not pulled. Pull it first in Settings → Permissions → Code Sandbox.`);
+  }
+
+  activeContainers++;
 
   // Build command based on language
   const cmd =
@@ -106,7 +139,7 @@ export async function executeInSandbox(opts: {
     language === "node" ? ["node", "-e", code] :
     ["bash", "-c", code];
 
-  // Create container
+  // Create container — no host mounts, no network by default
   const createBody = {
     Image: image,
     Cmd: cmd,
@@ -115,7 +148,8 @@ export async function executeInSandbox(opts: {
       Memory: config.memoryLimitMb * 1024 * 1024,
       CpuQuota: config.cpuQuota,
       NetworkMode: config.networkDisabled ? "none" : "bridge",
-      Binds: workspacePath ? [`${workspacePath}:/workspace:rw`] : [],
+      ReadonlyRootfs: false,
+      Binds: [] as string[],   // no host mounts — code runs in ephemeral /workspace
     },
     WorkingDir: "/workspace",
     Tty: false,
@@ -186,6 +220,7 @@ export async function executeInSandbox(opts: {
       oomKilled,
     };
   } finally {
+    activeContainers--;
     // Always cleanup container
     try {
       await dockerRequest("DELETE", `/${API_VERSION}/containers/${containerId}?force=true`);

@@ -14,6 +14,8 @@ let lastPruneDate: string | null = null;
 
 const DAEMON_JOB_ID = "daemon-tick";
 const TICK_INTERVAL_MS = 60_000; // 60 seconds
+const TASK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max per task
+const MAX_RETRIES = 2;
 
 export async function initDaemon(ws: WSManager): Promise<void> {
   wsRef = ws;
@@ -92,20 +94,29 @@ async function daemonTick(): Promise<void> {
 
       try {
         console.log(`[daemon] executing task: ${task.title}`);
-        // Dynamic import to avoid circular dependency
         const { executeConversation } = await import("./orchestrator.ts");
         const noop = () => {};
 
-        const result = await executeConversation(
+        // Race execution against timeout
+        const execPromise = executeConversation(
           [{
             id: randomUUID(),
             role: "user" as const,
             content: `[DAEMON TASK — This task was queued for autonomous execution. Complete it now.]\n\n${task.prompt}`,
-            channelType: "daemon" as any,
+            channelType: "daemon",
             timestamp: new Date().toISOString(),
           }],
           noop as any,
         );
+        const timeoutPromise = new Promise<null>((resolve) =>
+          setTimeout(() => resolve(null), TASK_TIMEOUT_MS)
+        );
+
+        const result = await Promise.race([execPromise, timeoutPromise]);
+
+        if (result === null) {
+          throw new Error(`Task timed out after ${TASK_TIMEOUT_MS / 1000}s`);
+        }
 
         const resultText = typeof result?.text === "string" ? result.text : JSON.stringify(result);
         updateDaemonTask(task.id, {
@@ -122,11 +133,23 @@ async function daemonTick(): Promise<void> {
         console.log(`[daemon] task completed: ${task.title}`);
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        updateDaemonTask(task.id, {
-          status: "failed",
-          error,
-        });
-        console.error(`[daemon] task failed: ${task.title}`, error);
+
+        // Retry logic: re-queue if under retry limit
+        const retryCount = parseInt(task.progress ?? "0", 10);
+        if (retryCount < MAX_RETRIES) {
+          updateDaemonTask(task.id, {
+            status: "queued",
+            progress: String(retryCount + 1),
+            error: `Retry ${retryCount + 1}/${MAX_RETRIES}: ${error}`,
+          });
+          console.log(`[daemon] task "${task.title}" failed, re-queued (retry ${retryCount + 1}/${MAX_RETRIES})`);
+        } else {
+          updateDaemonTask(task.id, {
+            status: "failed",
+            error: `Failed after ${MAX_RETRIES} retries: ${error}`,
+          });
+          console.error(`[daemon] task permanently failed: ${task.title}`, error);
+        }
       } finally {
         currentTask = null;
         broadcastPresence();
@@ -190,5 +213,5 @@ function handleEscalation(resultText: string, _healthContext: string): void {
 function broadcastPresence(stateOverride?: DaemonPresence["state"]): void {
   const presence = getDaemonPresence();
   if (stateOverride) presence.state = stateOverride;
-  wsRef?.broadcast({ type: "daemon.presence", data: presence } as any);
+  wsRef?.broadcast({ type: "daemon.presence", data: presence });
 }

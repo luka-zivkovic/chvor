@@ -71,13 +71,17 @@ export function listDaemonTasks(filter?: { status?: DaemonTaskStatus; limit?: nu
 export function claimNextTask(): DaemonTask | null {
   const db = getDb();
   const now = new Date().toISOString();
-  // Atomic claim: find oldest queued task by priority, set to running
-  const row = db.prepare(
-    `UPDATE daemon_tasks SET status = 'running', started_at = ?
-     WHERE id = (SELECT id FROM daemon_tasks WHERE status = 'queued' ORDER BY priority DESC, created_at ASC LIMIT 1)
-     RETURNING *`
-  ).get(now) as DaemonTaskRow | undefined;
-  return row ? rowToTask(row) : null;
+  // Two-step claim for SQLite < 3.35 compatibility (no RETURNING)
+  const next = db.prepare(
+    "SELECT id FROM daemon_tasks WHERE status = 'queued' ORDER BY priority DESC, created_at ASC LIMIT 1"
+  ).get() as { id: string } | undefined;
+  if (!next) return null;
+
+  db.prepare(
+    "UPDATE daemon_tasks SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'"
+  ).run(now, next.id);
+
+  return getDaemonTask(next.id);
 }
 
 export function updateDaemonTask(id: string, updates: {

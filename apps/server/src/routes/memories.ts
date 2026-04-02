@@ -45,7 +45,8 @@ memories.post("/", async (c) => {
 
 memories.get("/graph", (c) => {
   try {
-    return c.json({ data: getMemoryGraph() });
+    const limit = Math.min(parseInt(c.req.query("limit") ?? "500", 10) || 500, 1000);
+    return c.json({ data: getMemoryGraph(limit) });
   } catch (err) {
     return c.json({ error: String(err) }, 500);
   }
