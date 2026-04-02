@@ -76,15 +76,8 @@ export function getInstalledRegistryIds(): Set<string> {
   return new Set(Object.keys(readLock().installed));
 }
 
-export function compareSemver(a: string, b: string): number {
-  const pa = a.split(".").map((x) => Number(x) || 0);
-  const pb = b.split(".").map((x) => Number(x) || 0);
-  for (let i = 0; i < 3; i++) {
-    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
+// Re-export for backward compat — canonical implementation lives in semver.ts
+export { compareSemver } from "./semver.ts";
 
 /**
  * Runtime validation of a parsed template manifest.
@@ -658,8 +651,14 @@ export async function updateEntry(
     const { getBundledCapabilities } = await import("./capability-loader.ts");
     const bundled = getBundledCapabilities().find((c) => c.id === entryId);
     if (bundled) {
-      await installEntry(entryId, bundled.kind as RegistryEntryKind);
-      return { updated: true, conflict: false };
+      try {
+        await installEntry(entryId, bundled.kind as RegistryEntryKind);
+        return { updated: true, conflict: false };
+      } catch (err) {
+        // Version guard or network failure — not newer than bundled
+        console.warn(`[registry-manager] bundled update failed for "${entryId}":`, err instanceof Error ? err.message : err);
+        return { updated: false, conflict: false };
+      }
     }
     throw new Error(`"${entryId}" is not installed from registry`);
   }

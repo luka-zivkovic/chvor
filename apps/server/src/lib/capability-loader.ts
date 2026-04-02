@@ -5,7 +5,8 @@ import { homedir } from "node:os";
 import type { Skill, Tool, Capability } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
 import { parseCapabilityMd } from "./capability-parser.ts";
-import { getInstalledRegistryIds, compareSemver } from "./registry-manager.ts";
+import { getInstalledRegistryIds } from "./registry-manager.ts";
+import { compareSemver } from "./semver.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -16,6 +17,7 @@ const USER_TOOLS_DIR = process.env.CHVOR_TOOLS_DIR || join(homedir(), ".chvor", 
 
 let cachedSkills: Skill[] | null = null;
 let cachedTools: Tool[] | null = null;
+let cachedBundled: Capability[] | null = null;
 
 function scanDir(dir: string, source: "bundled" | "user"): Capability[] {
   if (!existsSync(dir)) return [];
@@ -35,18 +37,22 @@ function scanDir(dir: string, source: "bundled" | "user"): Capability[] {
   return capabilities;
 }
 
-/** Returns raw bundled capabilities (skills + tools) without dedup or caching. */
+/** Returns bundled capabilities (skills + tools) without dedup. Cached until reloadAll(). */
 export function getBundledCapabilities(): Capability[] {
-  return [
-    ...scanDir(BUNDLED_SKILLS_DIR, "bundled"),
-    ...scanDir(BUNDLED_TOOLS_DIR, "bundled"),
-  ];
+  if (!cachedBundled) {
+    cachedBundled = [
+      ...scanDir(BUNDLED_SKILLS_DIR, "bundled"),
+      ...scanDir(BUNDLED_TOOLS_DIR, "bundled"),
+    ];
+  }
+  return cachedBundled;
 }
 
 export function loadAll(force = false): { skills: Skill[]; tools: Tool[] } {
   if (cachedSkills && cachedTools && !force) {
     return { skills: cachedSkills, tools: cachedTools };
   }
+  if (force) cachedBundled = null;
 
   mkdirSync(USER_SKILLS_DIR, { recursive: true });
   mkdirSync(USER_TOOLS_DIR, { recursive: true });
