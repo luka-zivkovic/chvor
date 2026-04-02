@@ -85,6 +85,12 @@ export async function executePcTask(
     // a11y not available, skip
   }
 
+  if (!a11yTree) {
+    console.log("[pc-pipeline] a11y tree: null (not available on this platform or error)");
+  } else {
+    console.log(`[pc-pipeline] a11y tree: ${a11yTree.nodeCount} nodes`);
+  }
+
   if (a11yTree && a11yTree.nodeCount > 3) {
     // Import the serializer dynamically (from pc-agent lib)
     let serialized: string;
@@ -92,7 +98,7 @@ export async function executePcTask(
       const { serializeA11yTree } = await import("@chvor/pc-agent/a11y");
       serialized = serializeA11yTree(a11yTree, { maxDepth: 6, maxNodes: 200 });
     } catch {
-      // Serializer not available, skip a11y layer
+      console.log("[pc-pipeline] a11y serializer import failed, skipping a11y layer");
       serialized = "";
     }
 
@@ -126,6 +132,12 @@ export async function executePcTask(
     }
   }
 
+  const a11yReason = !a11yTree
+    ? "tree unavailable"
+    : a11yTree.nodeCount <= 3
+      ? `too few nodes (${a11yTree.nodeCount})`
+      : "no actions parsed from LLM";
+  console.log(`[pc-pipeline] a11y layer fallthrough: ${a11yReason}`);
   ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "a11y", status: "fallthrough" } });
 
   // Layer 3: Vision (screenshot + vision LLM)
