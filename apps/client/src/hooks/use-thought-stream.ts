@@ -5,9 +5,10 @@
  * into a rolling buffer of ThoughtSegments for canvas rendering.
  */
 
-import { useRef, useMemo } from "react";
+import { useRef, useMemo, useEffect } from "react";
 import { useAppStore } from "../stores/app-store";
 import type { ThoughtSegment } from "../lib/thought-stream/text-layout";
+import { clearLayoutCache } from "../lib/thought-stream/text-layout";
 
 const MAX_SEGMENTS = 20;
 const FONT_THOUGHT = "11px 'IBM Plex Sans', sans-serif";
@@ -64,11 +65,17 @@ function fontForType(type: ThoughtSegment["type"]): string {
 export function useThoughtStream(): {
   segments: ThoughtSegment[];
   isActive: boolean;
+  streamingThoughtRef: React.RefObject<string | null>;
 } {
   const executionEvents = useAppStore((s) => s.executionEvents);
   const streamingThought = useAppStore((s) => s.streamingThought);
   const prevLengthRef = useRef(0);
   const segmentsRef = useRef<ThoughtSegment[]>([]);
+  const streamingThoughtRef = useRef<string | null>(null);
+
+  // Keep streaming thought in a ref so render() can read it without
+  // causing segments to get a new reference on every token
+  streamingThoughtRef.current = streamingThought;
 
   const segments = useMemo(() => {
     const prevLen = prevLengthRef.current;
@@ -109,25 +116,23 @@ export function useThoughtStream(): {
     }
 
     prevLengthRef.current = currentLen;
-
-    // Append the live streaming thought as a transient segment
-    const result = [...segmentsRef.current];
-    if (streamingThought) {
-      result.push({
-        id: "streaming-thought",
-        text: streamingThought,
-        font: FONT_THOUGHT,
-        type: "thought",
-        createdAt: Date.now(),
-      });
-    }
-
-    return result;
-  }, [executionEvents, streamingThought]);
+    return segmentsRef.current;
+  }, [executionEvents]);
 
   const isActive = executionEvents.some(
     (e) => e.type === "execution.started",
   ) && !executionEvents.some((e) => e.type === "execution.completed");
 
-  return { segments, isActive };
+  // Clear pretext caches when execution finishes
+  const prevActiveRef = useRef(false);
+  useEffect(() => {
+    if (prevActiveRef.current && !isActive) {
+      // Execution just completed — schedule cache clear after fade-out
+      const timer = setTimeout(clearLayoutCache, 10_000);
+      return () => clearTimeout(timer);
+    }
+    prevActiveRef.current = isActive;
+  }, [isActive]);
+
+  return { segments, isActive, streamingThoughtRef };
 }

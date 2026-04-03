@@ -38,14 +38,18 @@ function cacheKey(text: string, font: string): string {
 function getPrepared(text: string, font: string): PreparedTextWithSegments {
   const key = cacheKey(text, font);
   let prepared = preparedCache.get(key);
-  if (!prepared) {
-    prepared = prepareWithSegments(text, font);
+  if (prepared) {
+    // LRU: move to end so it's evicted last
+    preparedCache.delete(key);
     preparedCache.set(key, prepared);
-    // Evict old entries to prevent unbounded growth
-    if (preparedCache.size > 100) {
-      const firstKey = preparedCache.keys().next().value;
-      if (firstKey) preparedCache.delete(firstKey);
-    }
+    return prepared;
+  }
+  prepared = prepareWithSegments(text, font);
+  preparedCache.set(key, prepared);
+  // Evict least-recently-used entry
+  if (preparedCache.size > 100) {
+    const firstKey = preparedCache.keys().next().value;
+    if (firstKey) preparedCache.delete(firstKey);
   }
   return prepared;
 }
