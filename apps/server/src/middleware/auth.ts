@@ -28,8 +28,8 @@ export const chvorAuth = createMiddleware<AuthEnv>(async (c, next) => {
     return next();
   }
 
-  // OAuth callback from Composio (browser redirect, no session cookie)
-  if (path === "/api/social/callback") return next();
+  // OAuth callbacks (browser redirect, no session cookie)
+  if (path === "/api/social/callback" || path === "/api/oauth/callback") return next();
 
   // If auth is not enabled, allow all requests
   if (!isAuthEnabled()) return next();

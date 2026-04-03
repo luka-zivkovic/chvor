@@ -5,6 +5,7 @@ import { useCanvasStore } from "../../stores/canvas-store";
 import { useRegistryStore } from "../../stores/registry-store";
 import { api } from "../../lib/api";
 import { cn } from "@/lib/utils";
+import { RegistrySearchBar } from "../registry/RegistrySearchBar";
 
 const TYPE_LABELS: Record<string, string> = {
   prompt: "Prompt",
@@ -40,17 +41,23 @@ export function SkillsPanel() {
 
   if (behavioralSkills.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-        <p className="text-xs text-muted-foreground">No behavioral skills configured</p>
-        <p className="text-[10px] text-muted-foreground/60">
-          Behavioral skills shape how the AI responds
-        </p>
+      <div className="flex flex-col gap-3">
+        <RegistrySearchBar kind="skill" onInstalled={fetchSkills} />
+        <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
+          <p className="text-xs text-muted-foreground">No behavioral skills configured</p>
+          <p className="text-[10px] text-muted-foreground/60">
+            Search the registry above to discover and install skills
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-2">
+      {/* Registry search */}
+      <RegistrySearchBar kind="skill" onInstalled={fetchSkills} />
+
       {/* Update indicator */}
       {availableUpdates.length > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-1.5">

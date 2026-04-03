@@ -59,9 +59,11 @@ import mediaConfigRoute from "./routes/media-config.ts";
 import registryRoute from "./routes/registry.ts";
 import pcControlRoute from "./routes/pc-control.ts";
 import socialRoute from "./routes/social.ts";
+import oauthRoute from "./routes/oauth.ts";
 import sandboxRoute from "./routes/sandbox.ts";
 import daemonRoute from "./routes/daemon.ts";
 import { initDocker } from "./lib/sandbox.ts";
+import { startOAuthTokenRefresh, stopOAuthTokenRefresh } from "./lib/oauth-token-refresh.ts";
 import { handlePcAgentConnection, handlePcAgentMessage, handlePcAgentClose, onPcAgentEvent, onPcFrame, shutdownPcAgents, initLocalBackend } from "./lib/pc-control.ts";
 import { getPcControlEnabled } from "./db/config-store.ts";
 import { initActivityTable } from "./db/activity-store.ts";
@@ -279,6 +281,7 @@ app.route("/api/auth", authRoute);
 app.route("/api/backup", backupRoute);
 app.route("/api/pc", pcControlRoute);
 app.route("/api/social", socialRoute);
+app.route("/api/oauth", oauthRoute);
 app.route("/api/config/sandbox", sandboxRoute);
 app.route("/api/daemon", daemonRoute);
 
@@ -543,6 +546,7 @@ startSkillWatcher([skillsDir, toolsDir], () => {
 // Registry auto-update: check for skill updates periodically
 startAutoUpdate((event) => wsManager.broadcast(event));
 startBackupScheduler();
+startOAuthTokenRefresh();
 
 // Graceful shutdown — clean up MCP child processes and browser sessions
 process.on("SIGINT", async () => {
@@ -555,6 +559,7 @@ process.on("SIGINT", async () => {
   stopPeriodicCleanup();
   stopDailyResetCheck();
   stopBrowserSweep();
+  stopOAuthTokenRefresh();
   stopAudioCleanup();
   stopSkillWatcher();
   stopAutoUpdate();
@@ -577,6 +582,7 @@ process.on("SIGTERM", async () => {
   stopPeriodicCleanup();
   stopDailyResetCheck();
   stopBrowserSweep();
+  stopOAuthTokenRefresh();
   stopAudioCleanup();
   stopSkillWatcher();
   stopAutoUpdate();

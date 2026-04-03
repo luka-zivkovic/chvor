@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CredentialSummary, AnyProviderDef, LLMProviderDef, EmbeddingProviderDef, IntegrationProviderDef } from "@chvor/shared";
+import type { CredentialSummary, AnyProviderDef, LLMProviderDef, EmbeddingProviderDef, IntegrationProviderDef, OAuthProviderDef, OAuthConnection } from "@chvor/shared";
 import { api } from "../lib/api";
 import { invalidateSttStatus } from "../components/chat/MicButton";
 
@@ -9,10 +9,14 @@ interface CredentialState {
   llmProviders: LLMProviderDef[];
   embeddingProviders: EmbeddingProviderDef[];
   integrationProviders: IntegrationProviderDef[];
+  oauthProviders: (OAuthProviderDef & { connected: boolean; hasSetupCredentials: boolean })[];
+  oauthConnections: OAuthConnection[];
+  hasComposioKey: boolean;
   loading: boolean;
   error: string | null;
 
   fetchAll: () => Promise<void>;
+  fetchOAuthState: () => Promise<void>;
   addCredential: (cred: CredentialSummary) => void;
   removeCredential: (id: string) => void;
   updateCredential: (id: string, updates: Partial<CredentialSummary>) => void;
@@ -24,6 +28,9 @@ export const useCredentialStore = create<CredentialState>((set) => ({
   llmProviders: [],
   embeddingProviders: [],
   integrationProviders: [],
+  oauthProviders: [],
+  oauthConnections: [],
+  hasComposioKey: false,
   loading: false,
   error: null,
 
@@ -60,6 +67,19 @@ export const useCredentialStore = create<CredentialState>((set) => ({
           : null;
 
     set({ credentials, providers, llmProviders, embeddingProviders, integrationProviders, loading: false, error });
+  },
+
+  fetchOAuthState: async () => {
+    try {
+      const data = await api.oauth.providers();
+      set({
+        oauthProviders: data.providers,
+        oauthConnections: data.connections,
+        hasComposioKey: data.hasComposioKey,
+      });
+    } catch {
+      // OAuth endpoints may not be available — ignore
+    }
   },
 
   addCredential: (cred) => {

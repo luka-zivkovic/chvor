@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
 import { AddCredentialDialog } from "@/components/credentials/AddCredentialDialog";
+import { OAuthConnectButton } from "@/components/credentials/OAuthConnectButton";
 import { useCredentialStore } from "@/stores/credential-store";
 import { SKILL_CATALOG, CATEGORY_LABELS, CATEGORY_ORDER, type SkillEntry } from "../onboarding-data";
 import { staggerContainer, staggerItem, phaseVariants } from "../onboarding-variants";
@@ -13,15 +14,19 @@ interface Props {
 }
 
 export function PowerUpPhase({ direction, onBack, onNext }: Props) {
-  const { credentials, fetchAll: fetchCredentials } = useCredentialStore();
+  const { credentials, oauthConnections, fetchAll: fetchCredentials, fetchOAuthState } = useCredentialStore();
   const [setupCredType, setSetupCredType] = useState<string | null>(null);
 
-  useEffect(() => { fetchCredentials(); }, [fetchCredentials]);
+  useEffect(() => { fetchCredentials(); fetchOAuthState(); }, [fetchCredentials, fetchOAuthState]);
 
   const credTypeSet = new Set(credentials.map((c) => c.type));
+  const connectedOAuthPlatforms = new Set(
+    oauthConnections.filter((c) => c.status === "active").map((c) => c.platform),
+  );
 
   const isSkillActive = (skill: SkillEntry): boolean => {
     if (skill.comingSoon) return false;
+    if (skill.oauthProvider) return connectedOAuthPlatforms.has(skill.oauthProvider);
     if (!skill.credType) return true;
     return credTypeSet.has(skill.credType);
   };
@@ -99,16 +104,14 @@ export function PowerUpPhase({ direction, onBack, onNext }: Props) {
                       const active = isSkillActive(skill);
                       const soon = skill.comingSoon;
                       return (
-                        <button
+                        <div
                           key={skill.id}
-                          onClick={() => !active && !soon && skill.credType && setSetupCredType(skill.credType)}
-                          disabled={active || soon}
                           className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-all ${
                             soon
                               ? "border-border/30 opacity-40"
                               : active
                                 ? "border-green-500/20 bg-green-500/5"
-                                : "border-border/50 bg-card/30 backdrop-blur-sm hover:border-muted-foreground/30 hover:bg-muted/30"
+                                : "border-border/50 bg-card/30 backdrop-blur-sm"
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
@@ -122,10 +125,32 @@ export function PowerUpPhase({ direction, onBack, onNext }: Props) {
                             <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[9px] text-muted-foreground">Soon</span>
                           ) : active ? (
                             <span className="shrink-0 text-[10px] text-green-400">Active</span>
-                          ) : (
-                            <span className="shrink-0 text-[10px] text-muted-foreground">Set up</span>
-                          )}
-                        </button>
+                          ) : skill.oauthProvider ? (
+                            <OAuthConnectButton
+                              provider={{
+                                id: skill.oauthProvider,
+                                name: skill.label,
+                                icon: skill.icon ?? skill.id,
+                                method: skill.oauthMethod ?? "composio",
+                                category: "social",
+                                description: skill.description,
+                                setupCredentialType: skill.oauthMethod === "direct"
+                                  ? `${skill.oauthProvider}-oauth`
+                                  : undefined,
+                              }}
+                              compact
+                              onConnected={fetchOAuthState}
+                              onSetupRequired={(ct) => setSetupCredType(ct)}
+                            />
+                          ) : skill.credType ? (
+                            <button
+                              onClick={() => setSetupCredType(skill.credType!)}
+                              className="shrink-0 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                            >
+                              Set up
+                            </button>
+                          ) : null}
+                        </div>
                       );
                     })}
                   </div>

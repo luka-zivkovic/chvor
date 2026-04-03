@@ -9,6 +9,10 @@ export interface SkillEntry {
   credType?: CredentialType;
   comingSoon?: boolean;
   featured?: boolean;
+  /** OAuth provider ID (matches OAUTH_PROVIDERS in provider-registry) */
+  oauthProvider?: string;
+  /** OAuth connection method — "direct" needs no third-party, "composio" requires Composio key */
+  oauthMethod?: "direct" | "composio";
 }
 
 export const CATEGORY_LABELS: Record<SkillEntry["category"], string> = {
@@ -55,17 +59,22 @@ export const SKILL_CATALOG: SkillEntry[] = [
   { id: "vercel", label: "Vercel", description: "Deployments, domains, and logs", category: "devtools", comingSoon: true },
 
   // --- Productivity ---
-  { id: "gmail", label: "Gmail", description: "Read, search, and send emails", category: "productivity", comingSoon: true },
-  { id: "google-calendar", label: "Google Calendar", description: "View, create, and manage events", category: "productivity", comingSoon: true },
-  { id: "google-drive", label: "Google Drive", description: "Search, read, and organize files", category: "productivity", comingSoon: true },
+  { id: "gmail", label: "Gmail", description: "Read, search, and send emails", category: "productivity", oauthProvider: "google", oauthMethod: "direct", featured: true },
+  { id: "google-calendar", label: "Google Calendar", description: "View, create, and manage events", category: "productivity", oauthProvider: "google", oauthMethod: "direct" },
+  { id: "google-drive", label: "Google Drive", description: "Search, read, and organize files", category: "productivity", oauthProvider: "google", oauthMethod: "direct" },
   { id: "linear", label: "Linear", description: "Create and manage issues and projects", category: "productivity", comingSoon: true },
   { id: "todoist", label: "Todoist", description: "Manage tasks and to-do lists", category: "productivity", comingSoon: true },
   { id: "dropbox", label: "Dropbox", description: "Access and manage cloud files", category: "productivity", comingSoon: true },
   { id: "onedrive", label: "OneDrive", description: "Access Microsoft cloud storage", category: "productivity", comingSoon: true },
 
+  // --- Social (via OAuth) ---
+  { id: "twitter", label: "Twitter / X", description: "Post tweets, read timeline, and manage your account", category: "communication", oauthProvider: "twitter", oauthMethod: "composio" },
+  { id: "reddit", label: "Reddit", description: "Browse, post, and message on Reddit", category: "communication", oauthProvider: "reddit", oauthMethod: "direct" },
+  { id: "linkedin", label: "LinkedIn", description: "Post updates and manage your profile", category: "communication", oauthProvider: "linkedin", oauthMethod: "composio" },
+
   // --- Smart Home & Life ---
   { id: "homeassistant", label: "Home Assistant", description: "Control smart home devices and automations", category: "life", credType: "homeassistant", featured: true },
-  { id: "spotify", label: "Spotify", description: "Control playback and browse music", category: "life", comingSoon: true },
+  { id: "spotify", label: "Spotify", description: "Control playback and browse music", category: "life", oauthProvider: "spotify", oauthMethod: "composio" },
   { id: "apple-health", label: "Apple Health", description: "Access health and fitness data", category: "life", comingSoon: true },
   { id: "fitbit", label: "Fitbit", description: "Track fitness and sleep data", category: "life", comingSoon: true },
   { id: "weather", label: "Weather", description: "Current and forecast weather data", category: "life", comingSoon: true },

@@ -1,34 +1,70 @@
 import { useEffect, useState } from "react";
 import { useCredentialStore } from "../../stores/credential-store";
 import { AddCredentialDialog } from "../credentials/AddCredentialDialog";
+import { OAuthConnectButton } from "../credentials/OAuthConnectButton";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
 
 export function IntegrationsPanel() {
-  const { credentials, integrationProviders, fetchAll, loading } = useCredentialStore();
+  const {
+    credentials,
+    integrationProviders,
+    oauthProviders,
+    oauthConnections,
+    hasComposioKey,
+    fetchAll,
+    fetchOAuthState,
+    loading,
+  } = useCredentialStore();
   const [showAdd, setShowAdd] = useState(false);
+  const [addCredType, setAddCredType] = useState<string | undefined>(undefined);
   const [editingCredential, setEditingCredential] = useState<typeof credentials[0] | null>(null);
+  const [composioExpanded, setComposioExpanded] = useState(false);
 
   useEffect(() => {
     fetchAll();
-  }, [fetchAll]);
+    fetchOAuthState();
+  }, [fetchAll, fetchOAuthState]);
 
-  // Filter credentials to only integration providers
+  // Filter credentials to only integration providers (exclude OAuth setup creds)
+  const oauthSetupTypes = new Set(["google-oauth", "reddit-oauth", "composio"]);
   const integrationCredTypes = new Set(integrationProviders.map((p) => p.credentialType));
-  const integrationCredentials = credentials.filter((c) => integrationCredTypes.has(c.type));
+  const integrationCredentials = credentials.filter(
+    (c) => integrationCredTypes.has(c.type) && !oauthSetupTypes.has(c.type),
+  );
+
+  // Split OAuth providers by method
+  const directOAuthProviders = oauthProviders.filter((p) => p.method === "direct");
+  const composioOAuthProviders = oauthProviders.filter((p) => p.method === "composio");
+
+  // Available native integrations (exclude OAuth setup creds from the "available" list)
+  const connectedTypes = new Set(integrationCredentials.map((c) => c.type));
+  const unconnectedNative = integrationProviders.filter(
+    (p) => !connectedTypes.has(p.credentialType) && !oauthSetupTypes.has(p.credentialType),
+  );
+
+  const handleAddWithProvider = (credType: string) => {
+    setAddCredType(credType);
+    setShowAdd(true);
+  };
+
+  const handleSetupRequired = (credType: string) => {
+    setAddCredType(credType);
+    setShowAdd(true);
+  };
 
   if (loading) {
     return <p className="text-xs text-muted-foreground">Loading...</p>;
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       {/* Header with add button */}
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground">
-          {integrationCredentials.length} integration{integrationCredentials.length !== 1 ? "s" : ""} connected
+          {integrationCredentials.length + oauthConnections.filter((c) => c.status === "active").length} service{integrationCredentials.length !== 1 ? "s" : ""} connected
         </span>
         <button
-          onClick={() => setShowAdd(true)}
+          onClick={() => { setAddCredType(undefined); setShowAdd(true); }}
           className="flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors"
         >
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -39,23 +75,8 @@ export function IntegrationsPanel() {
         </button>
       </div>
 
-      {/* Integration list */}
-      {integrationCredentials.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border/50 p-8 text-center">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/30">
-            <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-            <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-            <line x1="6" y1="6" x2="6.01" y2="6" />
-            <line x1="6" y1="18" x2="6.01" y2="18" />
-          </svg>
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">No integrations connected</p>
-            <p className="mt-0.5 text-[10px] text-muted-foreground/60">
-              Connect Telegram, Discord, Slack, and more
-            </p>
-          </div>
-        </div>
-      ) : (
+      {/* Connected integrations */}
+      {integrationCredentials.length > 0 && (
         <div className="flex flex-col gap-2">
           {integrationCredentials.map((cred) => {
             const providerDef = integrationProviders.find((p) => p.credentialType === cred.type);
@@ -94,37 +115,154 @@ export function IntegrationsPanel() {
         </div>
       )}
 
-      {/* Available integrations */}
-      {(() => {
-        const connectedTypes = new Set(integrationCredentials.map((c) => c.type));
-        const unconnected = integrationProviders.filter((p) => !connectedTypes.has(p.credentialType));
-        if (unconnected.length === 0) return null;
-        return (
+      {/* Empty state when nothing connected at all */}
+      {integrationCredentials.length === 0 && oauthConnections.filter((c) => c.status === "active").length === 0 && (
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border/50 p-6 text-center">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/30">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+            <line x1="6" y1="6" x2="6.01" y2="6" />
+            <line x1="6" y1="18" x2="6.01" y2="18" />
+          </svg>
           <div>
-            <p className="mb-1.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              Available integrations
+            <p className="text-xs font-medium text-muted-foreground">No services connected</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground/60">
+              Connect your services below to give your AI access
             </p>
-            <div className="flex flex-wrap gap-1">
-              {unconnected.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setShowAdd(true)}
-                  className="flex items-center gap-1.5 rounded-md border border-dashed border-border/40 px-2 py-1 text-[10px] text-muted-foreground/60 hover:border-primary/40 hover:text-primary/80 transition-all"
-                >
-                  <ProviderIcon icon={p.icon} size={14} className="opacity-50" />
-                  {p.name}
-                </button>
-              ))}
-            </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
+
+      {/* Available native integrations */}
+      {unconnectedNative.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            Available integrations
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {unconnectedNative.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => handleAddWithProvider(p.credentialType)}
+                className="flex items-center gap-1.5 rounded-md border border-dashed border-border/40 px-2 py-1 text-[10px] text-muted-foreground/60 hover:border-primary/40 hover:text-primary/80 transition-all"
+              >
+                <ProviderIcon icon={p.icon} size={14} className="opacity-50" />
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Direct OAuth accounts (Google, Reddit — no third-party needed) */}
+      {directOAuthProviders.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            Direct connect
+          </p>
+          <div className="flex flex-col gap-2">
+            {directOAuthProviders.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/5 p-3"
+              >
+                <ProviderIcon icon={p.icon} size={18} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-foreground">{p.name}</p>
+                  <p className="text-[9px] text-muted-foreground/60 line-clamp-1">{p.description}</p>
+                </div>
+                <OAuthConnectButton
+                  provider={p}
+                  compact
+                  onConnected={fetchOAuthState}
+                  onSetupRequired={handleSetupRequired}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Composio OAuth accounts (Twitter, LinkedIn, etc.) */}
+      {composioOAuthProviders.length > 0 && (
+        <div>
+          <button
+            onClick={() => setComposioExpanded(!composioExpanded)}
+            className="flex items-center gap-1.5 mb-1.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+          >
+            <svg
+              width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+              className={`transition-transform ${composioExpanded ? "rotate-90" : ""}`}
+            >
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+            More services via Composio
+          </button>
+
+          {composioExpanded && (
+            <div className="flex flex-col gap-2">
+              {/* Composio explainer */}
+              {!hasComposioKey && (
+                <div className="rounded-lg border border-border/40 bg-muted/5 p-3">
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    <span className="font-medium text-foreground">Composio</span> is a free OAuth bridge
+                    that securely connects services like Twitter, LinkedIn, and Spotify.
+                    You bring your own API key — tokens stay under your control.
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <a
+                      href="https://app.composio.dev/settings"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[9px] text-primary hover:underline"
+                    >
+                      Get a free key
+                    </a>
+                    <button
+                      onClick={() => handleAddWithProvider("composio")}
+                      className="rounded-md bg-primary/10 px-2 py-0.5 text-[9px] font-medium text-primary hover:bg-primary/20 transition-colors"
+                    >
+                      Add Composio API key
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Composio service grid */}
+              <div className="flex flex-col gap-2">
+                {composioOAuthProviders.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`flex items-center gap-3 rounded-lg border border-border/50 bg-muted/5 p-3 ${!hasComposioKey ? "opacity-50" : ""}`}
+                  >
+                    <ProviderIcon icon={p.icon} size={18} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-foreground">{p.name}</p>
+                      <p className="text-[9px] text-muted-foreground/60 line-clamp-1">{p.description}</p>
+                    </div>
+                    {hasComposioKey ? (
+                      <OAuthConnectButton
+                        provider={p}
+                        compact
+                        onConnected={fetchOAuthState}
+                      />
+                    ) : (
+                      <span className="text-[9px] text-muted-foreground/40">Needs Composio key</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Add dialog */}
       {showAdd && (
         <AddCredentialDialog
-          onClose={() => { setShowAdd(false); fetchAll(); }}
+          onClose={() => { setShowAdd(false); setAddCredType(undefined); fetchAll(); fetchOAuthState(); }}
           filter="integration"
+          initialCredType={addCredType}
         />
       )}
 

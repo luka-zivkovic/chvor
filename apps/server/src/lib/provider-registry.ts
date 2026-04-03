@@ -3,6 +3,7 @@ import type {
   EmbeddingProviderDef,
   IntegrationProviderDef,
   ImageGenProviderDef,
+  OAuthProviderDef,
 } from "@chvor/shared";
 
 // ── LLM Providers ────────────────────────────────────────────────
@@ -616,6 +617,53 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDef[] = [
     ],
   },
   {
+    id: "google-oauth",
+    name: "Google OAuth App",
+    icon: "google",
+    credentialType: "google-oauth",
+    description: "Your Google Cloud OAuth credentials for direct Gmail, Calendar, and Drive access",
+    requiredFields: [
+      {
+        key: "clientId",
+        label: "Client ID",
+        type: "text",
+        placeholder: "123456789-abc.apps.googleusercontent.com",
+        helpUrl: "https://console.cloud.google.com/apis/credentials",
+        helpText: "Create an OAuth 2.0 Client ID in Google Cloud Console. Set the redirect URI to http://localhost:9147/api/oauth/callback",
+      },
+      {
+        key: "clientSecret",
+        label: "Client Secret",
+        type: "password",
+        placeholder: "GOCSPX-...",
+      },
+    ],
+  },
+  {
+    id: "reddit-oauth",
+    name: "Reddit OAuth App",
+    icon: "reddit",
+    credentialType: "reddit-oauth",
+    description: "Your Reddit app credentials for direct Reddit access",
+    requiredFields: [
+      {
+        key: "clientId",
+        label: "Client ID",
+        type: "text",
+        placeholder: "Your Reddit app client ID",
+        helpUrl: "https://www.reddit.com/prefs/apps",
+        helpText: "Create a 'web app' at reddit.com/prefs/apps. Set the redirect URI to http://localhost:9147/api/oauth/callback",
+      },
+      {
+        key: "clientSecret",
+        label: "Client Secret",
+        type: "password",
+        placeholder: "Your Reddit app secret",
+        optional: true,
+      },
+    ],
+  },
+  {
     id: "composio",
     name: "Composio",
     icon: "share-2",
@@ -664,6 +712,104 @@ export const IMAGE_GEN_PROVIDERS: ImageGenProviderDef[] = [
       { id: "fal-ai/flux/dev", name: "Flux Dev" },
       { id: "fal-ai/flux-pro/v1.1-ultra", name: "Flux Pro 1.1 Ultra" },
     ],
+  },
+];
+
+// ── OAuth Providers ─────────────────────────────────────────────
+
+export const OAUTH_PROVIDERS: OAuthProviderDef[] = [
+  // --- Direct OAuth (Tier 2) — no third-party dependency ---
+  {
+    id: "google",
+    name: "Google (Gmail, Calendar, Drive)",
+    icon: "google",
+    method: "direct",
+    category: "productivity",
+    description: "Connect your Google account directly for Gmail, Calendar, and Drive access.",
+    setupCredentialType: "google-oauth",
+  },
+  {
+    id: "reddit",
+    name: "Reddit",
+    icon: "reddit",
+    method: "direct",
+    category: "social",
+    description: "Connect your Reddit account directly for browsing, posting, and messaging.",
+    setupCredentialType: "reddit-oauth",
+  },
+
+  // --- Composio OAuth (Tier 3) — requires Composio API key ---
+  {
+    id: "twitter",
+    name: "Twitter / X",
+    icon: "twitter",
+    method: "composio",
+    composioToolkit: "twitter",
+    category: "social",
+    description: "Post tweets, read timeline, and manage your Twitter account.",
+  },
+  {
+    id: "linkedin",
+    name: "LinkedIn",
+    icon: "linkedin",
+    method: "composio",
+    composioToolkit: "linkedin",
+    category: "social",
+    description: "Post updates, read feed, and manage your LinkedIn profile.",
+  },
+  {
+    id: "spotify",
+    name: "Spotify",
+    icon: "spotify",
+    method: "composio",
+    composioToolkit: "spotify",
+    category: "life",
+    description: "Control playback, browse music, and manage playlists.",
+  },
+  {
+    id: "instagram",
+    name: "Instagram",
+    icon: "instagram",
+    method: "composio",
+    composioToolkit: "instagram",
+    category: "social",
+    description: "Post photos, browse feed, and manage your Instagram account.",
+  },
+  {
+    id: "youtube",
+    name: "YouTube",
+    icon: "youtube",
+    method: "composio",
+    composioToolkit: "youtube",
+    category: "social",
+    description: "Search videos, manage playlists, and interact with YouTube.",
+  },
+  {
+    id: "tiktok",
+    name: "TikTok",
+    icon: "tiktok",
+    method: "composio",
+    composioToolkit: "tiktok",
+    category: "social",
+    description: "Post videos and interact with your TikTok account.",
+  },
+  {
+    id: "bluesky",
+    name: "Bluesky",
+    icon: "bluesky",
+    method: "composio",
+    composioToolkit: "bluesky",
+    category: "social",
+    description: "Post, follow, and interact on Bluesky.",
+  },
+  {
+    id: "pinterest",
+    name: "Pinterest",
+    icon: "pinterest",
+    method: "composio",
+    composioToolkit: "pinterest",
+    category: "social",
+    description: "Pin, board, and browse Pinterest.",
   },
 ];
 
