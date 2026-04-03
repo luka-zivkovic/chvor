@@ -136,18 +136,13 @@ class McpManager {
       console.warn(`[mcp] callTool failed for ${toolId}/${toolName}, attempting reconnect…`);
       const toolRef = conn.tool;
       await this.closeConnection(toolId);
-      try {
-        await this.getConnection(toolRef);
-        const newConn = this.connections.get(toolId);
-        if (!newConn) throw firstErr;
-        return await newConn.client.callTool({
-          name: toolName,
-          arguments: args,
-        });
-      } catch (retryErr) {
-        // Second failure is final — throw the retry error
-        throw retryErr;
-      }
+      await this.getConnection(toolRef);
+      const newConn = this.connections.get(toolId);
+      if (!newConn) throw firstErr;
+      return await newConn.client.callTool({
+        name: toolName,
+        arguments: args,
+      });
     }
   }
 
