@@ -19,7 +19,7 @@ export function ChatInput({ onSend, onStop, disabled, isStreaming }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const openPanel = useUIStore((s) => s.openPanel);
+  const openSettings = useUIStore((s) => s.openSettings);
 
   const showStop = isStreaming && !input.trim() && !pendingMedia.length;
 
@@ -90,9 +90,9 @@ export function ChatInput({ onSend, onStop, disabled, isStreaming }: Props) {
   }, []);
 
   const handleOpenCredentials = useCallback(() => {
-    openPanel("settings");
+    openSettings("connections");
     setVoiceError(null);
-  }, [openPanel]);
+  }, [openSettings]);
 
   useEffect(() => {
     const el = textareaRef.current;

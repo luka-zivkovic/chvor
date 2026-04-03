@@ -26,10 +26,13 @@ export function SlideOverPanel({
       className={cn(
         "animate-slide-in-left relative h-full z-30 w-full",
         "flex flex-col md:rounded-r-2xl",
-        "border-r border-border/50 backdrop-blur-xl"
+        "border-r border-border/50 backdrop-blur-xl",
+        "overflow-x-hidden"
       )}
       style={{
+        width: width ?? 560,
         maxWidth: width ?? 560,
+        minWidth: width ?? 560,
         background: "var(--glass-bg-strong)",
       }}
     >

@@ -1,37 +1,39 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { useModelsStore } from "../../stores/models-store";
 import { useCredentialStore } from "../../stores/credential-store";
 import { api } from "../../lib/api";
 import { cn } from "@/lib/utils";
-import type { ModelRole, ModelDef, LLMProviderDef, EmbeddingProviderDef, RoleFallbackEntry } from "@chvor/shared";
+import type { ModelRole, ModelDef, LLMProviderDef, EmbeddingProviderDef, RoleFallbackEntry, CredentialSummary } from "@chvor/shared";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
-import { AddCredentialDialog } from "@/components/credentials/AddCredentialDialog";
+
+/* ─── Helpers ─── */
 
 function formatCtx(tokens: number): string {
   if (tokens >= 1_000_000) return `${tokens / 1_000_000}M`;
   return `${Math.round(tokens / 1_000)}K`;
 }
 
-function formatModelLabel(m: ModelDef): string {
-  const parts = [m.name];
-  const meta: string[] = [];
-  if (m.contextWindow) meta.push(`${formatCtx(m.contextWindow)} ctx`);
-  if (m.cost) meta.push(`$${m.cost.input}/$${m.cost.output}/M`);
-  if (meta.length) parts.push(`(${meta.join(", ")})`);
-  return parts.join(" ");
+function formatCost(cost: { input: number; output: number }): string {
+  return `$${cost.input}/${cost.output}`;
 }
 
-/** Shared cache for dynamic models — survives across component instances. */
+const CAPABILITY_COLORS: Record<string, string> = {
+  vision: "bg-purple-500/15 text-purple-400",
+  reasoning: "bg-blue-500/15 text-blue-400",
+  toolUse: "bg-emerald-500/15 text-emerald-400",
+  code: "bg-amber-500/15 text-amber-400",
+};
+
+/* ─── Dynamic model cache hook ─── */
+
 const _dynamicModelCache = new Map<string, ModelDef[]>();
 
-/** Fetch dynamic models for a provider, caching results across re-renders. */
 function useDynamicModels() {
   const cacheRef = useRef(_dynamicModelCache);
   const [loading, setLoading] = useState<string | null>(null);
   const [, forceUpdate] = useState(0);
 
-  // Invalidate cache when credentials change so stale models don't persist
   const credentials = useCredentialStore((s) => s.credentials);
   const credVersionRef = useRef(credentials);
   if (credVersionRef.current !== credentials) {
@@ -56,14 +58,413 @@ function useDynamicModels() {
           forceUpdate((n) => n + 1);
         }
       })
-      .catch(() => {
-        // Silently fall back to static models
-      })
+      .catch(() => {})
       .finally(() => setLoading(null));
   };
 
   return { getModels, fetchModels, loading };
 }
+
+/* ─── Inline Credential Form ─── */
+
+function InlineCredentialForm({
+  provider,
+  editCredential,
+  onDone,
+  onCancel,
+}: {
+  provider: LLMProviderDef;
+  /** If set, opens in edit mode for this credential */
+  editCredential?: CredentialSummary;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const { addCredential, updateCredential } = useCredentialStore();
+  const isEdit = !!editCredential;
+
+  const [fields, setFields] = useState<Record<string, string>>(() => {
+    if (isEdit) return {}; // In edit mode, start empty — placeholders show current values
+    const defaults: Record<string, string> = {};
+    for (const f of provider.requiredFields) {
+      if (f.defaultValue) defaults[f.key] = f.defaultValue;
+    }
+    return defaults;
+  });
+  const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+
+  const hasNewFields = Object.values(fields).some((v) => v.trim());
+  const allRequiredFilled = isEdit
+    ? true // In edit mode, can save even without new values (re-test)
+    : provider.requiredFields.filter((f) => !f.optional).every((f) => fields[f.key]?.trim());
+
+  const canTest = isEdit || allRequiredFilled;
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      if (isEdit && !hasNewFields) {
+        // Test saved credential as-is
+        const result = await api.credentials.testSaved(editCredential.id);
+        setTestResult(result);
+        if (result.success) updateCredential(editCredential.id, { testStatus: "success" });
+      } else {
+        const result = await api.credentials.test({ type: provider.credentialType, data: fields });
+        setTestResult(result);
+      }
+    } catch (err) {
+      setTestResult({ success: false, error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (isEdit) {
+        if (!hasNewFields) { onDone(); return; }
+        const filledFields: Record<string, string> = {};
+        for (const [k, v] of Object.entries(fields)) {
+          if (v.trim()) filledFields[k] = v;
+        }
+        const updated = await api.credentials.update(editCredential.id, { data: filledFields });
+        updateCredential(editCredential.id, updated);
+        toast.success(`${provider.name} updated`);
+      } else {
+        if (!allRequiredFilled) return;
+        const summary = await api.credentials.create({
+          name: provider.name,
+          type: provider.credentialType,
+          data: fields,
+        });
+        addCredential(summary);
+        toast.success(`${provider.name} connected`);
+      }
+      onDone();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save credential");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2.5">
+      <div className="flex items-center gap-2">
+        <ProviderIcon icon={provider.icon} size={16} />
+        <span className="text-xs font-medium text-foreground">
+          {isEdit ? `Edit ${provider.name}` : `Connect ${provider.name}`}
+        </span>
+      </div>
+
+      {provider.requiredFields.map((field) => (
+        <div key={field.key} className="space-y-1">
+          <div className="flex items-center gap-1.5">
+            <label className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              {field.label}
+            </label>
+            {field.optional && (
+              <span className="text-[8px] text-muted-foreground/50">(optional)</span>
+            )}
+            {field.helpUrl && (
+              <a
+                href={field.helpUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[9px] text-primary hover:underline"
+              >
+                Get key
+              </a>
+            )}
+          </div>
+          <input
+            type={field.type === "password" ? "password" : "text"}
+            value={fields[field.key] ?? ""}
+            onChange={(e) => setFields((prev) => ({ ...prev, [field.key]: e.target.value }))}
+            placeholder={
+              isEdit
+                ? editCredential.redactedFields?.[field.key] ?? field.placeholder
+                : field.placeholder
+            }
+            className="w-full rounded border border-border/50 bg-background/50 px-2.5 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/40"
+          />
+          {isEdit && (
+            <p className="text-[8px] text-muted-foreground/50">Leave empty to keep current value</p>
+          )}
+          {!isEdit && field.helpText && (
+            <p className="text-[9px] leading-relaxed text-muted-foreground/70">{field.helpText}</p>
+          )}
+        </div>
+      ))}
+
+      {testResult && (
+        <div className={cn(
+          "rounded-md px-2.5 py-1.5 text-[10px]",
+          testResult.success ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
+        )}>
+          {testResult.success ? "Connection verified" : `Failed: ${testResult.error}`}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 pt-0.5">
+        <button
+          onClick={handleTest}
+          disabled={!canTest || testing}
+          className="rounded-md border border-border/50 px-2.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:border-border disabled:opacity-40 transition-colors"
+        >
+          {testing ? "Testing..." : "Test"}
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={(!isEdit && !allRequiredFilled) || saving}
+          className="rounded-md bg-primary/15 px-2.5 py-1 text-[10px] font-medium text-primary hover:bg-primary/25 disabled:opacity-40 transition-colors"
+        >
+          {saving ? "Saving..." : isEdit ? "Update" : "Save & Connect"}
+        </button>
+        <button
+          onClick={onCancel}
+          className="ml-auto text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Model Dropdown ─── */
+
+function ModelDropdown({
+  models,
+  selectedModelId,
+  onSelect,
+  loading,
+  allowFreeText,
+}: {
+  models: ModelDef[];
+  selectedModelId: string;
+  onSelect: (modelId: string) => void;
+  loading: boolean;
+  allowFreeText?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [freeText, setFreeText] = useState("");
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [highlightIdx, setHighlightIdx] = useState(0);
+
+  const selectedModel = models.find((m) => m.id === selectedModelId);
+
+  const filtered = search
+    ? models.filter((m) =>
+        m.name.toLowerCase().includes(search.toLowerCase()) ||
+        m.id.toLowerCase().includes(search.toLowerCase())
+      )
+    : models;
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch("");
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  // Focus search on open
+  useEffect(() => {
+    if (open) {
+      searchRef.current?.focus();
+      setHighlightIdx(0);
+    }
+  }, [open]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightIdx((i) => Math.min(i + 1, filtered.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (filtered[highlightIdx]) {
+        onSelect(filtered[highlightIdx].id);
+        setOpen(false);
+        setSearch("");
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+      setSearch("");
+    }
+  }, [filtered, highlightIdx, onSelect]);
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      {/* Trigger */}
+      <button
+        onClick={() => setOpen(!open)}
+        className={cn(
+          "flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
+          open ? "border-primary/50 bg-primary/5" : "border-border/50 bg-muted/5 hover:border-border/80"
+        )}
+      >
+        <div className="flex-1 min-w-0">
+          {selectedModel ? (
+            <div>
+              <p className="text-xs font-medium text-foreground truncate">{selectedModel.name}</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                {selectedModel.contextWindow > 0 && (
+                  <span className="text-[9px] text-muted-foreground">
+                    {formatCtx(selectedModel.contextWindow)} ctx
+                  </span>
+                )}
+                {selectedModel.cost && (
+                  <span className="text-[9px] text-muted-foreground">
+                    {formatCost(selectedModel.cost)}/M
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : selectedModelId ? (
+            <p className="text-xs text-foreground truncate">{selectedModelId}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground/50">Select a model...</p>
+          )}
+        </div>
+        {loading ? (
+          <span className="text-[9px] text-muted-foreground animate-pulse shrink-0">loading...</span>
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            className={cn("shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        )}
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-lg border border-border/50 bg-card shadow-lg overflow-hidden">
+          {/* Search */}
+          {(models.length > 4 || allowFreeText) && (
+            <div className="border-b border-border/30 p-1.5">
+              <input
+                ref={searchRef}
+                type="text"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setHighlightIdx(0); }}
+                onKeyDown={handleKeyDown}
+                placeholder={allowFreeText ? "Search or type model ID..." : "Search models..."}
+                className="w-full rounded bg-transparent px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/40 outline-none"
+              />
+            </div>
+          )}
+
+          {/* Model list */}
+          <div className="max-h-[240px] overflow-y-auto py-1">
+            {filtered.length === 0 && !allowFreeText && (
+              <p className="px-3 py-2 text-[10px] text-muted-foreground/60">No models found</p>
+            )}
+            {filtered.map((m, idx) => {
+              const isSelected = m.id === selectedModelId;
+              const isHighlighted = idx === highlightIdx;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => { onSelect(m.id); setOpen(false); setSearch(""); }}
+                  onMouseEnter={() => setHighlightIdx(idx)}
+                  className={cn(
+                    "flex w-full flex-col items-start px-3 py-2 text-left transition-colors",
+                    isHighlighted ? "bg-primary/10" : "hover:bg-muted/20",
+                    isSelected && "border-l-2 border-primary"
+                  )}
+                >
+                  <div className="flex w-full items-center gap-2">
+                    <span className={cn("text-xs font-medium", isSelected ? "text-primary" : "text-foreground")}>
+                      {m.name}
+                    </span>
+                    {isSelected && (
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="text-primary ml-auto shrink-0">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    {m.contextWindow > 0 && (
+                      <span className="rounded bg-muted/30 px-1 py-0.5 text-[9px] text-muted-foreground">
+                        {formatCtx(m.contextWindow)}
+                      </span>
+                    )}
+                    {m.cost && (
+                      <span className="rounded bg-muted/30 px-1 py-0.5 text-[9px] text-muted-foreground">
+                        {formatCost(m.cost)}/M
+                      </span>
+                    )}
+                    {m.capabilities?.map((cap) => (
+                      <span key={cap} className={cn("rounded px-1 py-0.5 text-[9px]", CAPABILITY_COLORS[cap] ?? "bg-muted/30 text-muted-foreground")}>
+                        {cap}
+                      </span>
+                    ))}
+                  </div>
+                </button>
+              );
+            })}
+
+            {/* Free text option when search doesn't match */}
+            {allowFreeText && search.trim() && !filtered.some((m) => m.id === search.trim()) && (
+              <button
+                onClick={() => { onSelect(search.trim()); setOpen(false); setSearch(""); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/20 border-t border-border/20"
+              >
+                <span className="text-xs text-muted-foreground">Use custom:</span>
+                <span className="text-xs font-medium text-foreground font-mono">{search.trim()}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Free text input for providers that support it */}
+          {allowFreeText && !search && (
+            <div className="border-t border-border/30 p-2">
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={freeText}
+                  onChange={(e) => setFreeText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && freeText.trim()) {
+                      onSelect(freeText.trim());
+                      setFreeText("");
+                      setOpen(false);
+                    }
+                  }}
+                  placeholder="Custom model ID..."
+                  className="flex-1 rounded border border-border/50 bg-transparent px-2 py-1 font-mono text-[10px] text-foreground placeholder:text-muted-foreground/40 outline-none"
+                />
+                <button
+                  onClick={() => { if (freeText.trim()) { onSelect(freeText.trim()); setFreeText(""); setOpen(false); } }}
+                  disabled={!freeText.trim()}
+                  className="rounded bg-primary/15 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/25 disabled:opacity-40"
+                >
+                  Use
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Fallback List ─── */
 
 function FallbackList({ role }: { role: ModelRole }) {
   const { fallbacks, setFallbacks } = useModelsStore();
@@ -100,7 +501,6 @@ function FallbackList({ role }: { role: ModelRole }) {
   const handleAdd = () => {
     if (!addProvider || !addModel.trim()) return;
     const model = addModel.trim();
-    // Prevent duplicate provider+model entries
     if (entries.some((e) => e.providerId === addProvider.id && e.model === model)) return;
     const entry: RoleFallbackEntry = {
       providerId: addProvider.id,
@@ -115,64 +515,75 @@ function FallbackList({ role }: { role: ModelRole }) {
   };
 
   return (
-    <div className="mt-2">
+    <div className="mt-3">
       <button
         onClick={() => setShowAdd(!showAdd && entries.length === 0 ? true : !showAdd)}
-        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+        className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
       >
-        <span className={cn("text-[8px] transition-transform", (showAdd || entries.length > 0) && "rotate-90")}>
-          {"\u25B6"}
-        </span>
-        Fallbacks{entries.length > 0 && ` (${entries.length})`}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          className={cn("transition-transform", (showAdd || entries.length > 0) && "rotate-90")}>
+          <polyline points="9 6 15 12 9 18" />
+        </svg>
+        Fallback chain{entries.length > 0 && ` (${entries.length})`}
       </button>
 
       {(showAdd || entries.length > 0) && (
-        <div className="mt-1.5 space-y-1">
+        <div className="mt-2 space-y-1.5">
           {entries.map((entry, idx) => {
             const pDef = getProviderDef(entry.providerId);
             return (
               <div
                 key={`${entry.providerId}-${entry.model}-${idx}`}
-                className="flex items-center gap-1.5 rounded border border-border/30 bg-muted/5 px-2 py-1"
+                className="flex items-center gap-2 rounded-lg border border-border/30 bg-muted/5 px-2.5 py-1.5"
               >
-                {pDef && <ProviderIcon icon={pDef.icon} size={12} />}
-                <span className="flex-1 truncate text-[10px] text-foreground">
+                <span className="text-[9px] text-muted-foreground/50 w-3 shrink-0">{idx + 1}</span>
+                {pDef && <ProviderIcon icon={pDef.icon} size={14} />}
+                <span className="flex-1 truncate text-[11px] text-foreground">
                   {entry.alias ? (
-                    <>{entry.alias} <span className="text-muted-foreground/60">({entry.model})</span></>
+                    <>{entry.alias} <span className="text-muted-foreground/50">({entry.model})</span></>
                   ) : (
                     entry.model
                   )}
                 </span>
-                <button
-                  onClick={() => move(idx, -1)}
-                  disabled={idx === 0}
-                  className="px-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30"
-                  title="Move up"
-                >
-                  {"\u2191"}
-                </button>
-                <button
-                  onClick={() => move(idx, 1)}
-                  disabled={idx === entries.length - 1}
-                  className="px-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30"
-                  title="Move down"
-                >
-                  {"\u2193"}
-                </button>
-                <button
-                  onClick={() => remove(idx)}
-                  className="px-0.5 text-[10px] text-muted-foreground hover:text-destructive"
-                  title="Remove"
-                >
-                  {"\u00D7"}
-                </button>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    onClick={() => move(idx, -1)}
+                    disabled={idx === 0}
+                    className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/20 disabled:opacity-20 transition-colors"
+                    title="Move up"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="18 15 12 9 6 15" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => move(idx, 1)}
+                    disabled={idx === entries.length - 1}
+                    className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/20 disabled:opacity-20 transition-colors"
+                    title="Move down"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => remove(idx)}
+                    className="rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    title="Remove"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             );
           })}
 
           {showAdd ? (
-            <div className="space-y-1.5 rounded border border-border/30 bg-muted/5 p-2">
-              <div className="flex flex-wrap gap-1">
+            <div className="space-y-2 rounded-lg border border-border/30 bg-muted/5 p-2.5">
+              <div className="flex flex-wrap gap-1.5">
                 {availableProviders.map((p) => (
                   <button
                     key={p.id}
@@ -183,13 +594,13 @@ function FallbackList({ role }: { role: ModelRole }) {
                       setAddModel(models[0]?.id ?? "");
                     }}
                     className={cn(
-                      "flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium transition-all",
+                      "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-medium transition-all",
                       addProvider?.id === p.id
                         ? "border-primary/60 bg-primary/10 text-foreground"
                         : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
                     )}
                   >
-                    <ProviderIcon icon={p.icon} size={12} />
+                    <ProviderIcon icon={p.icon} size={14} />
                     {p.name}
                   </button>
                 ))}
@@ -201,14 +612,12 @@ function FallbackList({ role }: { role: ModelRole }) {
                     list={`fallback-models-${role}-${addProvider.id}`}
                     value={addModel}
                     onChange={(e) => setAddModel(e.target.value)}
-                    placeholder={getModels(addProvider).length > 0 ? "Select or type a model…" : "Type a model name…"}
-                    className="w-full rounded border border-border/50 bg-transparent px-2 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/50"
+                    placeholder={getModels(addProvider).length > 0 ? "Select or type a model..." : "Type a model name..."}
+                    className="w-full rounded-lg border border-border/50 bg-transparent px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/40"
                   />
                   <datalist id={`fallback-models-${role}-${addProvider.id}`}>
                     {getModels(addProvider).map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {formatModelLabel(m)}
-                      </option>
+                      <option key={m.id} value={m.id}>{m.name}</option>
                     ))}
                   </datalist>
                   <input
@@ -216,19 +625,19 @@ function FallbackList({ role }: { role: ModelRole }) {
                     value={addAlias}
                     onChange={(e) => setAddAlias(e.target.value)}
                     placeholder="Display alias (optional)"
-                    className="w-full rounded border border-border/50 bg-transparent px-2 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/50"
+                    className="w-full rounded-lg border border-border/50 bg-transparent px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/40"
                   />
-                  <div className="flex gap-1.5">
+                  <div className="flex gap-2">
                     <button
                       onClick={handleAdd}
                       disabled={!addModel}
-                      className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20 disabled:opacity-40"
+                      className="rounded-md bg-primary/15 px-2.5 py-1 text-[10px] font-medium text-primary hover:bg-primary/25 disabled:opacity-40 transition-colors"
                     >
                       Add
                     </button>
                     <button
                       onClick={() => { setShowAdd(false); setAddProvider(null); setAddModel(""); setAddAlias(""); }}
-                      className="text-[10px] text-muted-foreground hover:text-foreground"
+                      className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
                     >
                       Cancel
                     </button>
@@ -239,9 +648,13 @@ function FallbackList({ role }: { role: ModelRole }) {
           ) : (
             <button
               onClick={() => setShowAdd(true)}
-              className="text-[10px] text-muted-foreground hover:text-foreground"
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
             >
-              + Add fallback
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Add fallback
             </button>
           )}
         </div>
@@ -249,6 +662,8 @@ function FallbackList({ role }: { role: ModelRole }) {
     </div>
   );
 }
+
+/* ─── Role Selector (redesigned) ─── */
 
 function RoleSelector({
   role,
@@ -261,19 +676,20 @@ function RoleSelector({
 }) {
   const { roles, defaults, setRole } = useModelsStore();
   const { credentials, llmProviders, fetchAll } = useCredentialStore();
-  const [credDialogType, setCredDialogType] = useState<string | null>(null);
 
   const config = roles[role];
   const effectiveConfig = config ?? defaults[role] ?? null;
   const isDefault = !config && role !== "primary";
 
+  // Inline credential form state
+  const [credFormProvider, setCredFormProvider] = useState<LLMProviderDef | null>(null);
+  const [credFormEdit, setCredFormEdit] = useState<CredentialSummary | undefined>(undefined);
+
   const hasCredential = (p: LLMProviderDef) =>
     credentials.some((c) => c.type === p.credentialType && c.testStatus !== "failed");
 
-  // Show ALL providers — configured ones first, then unconfigured with "needs key"
   const configuredProviders = llmProviders.filter(hasCredential);
   const unconfiguredProviders = llmProviders.filter((p) => !hasCredential(p));
-  const availableProviders = [...configuredProviders, ...unconfiguredProviders];
 
   const activeProvider =
     configuredProviders.find((p) => p.id === effectiveConfig?.providerId) ??
@@ -281,25 +697,34 @@ function RoleSelector({
 
   const { getModels, fetchModels, loading: loadingModels } = useDynamicModels();
 
-  // Fetch dynamic models when active provider changes
   useEffect(() => {
     fetchModels(activeProvider);
   }, [activeProvider?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const displayModels = getModels(activeProvider);
 
-  const [freeTextModel, setFreeTextModel] = useState(effectiveConfig?.model ?? "");
-
-  // Sync free-text model state when effective config or active provider changes
-  useEffect(() => {
-    setFreeTextModel(effectiveConfig?.model ?? "");
-  }, [activeProvider?.id, effectiveConfig?.model]);
-
   const handleProviderSwitch = async (provider: LLMProviderDef) => {
     fetchModels(provider);
     const models = getModels(provider);
     const firstModel = models[0]?.id ?? "";
-    await setRole(role, provider.id, firstModel);
+    if (firstModel) {
+      await setRole(role, provider.id, firstModel);
+    } else {
+      // For providers with empty static models (Ollama, OpenRouter, etc.),
+      // fetch dynamic models first, then set role with the first discovered model.
+      try {
+        const result = await api.providers.models(provider.id);
+        if (result.models.length > 0) {
+          await setRole(role, provider.id, result.models[0].id);
+        } else {
+          // No models discovered — set provider anyway, user must type model name
+          await setRole(role, provider.id, "");
+        }
+      } catch {
+        // Fetch failed — set provider with empty model, user can type manually
+        await setRole(role, provider.id, "");
+      }
+    }
   };
 
   const handleModelChange = async (modelId: string) => {
@@ -311,145 +736,151 @@ function RoleSelector({
     await setRole(role, null, null);
   };
 
+  const handleCredentialDone = () => {
+    setCredFormProvider(null);
+    setCredFormEdit(undefined);
+    fetchAll(); // Refresh credentials
+  };
+
+  const handleEditProvider = (p: LLMProviderDef, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const cred = credentials.find((c) => c.type === p.credentialType);
+    setCredFormProvider(p);
+    setCredFormEdit(cred);
+  };
+
   return (
     <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <div>
+      {/* Header */}
+      <div className="mb-2.5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-foreground">{label}</span>
           {isDefault && (
-            <span className="ml-2 rounded bg-muted/40 px-1.5 py-0.5 text-[9px] text-muted-foreground">
-              default
+            <span className="rounded-full bg-muted/40 px-1.5 py-0.5 text-[8px] font-medium text-muted-foreground">
+              using default
             </span>
           )}
         </div>
-        {isDefault ? null : role !== "primary" ? (
+        {!isDefault && role !== "primary" && (
           <button
             onClick={handleClearRole}
-            className="text-[10px] text-muted-foreground hover:text-foreground"
+            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
           >
             Reset
           </button>
-        ) : null}
+        )}
       </div>
-      <p className="mb-2 text-[10px] text-muted-foreground">{description}</p>
+      <p className="mb-3 text-[10px] text-muted-foreground/80">{description}</p>
 
-      {availableProviders.length > 0 ? (
-        <>
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {availableProviders.map((p) => {
-              const isActive = p.id === activeProvider?.id;
-              const configured = hasCredential(p);
-              const cred = credentials.find((c) => c.type === p.credentialType);
-              const status = cred?.testStatus ?? "untested";
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    if (!configured) {
-                      setCredDialogType(p.credentialType);
-                      return;
-                    }
-                    if (!isActive) handleProviderSwitch(p);
-                  }}
-                  title={configured
-                    ? `${p.name} — ${status === "success" ? "Credential verified" : status === "failed" ? "Credential failed" : "Credential untested"}`
-                    : `${p.name} — needs API key`}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-all",
-                    isActive
-                      ? "border-primary/60 bg-primary/10 text-foreground"
-                      : configured
-                        ? "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
-                        : "border-border/30 text-muted-foreground/50 hover:border-border/50 hover:text-muted-foreground"
-                  )}
-                >
-                  <span className={cn(
-                    "inline-block h-1.5 w-1.5 rounded-full",
-                    configured
-                      ? status === "success" ? "bg-green-500" : status === "failed" ? "bg-red-500" : "bg-muted-foreground/50"
-                      : "bg-muted-foreground/20"
-                  )} />
-                  <ProviderIcon icon={p.icon} size={16} />
-                  {p.name}
-                  {!configured && (
-                    <span className="text-[8px] text-muted-foreground/50">needs key</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {activeProvider && (
-            <>
-              <div className="relative">
-                <input
-                  type="text"
-                  list={`models-${role}-${activeProvider.id}`}
-                  value={freeTextModel}
-                  onChange={(e) => setFreeTextModel(e.target.value)}
-                  onBlur={() => {
-                    if (freeTextModel.trim()) {
-                      handleModelChange(freeTextModel.trim());
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && freeTextModel.trim()) {
-                      handleModelChange(freeTextModel.trim());
-                      (e.target as HTMLInputElement).blur();
-                    }
-                  }}
-                  placeholder={displayModels.length > 0 ? "Select or type a model name…" : "Type a model name…"}
-                  className="w-full rounded border border-border/50 bg-transparent px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50"
-                />
-                <datalist id={`models-${role}-${activeProvider.id}`}>
-                  {displayModels.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {formatModelLabel(m)}
-                    </option>
-                  ))}
-                </datalist>
-                {loadingModels === activeProvider?.id && (
-                  <span className="absolute right-7 top-1/2 -translate-y-1/2 text-[9px] text-muted-foreground animate-pulse">
-                    loading…
-                  </span>
+      {/* Configured Providers */}
+      {configuredProviders.length > 0 && (
+        <div className="mb-3 grid grid-cols-2 gap-1.5">
+          {configuredProviders.map((p) => {
+            const isActive = p.id === activeProvider?.id;
+            const cred = credentials.find((c) => c.type === p.credentialType);
+            const status = cred?.testStatus ?? "untested";
+            return (
+              <div
+                key={p.id}
+                onClick={() => !isActive && handleProviderSwitch(p)}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg border p-2 text-left transition-all cursor-pointer",
+                  isActive
+                    ? "border-primary/50 bg-primary/8"
+                    : "border-border/40 hover:border-border/70 hover:bg-muted/10"
                 )}
+              >
+                <ProviderIcon icon={p.icon} size={18} className={isActive ? "text-primary" : ""} />
+                <div className="min-w-0 flex-1">
+                  <p className={cn("text-[11px] font-medium truncate", isActive ? "text-primary" : "text-foreground")}>
+                    {p.name}
+                  </p>
+                </div>
+                <button
+                  onClick={(e) => handleEditProvider(p, e)}
+                  className="rounded p-0.5 text-muted-foreground/40 hover:text-foreground hover:bg-muted/20 transition-colors shrink-0"
+                  title={`Edit ${p.name} configuration`}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                </button>
+                <span className={cn(
+                  "inline-block h-2 w-2 rounded-full shrink-0",
+                  status === "success" ? "bg-green-500" : status === "failed" ? "bg-red-500" : "bg-muted-foreground/40"
+                )} />
               </div>
-              {(() => {
-                const selected = displayModels.find((m) => m.id === effectiveConfig?.model);
-                return selected?.capabilities?.length ? (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {selected.capabilities.map((cap) => (
-                      <span key={cap} className="rounded bg-muted/40 px-1 py-0.5 text-[9px] text-muted-foreground">
-                        {cap}
-                      </span>
-                    ))}
-                  </div>
-                ) : null;
-              })()}
-            </>
-          )}
-
-          <FallbackList role={role} />
-        </>
-      ) : (
-        <p className="text-[10px] text-muted-foreground/60">
-          No providers available
-        </p>
+            );
+          })}
+        </div>
       )}
 
-      {credDialogType && (
-        <AddCredentialDialog
-          initialCredType={credDialogType}
-          filter="llm"
-          onClose={() => {
-            setCredDialogType(null);
-            fetchAll();
-          }}
+      {/* Model Selector */}
+      {activeProvider && (
+        <ModelDropdown
+          models={displayModels}
+          selectedModelId={effectiveConfig?.model ?? ""}
+          onSelect={handleModelChange}
+          loading={loadingModels === activeProvider.id}
+          allowFreeText={activeProvider.freeTextModel}
         />
       )}
+
+      {/* No configured providers message */}
+      {configuredProviders.length === 0 && !credFormProvider && (
+        <div className="rounded-lg border border-status-warning/30 bg-status-warning/5 p-2.5 mb-3">
+          <p className="text-[11px] font-medium text-status-warning">No providers connected</p>
+          <p className="mt-0.5 text-[9px] text-muted-foreground">
+            Add an API key below to get started
+          </p>
+        </div>
+      )}
+
+      {/* Inline credential form */}
+      {credFormProvider && (
+        <div className="mt-3">
+          <InlineCredentialForm
+            provider={credFormProvider}
+            editCredential={credFormEdit}
+            onDone={handleCredentialDone}
+            onCancel={() => { setCredFormProvider(null); setCredFormEdit(undefined); }}
+          />
+        </div>
+      )}
+
+      {/* Unconfigured providers (add key) */}
+      {unconfiguredProviders.length > 0 && !credFormProvider && (
+        <div className="mt-3">
+          <p className="mb-1.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            Add provider
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {unconfiguredProviders.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setCredFormProvider(p)}
+                className="flex items-center gap-1.5 rounded-md border border-dashed border-border/40 px-2 py-1 text-[10px] text-muted-foreground/60 hover:border-primary/40 hover:text-primary/80 transition-all"
+              >
+                <ProviderIcon icon={p.icon} size={14} className="opacity-50" />
+                {p.name}
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="opacity-50">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Fallback chain */}
+      <FallbackList role={role} />
     </div>
   );
 }
+
+/* ─── Embeddings Section ─── */
 
 interface EmbeddingHealth {
   embedderAvailable: boolean;
@@ -459,10 +890,9 @@ interface EmbeddingHealth {
 
 function EmbeddingsSection() {
   const { embedding, setEmbedding, reembedStatus, triggerReembed, pollReembedStatus } = useModelsStore();
-  const { credentials, embeddingProviders, fetchAll } = useCredentialStore();
+  const { credentials, embeddingProviders } = useCredentialStore();
 
   const [showWarning, setShowWarning] = useState(false);
-  const [credDialogType, setCredDialogType] = useState<string | null>(null);
   const [pendingProvider, setPendingProvider] = useState<{ providerId: string; model: string } | null>(null);
   const [health, setHealth] = useState<EmbeddingHealth | null>(null);
   const [modelStatus, setModelStatus] = useState<{ status: string; percent: number; error?: string } | null>(null);
@@ -488,12 +918,10 @@ function EmbeddingsSection() {
     }, 2000);
   };
 
-  // Fetch embedding health on mount
   useEffect(() => {
     api.models.embeddingHealth().then(setHealth).catch(() => toast.error("Failed to check embedding health"));
   }, [embedding.providerId]);
 
-  // Fetch local model status when local provider is active
   useEffect(() => {
     if (embedding.providerId !== "local") { setModelStatus(null); return; }
     api.models.embeddingModelStatus().then((s) => {
@@ -502,9 +930,8 @@ function EmbeddingsSection() {
       if (s.status === "downloading") startModelPoll();
     }).catch(() => {});
     return () => { if (modelPollRef.current) { clearInterval(modelPollRef.current); modelPollRef.current = null; } };
-  }, [embedding.providerId]);
+  }, [embedding.providerId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Poll re-embed status while running
   useEffect(() => {
     if (reembedStatus.status !== "running") return;
     const interval = setInterval(pollReembedStatus, 2000);
@@ -554,18 +981,12 @@ function EmbeddingsSection() {
           return (
             <button
               key={p.id}
-              onClick={() => {
-                if (!hasCreds) {
-                  if (p.credentialType) setCredDialogType(p.credentialType);
-                  return;
-                }
-                if (!isActive) handleProviderSwitch(p);
-              }}
-              title={!hasCreds ? `${p.name} — needs API key` : undefined}
+              onClick={() => hasCreds && !isActive && handleProviderSwitch(p)}
+              title={!hasCreds ? `Add ${p.credentialType} API key in Settings > Connections` : undefined}
               className={cn(
                 "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-all",
                 !hasCreds
-                  ? "border-border/30 text-muted-foreground/50 hover:border-border/50 hover:text-muted-foreground"
+                  ? "border-border/30 text-muted-foreground/40 cursor-not-allowed"
                   : isActive
                     ? "border-primary/60 bg-primary/10 text-foreground"
                     : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
@@ -731,20 +1152,11 @@ function EmbeddingsSection() {
           </div>
         )}
       </div>
-
-      {credDialogType && (
-        <AddCredentialDialog
-          initialCredType={credDialogType}
-          filter="all"
-          onClose={() => {
-            setCredDialogType(null);
-            fetchAll();
-          }}
-        />
-      )}
     </div>
   );
 }
+
+/* ─── Main Panel ─── */
 
 export function ModelsPanel() {
   const { fetchConfig, loading } = useModelsStore();
@@ -785,11 +1197,12 @@ export function ModelsPanel() {
       <div>
         <button
           onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground"
+          className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
         >
-          <span className={cn("transition-transform", showAdvanced && "rotate-90")}>
-            {"\u25B6"}
-          </span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            className={cn("transition-transform", showAdvanced && "rotate-90")}>
+            <polyline points="9 6 15 12 9 18" />
+          </svg>
           Advanced
         </button>
         {showAdvanced && (

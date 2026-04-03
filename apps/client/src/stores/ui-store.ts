@@ -1,7 +1,8 @@
 import { create } from "zustand";
 
-export type PanelId = "brain" | "persona" | "memory" | "knowledge" | "schedules" | "webhooks" | "settings" | "skills" | "skill-detail" | "tools" | "tool-detail" | "integration-detail" | "conversations" | "activity" | "emotion-history" | "registry";
+export type PanelId = "brain" | "persona" | "memory" | "knowledge" | "schedules" | "webhooks" | "skills" | "skill-detail" | "tools" | "tool-detail" | "integration-detail" | "connections" | "integrations" | "conversations" | "activity" | "emotion-history" | "registry";
 export type BrainTab = "overview" | "models" | "persona" | "memory";
+export type SettingsSection = "permissions" | "connections" | "voice" | "security" | "sessions" | "backup";
 export type LayoutMode = "default" | "canvas-expanded" | "canvas";
 
 interface UIState {
@@ -15,6 +16,8 @@ interface UIState {
   detailNodeId: string | null;
   /** Full-screen settings overlay */
   settingsOpen: boolean;
+  /** Which section the settings overlay should open to */
+  settingsSection: SettingsSection;
   openPanel: (panel: PanelId) => void;
   closePanel: () => void;
   togglePanel: (panel: PanelId) => void;
@@ -27,7 +30,7 @@ interface UIState {
   closeMobileMenu: () => void;
   openCanvas: (surfaceId?: string) => void;
   exitCanvas: () => void;
-  openSettings: () => void;
+  openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
 }
 
@@ -39,7 +42,15 @@ export const useUIStore = create<UIState>((set, get) => ({
   mobileMenuOpen: false,
   detailNodeId: null,
   settingsOpen: false,
-  openPanel: (panel) => set({ activePanel: panel, detailNodeId: null }),
+  settingsSection: "connections",
+  openPanel: (panel) => {
+    // Safety net: legacy "settings" panel calls redirect to SettingsOverlay
+    if ((panel as string) === "settings") {
+      get().openSettings("connections");
+      return;
+    }
+    set({ activePanel: panel, detailNodeId: null });
+  },
   closePanel: () => set({ activePanel: null, detailNodeId: null }),
   togglePanel: (panel) =>
     set({ activePanel: get().activePanel === panel ? null : panel, detailNodeId: null }),
@@ -67,6 +78,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     }
   },
   exitCanvas: () => set({ layoutMode: "default" }),
-  openSettings: () => set({ settingsOpen: true, activePanel: null }),
+  openSettings: (section?: SettingsSection) =>
+    set({ settingsOpen: true, activePanel: null, settingsSection: section ?? get().settingsSection }),
   closeSettings: () => set({ settingsOpen: false }),
 }));
