@@ -13,7 +13,7 @@ tags:
   - mcp
 mcp:
   command: npx
-  args: ["-y", "@anthropic-ai/brave-search-mcp"]
+  args: ["-y", "@modelcontextprotocol/server-brave-search"]
   transport: stdio
   env:
     BRAVE_API_KEY: "{{credentials.brave}}"

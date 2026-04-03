@@ -326,7 +326,7 @@ function parseDuckDuckGoHTML(
     snippets.push(stripHtmlTags(match[1]));
   }
 
-  for (let i = 0; i < Math.min(links.length, maxResults); i++) {
+  for (let i = 0; i < links.length && results.length < maxResults; i++) {
     const url = extractRealUrl(links[i].rawHref);
     // Skip DuckDuckGo internal links
     if (url.includes("duckduckgo.com/y.js")) continue;
@@ -343,7 +343,8 @@ async function handleWebSearch(
   args: Record<string, unknown>
 ): Promise<NativeToolResult> {
   const query = String(args.query ?? "");
-  const maxResults = Number(args.maxResults ?? 8);
+  const rawMax = Number(args.maxResults ?? 8);
+  const maxResults = Number.isFinite(rawMax) && rawMax > 0 ? Math.min(rawMax, 20) : 8;
 
   if (!query.trim()) {
     return {
