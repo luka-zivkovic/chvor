@@ -21,11 +21,14 @@ interface Actions {
   openPanel: (panel: string) => void;
   openNodeDetail: (panel: string, id: string) => void;
   fitView: () => void;
+  openSearchDialog: (kind: "skill" | "tool" | null) => void;
 }
 
 function getMenuItems(nodeType: string | null, nodeId: string | null, a: Actions): MenuItem[] {
   if (!nodeType) {
     return [
+      { label: "Search Registry", action: () => a.openSearchDialog(null) },
+      { label: "Browse Templates", action: () => a.openPanel("registry") },
       { label: "Add Skill", action: () => a.openPanel("skills") },
       { label: "Add Tool", action: () => a.openPanel("tools") },
       { label: "Fit View", action: a.fitView },
@@ -49,9 +52,15 @@ function getMenuItems(nodeType: string | null, nodeId: string | null, a: Actions
         { label: "All Tools", action: () => a.openPanel("tools") },
       ];
     case "skills-hub":
-      return [{ label: "Manage Skills", action: () => a.openPanel("skills") }];
+      return [
+        { label: "Search Skills", action: () => a.openSearchDialog("skill") },
+        { label: "Manage Skills", action: () => a.openPanel("skills") },
+      ];
     case "tools-hub":
-      return [{ label: "Manage Tools", action: () => a.openPanel("tools") }];
+      return [
+        { label: "Search Tools", action: () => a.openSearchDialog("tool") },
+        { label: "Manage Tools", action: () => a.openPanel("tools") },
+      ];
     case "schedule-hub":
       return [{ label: "Manage Schedules", action: () => a.openPanel("schedules") }];
     case "schedule": {
@@ -78,7 +87,7 @@ function getMenuItems(nodeType: string | null, nodeId: string | null, a: Actions
   }
 }
 
-export function CanvasContextMenu({ menu, onClose }: { menu: ContextMenuState; onClose: () => void }) {
+export function CanvasContextMenu({ menu, onClose, onOpenSearch }: { menu: ContextMenuState; onClose: () => void; onOpenSearch?: (kind: "skill" | "tool" | null) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const { fitView } = useReactFlow();
 
@@ -105,6 +114,7 @@ export function CanvasContextMenu({ menu, onClose }: { menu: ContextMenuState; o
     openPanel: (p) => close(() => useUIStore.getState().openPanel(p as any))(),
     openNodeDetail: (p, id) => close(() => useUIStore.getState().openNodeDetail(p as any, id))(),
     fitView: close(() => fitView({ padding: 0.3, duration: 300 })),
+    openSearchDialog: (kind) => close(() => onOpenSearch?.(kind))(),
   });
 
   if (items.length === 0) return null;

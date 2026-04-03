@@ -2,10 +2,14 @@ import { useEffect, useState } from "react";
 import { useRegistryStore, type RegistryEntryWithStatus } from "../../stores/registry-store";
 import { useSkillStore } from "../../stores/skill-store";
 import { useToolStore } from "../../stores/tool-store";
+import { useScheduleStore } from "../../stores/schedule-store";
+import { useCredentialStore } from "../../stores/credential-store";
+import { TemplateSetupWizard } from "../templates/TemplateSetupWizard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { RegistryEntryKind } from "@chvor/shared";
+import { api } from "@/lib/api";
+import type { RegistryEntryKind, TemplateManifest } from "@chvor/shared";
 
 const CATEGORIES = [
   { value: "", label: "All" },
@@ -29,10 +33,12 @@ function EntryCard({
   entry,
   onInstall,
   onUninstall,
+  onTemplateClick,
 }: {
   entry: RegistryEntryWithStatus;
   onInstall: (id: string, kind?: RegistryEntryKind) => void;
   onUninstall: (id: string) => void;
+  onTemplateClick?: (entry: RegistryEntryWithStatus) => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -47,10 +53,12 @@ function EntryCard({
     }
   };
 
+  const isTemplate = entry.kind === "template";
+
   return (
     <div
       className="rounded-lg border border-border/50 bg-muted/10 p-3 transition-colors hover:bg-muted/20 cursor-pointer"
-      onClick={() => setExpanded(!expanded)}
+      onClick={() => isTemplate && onTemplateClick ? onTemplateClick(entry) : setExpanded(!expanded)}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
@@ -71,18 +79,34 @@ function EntryCard({
             {entry.description}
           </p>
         </div>
-        <Button
-          size="sm"
-          variant={entry.installed ? "outline" : "default"}
-          className="h-6 shrink-0 text-[10px] px-2"
-          disabled={loading}
-          onClick={(e) => {
-            e.stopPropagation();
-            handleAction(entry.installed ? "uninstall" : "install");
-          }}
-        >
-          {loading ? "..." : entry.installed ? "Uninstall" : "Install"}
-        </Button>
+        {isTemplate ? (
+          <Button
+            size="sm"
+            variant={entry.installed ? "outline" : "default"}
+            className="h-6 shrink-0 text-[10px] px-2"
+            disabled={loading}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (entry.installed) handleAction("uninstall");
+              else onTemplateClick?.(entry);
+            }}
+          >
+            {loading ? "..." : entry.installed ? "Uninstall" : "Set up"}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant={entry.installed ? "outline" : "default"}
+            className="h-6 shrink-0 text-[10px] px-2"
+            disabled={loading}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleAction(entry.installed ? "uninstall" : "install");
+            }}
+          >
+            {loading ? "..." : entry.installed ? "Uninstall" : "Install"}
+          </Button>
+        )}
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1">
@@ -146,8 +170,13 @@ export function RegistryBrowserPanel() {
   } = useRegistryStore();
   const { fetchSkills } = useSkillStore();
   const { fetchTools } = useToolStore();
+  const { fetchAll: fetchSchedules } = useScheduleStore();
+  const { fetchAll: fetchCredentials } = useCredentialStore();
 
   const [inputValue, setInputValue] = useState(searchQuery);
+  const [activeTemplate, setActiveTemplate] = useState<{ id: string; manifest: TemplateManifest } | null>(null);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
 
   useEffect(() => {
     search();
@@ -165,6 +194,8 @@ export function RegistryBrowserPanel() {
   const refreshCapabilities = () => {
     fetchSkills();
     fetchTools();
+    fetchSchedules();
+    fetchCredentials();
   };
 
   const handleInstall = async (id: string, kind?: RegistryEntryKind) => {
@@ -177,8 +208,53 @@ export function RegistryBrowserPanel() {
     refreshCapabilities();
   };
 
+  const handleTemplateClick = async (entry: RegistryEntryWithStatus) => {
+    setTemplateLoading(true);
+    setTemplateError(null);
+    try {
+      const manifest = await api.templates.getManifest(entry.id);
+      setActiveTemplate({ id: entry.id, manifest });
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
+
+  const handleTemplateActivate = async () => {
+    if (!activeTemplate) return;
+    try {
+      await install(activeTemplate.id, "template");
+      refreshCapabilities();
+      setActiveTemplate(null);
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <div className="flex flex-col gap-3">
+      {/* Template wizard modal */}
+      {activeTemplate && (
+        <TemplateSetupWizard
+          template={activeTemplate.manifest}
+          onComplete={handleTemplateActivate}
+          onCancel={() => setActiveTemplate(null)}
+        />
+      )}
+
+      {/* Template loading/error */}
+      {templateLoading && (
+        <div className="flex items-center justify-center rounded-lg border border-border/50 bg-muted/10 px-3 py-4">
+          <span className="text-[10px] text-muted-foreground">Loading template...</span>
+        </div>
+      )}
+      {templateError && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+          <p className="text-[10px] text-destructive">{templateError}</p>
+        </div>
+      )}
+
       {/* Update banner */}
       {availableUpdates.length > 0 && (
         <div className="flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
@@ -292,6 +368,7 @@ export function RegistryBrowserPanel() {
               entry={entry}
               onInstall={handleInstall}
               onUninstall={handleUninstall}
+              onTemplateClick={handleTemplateClick}
             />
           ))}
         </div>

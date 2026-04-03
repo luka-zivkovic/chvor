@@ -36,6 +36,7 @@ import { AnimatedEdge } from "./AnimatedEdge";
 import { CanvasControls } from "./CanvasControls";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import type { ContextMenuState } from "./CanvasContextMenu";
+import { CanvasSearchDialog } from "./CanvasSearchDialog";
 import { GhostHubNode } from "./GhostHubNode";
 import { A2UICanvasNode } from "./A2UICanvasNode";
 
@@ -82,6 +83,7 @@ export function BrainCanvas() {
   const { credentials, providers, fetchAll: fetchCredentials } = useCredentialStore();
   const connected = useAppStore((s) => s.connected);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, nodeId: null, nodeType: null });
+  const [searchDialog, setSearchDialog] = useState<{ open: boolean; initialKind: "skill" | "tool" | null }>({ open: false, initialKind: null });
   const initializedRef = useRef<string | undefined>(undefined);
   const rfInstanceRef = useRef<ReactFlowInstance<ChvorNode, ChvorEdge> | null>(null);
   const savedPositionsRef = useRef<Map<string, { x: number; y: number }> | undefined>(undefined);
@@ -270,6 +272,23 @@ export function BrainCanvas() {
 
   const closeContextMenu = useCallback(() => setContextMenu((prev) => ({ ...prev, visible: false })), []);
 
+  const openSearchDialog = useCallback((kind: "skill" | "tool" | null) => {
+    setSearchDialog({ open: true, initialKind: kind });
+  }, []);
+  const closeSearchDialog = useCallback(() => setSearchDialog({ open: false, initialKind: null }), []);
+
+  // Ctrl+K to open search dialog
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "k") {
+        e.preventDefault();
+        setSearchDialog((prev) => prev.open ? { open: false, initialKind: null } : { open: true, initialKind: null });
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   // Single click: open appropriate left panel for each node type
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: ChvorNode) => {
@@ -380,7 +399,7 @@ export function BrainCanvas() {
           bgColor="transparent"
         />
         <CanvasControls />
-        <CanvasContextMenu menu={contextMenu} onClose={closeContextMenu} />
+        <CanvasContextMenu menu={contextMenu} onClose={closeContextMenu} onOpenSearch={openSearchDialog} />
         <MiniMap
           nodeColor={minimapNodeColor}
           nodeStrokeWidth={0}
@@ -395,6 +414,11 @@ export function BrainCanvas() {
           maskColor="oklch(0.17 0 0 / 0.7)"
         />
       </ReactFlow>
+      <CanvasSearchDialog
+        open={searchDialog.open}
+        onClose={closeSearchDialog}
+        initialKind={searchDialog.initialKind}
+      />
       <EmotionTintOverlay />
     </div>
   );
