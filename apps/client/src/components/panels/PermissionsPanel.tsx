@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { Select, SelectOption } from "../ui/select";
 import type {
   PcSafetyLevel,
   ShellApprovalMode,
@@ -244,15 +245,14 @@ export function PermissionsContent() {
             {pcEnabled && (
               <div className="mt-2">
                 <label className="mb-1 block text-[10px] text-muted-foreground">Safety level</label>
-                <select
+                <Select
                   value={pcSafetyLevel}
-                  onChange={(e) => handlePcSafetyChange(e.target.value as PcSafetyLevel)}
-                  className="w-full rounded border border-border/40 bg-transparent px-2 py-1.5 text-[11px] text-foreground"
+                  onChange={(v) => handlePcSafetyChange(v as PcSafetyLevel)}
                 >
-                  <option value="supervised">Supervised</option>
-                  <option value="semi-autonomous">Semi-autonomous</option>
-                  <option value="autonomous">Autonomous</option>
-                </select>
+                  <SelectOption value="supervised">Supervised</SelectOption>
+                  <SelectOption value="semi-autonomous">Semi-autonomous</SelectOption>
+                  <SelectOption value="autonomous">Autonomous</SelectOption>
+                </Select>
                 <p className="mt-1.5 text-[10px] text-muted-foreground/70">
                   {SAFETY_DESCRIPTIONS[pcSafetyLevel]}
                 </p>
@@ -280,16 +280,16 @@ export function PermissionsContent() {
                 Control which shell commands run without approval
               </p>
             </div>
-            <select
+            <Select
               value={shellApprovalMode}
-              onChange={(e) => handleShellApprovalChange(e.target.value as ShellApprovalMode)}
-              className="mt-2 w-full rounded border border-border/40 bg-transparent px-2 py-1.5 text-[11px] text-foreground"
+              onChange={(v) => handleShellApprovalChange(v as ShellApprovalMode)}
+              className="mt-2"
             >
-              <option value="always_approve">Always approve</option>
-              <option value="dangerous_only">Block dangerous</option>
-              <option value="moderate_plus">Block moderate + dangerous</option>
-              <option value="block_all">Block all</option>
-            </select>
+              <SelectOption value="always_approve">Always approve</SelectOption>
+              <SelectOption value="dangerous_only">Block dangerous</SelectOption>
+              <SelectOption value="moderate_plus">Block moderate + dangerous</SelectOption>
+              <SelectOption value="block_all">Block all</SelectOption>
+            </Select>
             <p className="mt-1.5 text-[10px] text-muted-foreground/70">
               {SHELL_DESCRIPTIONS[shellApprovalMode]}
             </p>
@@ -582,33 +582,33 @@ export function PermissionsContent() {
                     {/* Memory limit */}
                     <div className="flex items-center justify-between">
                       <label className="text-[10px] text-muted-foreground">Memory limit</label>
-                      <select
-                        value={sandboxConfig.memoryLimitMb}
-                        onChange={(e) => handleSandboxUpdate({ memoryLimitMb: Number(e.target.value) })}
-                        className="rounded border border-input bg-transparent px-2 py-0.5 font-mono text-[10px] text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      <Select
+                        value={String(sandboxConfig.memoryLimitMb)}
+                        onChange={(v) => handleSandboxUpdate({ memoryLimitMb: Number(v) })}
+                        className="font-mono text-[10px]"
                       >
-                        <option value={256}>256 MB</option>
-                        <option value={512}>512 MB</option>
-                        <option value={1024}>1 GB</option>
-                        <option value={2048}>2 GB</option>
-                        <option value={4096}>4 GB</option>
-                      </select>
+                        <SelectOption value="256">256 MB</SelectOption>
+                        <SelectOption value="512">512 MB</SelectOption>
+                        <SelectOption value="1024">1 GB</SelectOption>
+                        <SelectOption value="2048">2 GB</SelectOption>
+                        <SelectOption value="4096">4 GB</SelectOption>
+                      </Select>
                     </div>
 
                     {/* Timeout */}
                     <div className="flex items-center justify-between">
                       <label className="text-[10px] text-muted-foreground">Execution timeout</label>
-                      <select
-                        value={sandboxConfig.timeoutMs / 1000}
-                        onChange={(e) => handleSandboxUpdate({ timeoutMs: Number(e.target.value) * 1000 })}
-                        className="rounded border border-input bg-transparent px-2 py-0.5 font-mono text-[10px] text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      <Select
+                        value={String(sandboxConfig.timeoutMs / 1000)}
+                        onChange={(v) => handleSandboxUpdate({ timeoutMs: Number(v) * 1000 })}
+                        className="font-mono text-[10px]"
                       >
-                        <option value={10}>10s</option>
-                        <option value={30}>30s</option>
-                        <option value={60}>60s</option>
-                        <option value={120}>120s</option>
-                        <option value={300}>300s</option>
-                      </select>
+                        <SelectOption value="10">10s</SelectOption>
+                        <SelectOption value="30">30s</SelectOption>
+                        <SelectOption value="60">60s</SelectOption>
+                        <SelectOption value="120">120s</SelectOption>
+                        <SelectOption value="300">300s</SelectOption>
+                      </Select>
                     </div>
                   </div>
                 </div>

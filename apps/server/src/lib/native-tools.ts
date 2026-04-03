@@ -3584,81 +3584,197 @@ async function handleA2UIPush(
     return { content: [{ type: "text", text: "No A2UI messages provided." }] };
   }
 
-  const surfaceIds = new Set<string>();
   const send = (event: GatewayServerEvent) => {
     if (sessionId) ws.broadcastToSession(sessionId, event);
     else ws.broadcast(event);
   };
 
-  // Check which surfaces are new (for toast gating)
-  const newSurfaceIds = new Set<string>();
+  // ── Phase 1: Collect all data per surface before emitting events ──
+  const surfaceData = new Map<string, {
+    components: A2UIComponentEntry[];
+    componentMap: Record<string, A2UIComponentEntry>;
+    root: string | null;
+    bindings: Record<string, unknown> | null;
+  }>();
 
-  // Track root assignments per surface from beginRendering messages
-  const roots = new Map<string, string>();
+  const newSurfaceIds = new Set<string>();
+  const surfaceIds = new Set<string>();
+
+  const getOrCreate = (sid: string) => {
+    let entry = surfaceData.get(sid);
+    if (!entry) {
+      entry = { components: [], componentMap: {}, root: null, bindings: null };
+      surfaceData.set(sid, entry);
+    }
+    return entry;
+  };
 
   for (const msg of messages) {
     if (typeof msg !== "object" || msg == null) continue;
-
     const m = msg as Record<string, unknown>;
 
     if ("surfaceUpdate" in m && typeof m.surfaceUpdate === "object" && m.surfaceUpdate != null) {
       const su = m.surfaceUpdate as { surfaceId: string; components: Array<{ id: string; component: Record<string, unknown> }> };
       if (typeof su.surfaceId !== "string") continue;
 
-      // Track if this is a new surface before persisting
       if (!surfaceIds.has(su.surfaceId) && !surfaceExists(su.surfaceId)) {
         newSurfaceIds.add(su.surfaceId);
       }
       surfaceIds.add(su.surfaceId);
 
-      const componentMap: Record<string, A2UIComponentEntry> = {};
+      const entry = getOrCreate(su.surfaceId);
       if (Array.isArray(su.components)) {
-        for (const c of su.components) componentMap[c.id] = c as unknown as A2UIComponentEntry;
+        for (const c of su.components) {
+          entry.componentMap[c.id] = c as unknown as A2UIComponentEntry;
+          entry.components.push(c as unknown as A2UIComponentEntry);
+        }
       }
-
-      // Persist to DB
-      upsertSurface({
-        surfaceId: su.surfaceId,
-        components: componentMap,
-      });
-
-      const root = roots.get(su.surfaceId);
-      send({
-        type: "a2ui.surface" as const,
-        data: {
-          surfaceId: su.surfaceId,
-          components: Array.isArray(su.components) ? (su.components as unknown as A2UIComponentEntry[]) : [],
-          ...(root ? { root } : {}),
-        },
-      });
     } else if ("beginRendering" in m && typeof m.beginRendering === "object" && m.beginRendering != null) {
       const br = m.beginRendering as { surfaceId: string; root: string };
       if (typeof br.surfaceId !== "string" || typeof br.root !== "string") continue;
       surfaceIds.add(br.surfaceId);
-      roots.set(br.surfaceId, br.root);
-
-      // Persist root + rendering to DB
-      upsertSurface({
-        surfaceId: br.surfaceId,
-        root: br.root,
-        rendering: true,
-      });
-
-      send({
-        type: "a2ui.surface" as const,
-        data: { surfaceId: br.surfaceId, components: [], root: br.root },
-      });
+      getOrCreate(br.surfaceId).root = br.root;
     } else if ("dataModelUpdate" in m && typeof m.dataModelUpdate === "object" && m.dataModelUpdate != null) {
       const dm = m.dataModelUpdate as { surfaceId: string; bindings: Record<string, unknown> };
       if (typeof dm.surfaceId !== "string") continue;
       surfaceIds.add(dm.surfaceId);
+      getOrCreate(dm.surfaceId).bindings = dm.bindings ?? {};
+    }
+  }
 
-      // Persist bindings to DB
-      updateSurfaceBindings(dm.surfaceId, dm.bindings ?? {});
+  // ── Phase 1.5: Validate & normalize component structures ──
+  const KNOWN_TYPES = new Set(["Text", "Column", "Row", "Image", "Table", "Button", "Form", "Input", "Chart"]);
 
+  for (const [sid, entry] of surfaceData) {
+    for (const [cid, ce] of Object.entries(entry.componentMap)) {
+      const comp = ce.component as unknown as Record<string, unknown> | undefined;
+      if (!comp || typeof comp !== "object") {
+        console.warn(`[a2ui] Surface "${sid}": component "${cid}" has no definition, removing`);
+        delete entry.componentMap[cid];
+        continue;
+      }
+
+      // Check if the component has a recognized type key
+      const typeKey = Object.keys(comp).find((k) => KNOWN_TYPES.has(k));
+      if (!typeKey) {
+        console.warn(`[a2ui] Surface "${sid}": component "${cid}" has unrecognized keys [${Object.keys(comp).join(", ")}]. Raw:`, JSON.stringify(comp));
+        // Attempt to infer: if it has "children", it's likely a Column/Row missing the wrapper
+        const raw = comp as Record<string, unknown>;
+        if (raw.children || raw.items) {
+          const childList = raw.children ?? raw.items;
+          const normalizedChildren = Array.isArray(childList)
+            ? { explicitList: childList as string[] }
+            : childList;
+          (ce.component as unknown as Record<string, unknown>)["Column"] = { children: normalizedChildren, gap: raw.gap ?? 8 };
+          console.warn(`[a2ui] Surface "${sid}": auto-wrapped component "${cid}" as Column`);
+        }
+        continue;
+      }
+
+      // Normalize children format: if children is a plain array instead of {explicitList: [...]}
+      const inner = comp[typeKey] as Record<string, unknown> | undefined;
+      if (inner && (typeKey === "Column" || typeKey === "Row" || typeKey === "Form")) {
+        if (Array.isArray(inner.children)) {
+          inner.children = { explicitList: inner.children as string[] };
+          console.warn(`[a2ui] Surface "${sid}": normalized "${cid}" children array → explicitList`);
+        } else if (inner.children && typeof inner.children === "object" && !("explicitList" in (inner.children as Record<string, unknown>))) {
+          // children object but missing explicitList — check for common alternatives
+          const childObj = inner.children as Record<string, unknown>;
+          if (Array.isArray(childObj.list)) {
+            inner.children = { explicitList: childObj.list as string[] };
+            console.warn(`[a2ui] Surface "${sid}": normalized "${cid}" children.list → explicitList`);
+          } else if (Array.isArray(childObj.items)) {
+            inner.children = { explicitList: childObj.items as string[] };
+            console.warn(`[a2ui] Surface "${sid}": normalized "${cid}" children.items → explicitList`);
+          }
+        }
+      }
+
+      // Normalize text values: if text is a plain string instead of {literalString: "..."}
+      if (typeKey === "Text" && inner) {
+        if (typeof inner.text === "string") {
+          inner.text = { literalString: inner.text as string };
+          console.warn(`[a2ui] Surface "${sid}": normalized "${cid}" text string → literalString`);
+        }
+      }
+
+      // Normalize Chart data: if data is a plain array instead of a binding/literal
+      if (typeKey === "Chart" && inner) {
+        if (Array.isArray(inner.data)) {
+          // Inline data array — store as binding and convert to bound value
+          const bindingKey = `__chart_${cid}`;
+          if (!entry.bindings) entry.bindings = {};
+          entry.bindings[bindingKey] = inner.data;
+          inner.data = { binding: bindingKey };
+          console.warn(`[a2ui] Surface "${sid}": normalized "${cid}" inline chart data → binding "${bindingKey}"`);
+        }
+      }
+
+      // Normalize Table rows: if rows is an array instead of a binding
+      if (typeKey === "Table" && inner) {
+        if (Array.isArray(inner.rows)) {
+          const bindingKey = `__table_${cid}`;
+          if (!entry.bindings) entry.bindings = {};
+          entry.bindings[bindingKey] = inner.rows;
+          inner.rows = { binding: bindingKey };
+          console.warn(`[a2ui] Surface "${sid}": normalized "${cid}" inline table rows → binding "${bindingKey}"`);
+        }
+      }
+
+      // Normalize Button/Image label/src: plain string → literalString
+      if (typeKey === "Button" && inner && typeof inner.label === "string") {
+        inner.label = { literalString: inner.label as string };
+      }
+      if (typeKey === "Image" && inner && typeof inner.src === "string") {
+        inner.src = { literalString: inner.src as string };
+      }
+    }
+
+    // Rebuild components array from the (now normalized) componentMap
+    entry.components = Object.values(entry.componentMap);
+  }
+
+  // ── Phase 2: Auto-infer root if LLM omitted beginRendering ──
+  for (const [sid, entry] of surfaceData) {
+    if (!entry.root && Object.keys(entry.componentMap).length > 0) {
+      // Try to find a layout component (Column/Row) as root, otherwise use first component
+      const layoutRoot = Object.entries(entry.componentMap).find(
+        ([, c]) => c.component && ("Column" in c.component || "Row" in c.component)
+      );
+      entry.root = layoutRoot ? layoutRoot[0] : Object.keys(entry.componentMap)[0];
+      console.warn(`[a2ui] Surface "${sid}": beginRendering missing, auto-inferred root="${entry.root}"`);
+    }
+  }
+
+  // ── Phase 3: Persist to DB and emit consolidated events ──
+  for (const [sid, entry] of surfaceData) {
+    const hasComponents = Object.keys(entry.componentMap).length > 0;
+
+    // Persist components + root + rendering in a single upsert
+    upsertSurface({
+      surfaceId: sid,
+      ...(hasComponents ? { components: entry.componentMap } : {}),
+      ...(entry.root ? { root: entry.root, rendering: true } : {}),
+    });
+
+    // Send one consolidated surface event with both components AND root
+    if (hasComponents || entry.root) {
+      send({
+        type: "a2ui.surface" as const,
+        data: {
+          surfaceId: sid,
+          components: entry.components,
+          ...(entry.root ? { root: entry.root } : {}),
+        },
+      });
+    }
+
+    // Send data bindings
+    if (entry.bindings) {
+      updateSurfaceBindings(sid, entry.bindings);
       send({
         type: "a2ui.data" as const,
-        data: { surfaceId: dm.surfaceId, bindings: dm.bindings ?? {} },
+        data: { surfaceId: sid, bindings: entry.bindings },
       });
     }
   }

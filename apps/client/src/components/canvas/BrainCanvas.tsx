@@ -311,7 +311,7 @@ export function BrainCanvas() {
       } else if (node.type === "tool") {
         const toolData = node.data as { toolId?: string };
         if (toolData.toolId === "a2ui") {
-          ui.openCanvas();
+          ui.openPreviewModal();
         } else {
           ui.openNodeDetail("tool-detail", node.id);
         }
@@ -337,7 +337,7 @@ export function BrainCanvas() {
         const ghostData = node.data as { targetPanel?: string };
         if (ghostData.targetPanel) ui.openPanel(ghostData.targetPanel as any);
       } else if (node.type === "a2ui-canvas") {
-        ui.openCanvas();
+        ui.openPreviewModal();
       }
     },
     []

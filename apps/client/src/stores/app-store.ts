@@ -498,10 +498,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         useA2UIStore.getState().handleDelete(event.data);
         break;
       case "a2ui.toast":
+        // Auto-open the preview modal so the user sees the dashboard immediately
+        useUIStore.getState().openPreviewModal(event.data.surfaceId);
         import("sonner").then(({ toast }) => {
-          toast.success(event.data.title ?? "Surface ready", {
-            action: { label: "Open Canvas", onClick: () => useUIStore.getState().openCanvas(event.data.surfaceId) },
-          });
+          toast.success(event.data.title ?? "Surface ready");
         }).catch(() => { /* sonner not available */ });
         break;
       case "activity.new":

@@ -193,6 +193,10 @@ function buildSystemPrompt(
     );
   }
 
+  toolUsageLines.push(
+    "- When the user asks to install, find, browse, or list skills, tools, or templates from the registry, use native__registry_search to search and native__registry_install to install them."
+  );
+
   stableSections.push(`## Tool Usage\n\n${toolUsageLines.join("\n")}`);
 
   // Group skills by type for clearer system prompt sections
