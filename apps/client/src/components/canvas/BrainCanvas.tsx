@@ -301,9 +301,9 @@ export function BrainCanvas() {
       } else if (node.type === "integration") {
         ui.openNodeDetail("integration-detail", node.id);
       } else if (node.type === "connections-hub") {
-        ui.openPanel("settings");
+        ui.openPanel("connections");
       } else if (node.type === "integrations-hub") {
-        ui.openPanel("settings");
+        ui.openPanel("integrations");
       } else if (node.type === "skills-hub") {
         ui.openPanel("skills");
       } else if (node.type === "tools-hub") {

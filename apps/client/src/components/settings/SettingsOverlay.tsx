@@ -1,11 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useUIStore } from "../../stores/ui-store";
+import type { SettingsSection } from "../../stores/ui-store";
 import { cn } from "@/lib/utils";
 import { CredentialsContent, SecurityContent, SessionsContent, BackupContent } from "../panels/SettingsPanel";
 import { VoiceSettingsContent } from "../panels/VoiceSettingsContent";
 import { PermissionsContent } from "../panels/PermissionsPanel";
-
-type SettingsSection = "permissions" | "connections" | "voice" | "security" | "sessions" | "backup";
 
 const SECTIONS: { id: SettingsSection; label: string; description: string; icon: React.ReactNode }[] = [
   {
@@ -99,8 +98,18 @@ function SectionContent({ section }: { section: SettingsSection }) {
 
 export function SettingsOverlay() {
   const settingsOpen = useUIStore((s) => s.settingsOpen);
+  const settingsSection = useUIStore((s) => s.settingsSection);
   const closeSettings = useUIStore((s) => s.closeSettings);
-  const [activeSection, setActiveSection] = useState<SettingsSection>("permissions");
+  const [activeSection, setActiveSection] = useState<SettingsSection>(settingsSection);
+  const prevOpenRef = useRef(settingsOpen);
+
+  // Sync active section from store when overlay opens
+  useEffect(() => {
+    if (settingsOpen && !prevOpenRef.current) {
+      setActiveSection(settingsSection);
+    }
+    prevOpenRef.current = settingsOpen;
+  }, [settingsOpen, settingsSection]);
 
   useEffect(() => {
     if (!settingsOpen) return;

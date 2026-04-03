@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { AnyProviderDef, EmbeddingProviderDef, CredentialSummary } from "@chvor/shared";
+import type { AnyProviderDef, CredentialSummary } from "@chvor/shared";
 import { useCredentialStore } from "../../stores/credential-store";
 import { api } from "../../lib/api";
 import { Button } from "@/components/ui/button";
@@ -30,12 +30,8 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  const { providers: allProviders, embeddingProviders, addCredential, updateCredential } = useCredentialStore();
-  // Embedding providers with credentials that aren't already covered by an LLM provider
-  const extraEmbedding = embeddingProviders.filter(
-    (ep) => ep.credentialType && !allProviders.some((p) => p.credentialType === ep.credentialType),
-  );
-  const providers = [...allProviders, ...extraEmbedding].filter((p) => {
+  const { providers: allProviders, addCredential, updateCredential } = useCredentialStore();
+  const providers = allProviders.filter((p) => {
     if (filter === "all") return true;
     const isLLM = "models" in p;
     return filter === "llm" ? isLLM : !isLLM;
@@ -45,7 +41,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
 
   const [step, setStep] = useState<Step>(isEditMode ? "fill-fields" : "pick-provider");
   const [selectedProvider, setSelectedProvider] =
-    useState<AnyProviderDef | EmbeddingProviderDef | null>(null);
+    useState<AnyProviderDef | null>(null);
   const [name, setName] = useState(isEditMode ? editCredential.name : "");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<{
@@ -69,13 +65,12 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
   const initializedRef = useRef(false);
   useEffect(() => {
     if (initializedRef.current) return;
-    if (allProviders.length === 0 && embeddingProviders.length === 0) return;
+    if (allProviders.length === 0) return;
 
     const credType = isEditMode ? editCredential.type : initialCredType;
     if (!credType) return;
 
-    const match = allProviders.find((p) => p.credentialType === credType)
-      ?? embeddingProviders.find((p) => p.credentialType === credType);
+    const match = allProviders.find((p) => p.credentialType === credType);
     if (match) {
       setSelectedProvider(match);
       if (!isEditMode) {
@@ -91,7 +86,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editCredential, initialCredType, allProviders]);
 
-  const selectProvider = (provider: AnyProviderDef | EmbeddingProviderDef) => {
+  const selectProvider = (provider: AnyProviderDef) => {
     setSelectedProvider(provider);
     setName(provider.name);
     const defaults: Record<string, string> = {};
@@ -124,7 +119,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
           updateCredential(editCredential.id, { testStatus: "success" });
         }
       } else {
-        const credType = isEditMode ? editCredential.type : selectedProvider!.credentialType!;
+        const credType = isEditMode ? editCredential.type : selectedProvider!.credentialType;
         const result = await api.credentials.test({
           type: credType,
           data: fields,
@@ -165,7 +160,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
         const updated = await api.credentials.update(editCredential.id, body);
         updateCredential(editCredential.id, updated);
       } else {
-        if (!selectedProvider || !selectedProvider.credentialType) return;
+        if (!selectedProvider) return;
         const summary = await api.credentials.create({
           name: name.trim(),
           type: selectedProvider.credentialType,
@@ -185,16 +180,12 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
   const hasNewFields = Object.values(fields).some((v) => v.trim());
   const canSave = isEditMode
     ? name.trim() && (name.trim() !== editCredential.name || hasNewFields)
-    : ("requiredFields" in (selectedProvider ?? {})
-        ? (selectedProvider as AnyProviderDef).requiredFields
-            .filter((f) => !f.optional)
-            .every((f) => fields[f.key]?.trim())
-        : true) && name.trim();
+    : selectedProvider?.requiredFields
+        .filter((f) => !f.optional)
+        .every((f) => fields[f.key]?.trim()) && name.trim();
 
   // Determine which fields to render
-  const providerFields = selectedProvider && "requiredFields" in selectedProvider
-    ? selectedProvider.requiredFields
-    : [];
+  const providerFields = selectedProvider?.requiredFields ?? [];
   // For edit mode without a matching provider, derive fields from the credential's redactedFields
   const editFallbackFields = isEditMode && providerFields.length === 0
     ? Object.keys(editCredential.redactedFields ?? {}).map((key) => ({
@@ -207,11 +198,9 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
   const fieldsToRender = providerFields.length > 0 ? providerFields : editFallbackFields;
 
   // Can test: in edit mode always (test saved), in create mode when all non-optional fields filled
-  const canTest = isEditMode || ("requiredFields" in (selectedProvider ?? {})
-    ? (selectedProvider as AnyProviderDef).requiredFields
-        .filter((f) => !f.optional)
-        .every((f) => fields[f.key]?.trim())
-    : true);
+  const canTest = isEditMode || (selectedProvider?.requiredFields
+    .filter((f) => !f.optional)
+    .every((f) => fields[f.key]?.trim()) ?? false);
 
   // WhatsApp uses QR pairing instead of field form
   if (selectedProvider?.credentialType === "whatsapp" || initialCredType === "whatsapp") {
@@ -223,48 +212,50 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="animate-scale-in w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl">
+      <div className="animate-scale-in w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-card p-6 shadow-2xl">
         {step === "pick-provider" && (
           <>
-            <h2 className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            <h2 className="mb-1 shrink-0 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
               Select Provider
             </h2>
-            <p className="mb-4 text-[10px] text-muted-foreground/70">
+            <p className="mb-4 shrink-0 text-[10px] text-muted-foreground/70">
               Choose an AI provider to connect
             </p>
-            <div className="grid grid-cols-2 gap-2">
-              {providers.map((p) => (
-                <Card
-                  key={p.id}
-                  className="cursor-pointer p-3 text-left transition-colors hover:border-primary/30 hover:bg-muted"
-                  onClick={() => selectProvider(p)}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <ProviderIcon icon={p.icon ?? p.id} size={20} className="shrink-0 text-foreground/80" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-sm font-medium">{p.name}</p>
-                        {discovered.has(p.id) && (
-                          <span className="rounded-full bg-green-500/15 px-1.5 py-0.5 text-[8px] font-medium text-green-400">
-                            Detected
-                          </span>
-                        )}
+            <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
+              <div className="grid grid-cols-2 gap-2">
+                {providers.map((p) => (
+                  <Card
+                    key={p.id}
+                    className="cursor-pointer p-3 text-left transition-colors hover:border-primary/30 hover:bg-muted"
+                    onClick={() => selectProvider(p)}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <ProviderIcon icon={p.icon} size={20} className="shrink-0 text-foreground/80" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-sm font-medium">{p.name}</p>
+                          {discovered.has(p.id) && (
+                            <span className="rounded-full bg-green-500/15 px-1.5 py-0.5 text-[8px] font-medium text-green-400">
+                              Detected
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">
+                          {"models" in p
+                            ? `${p.models.length} model${p.models.length !== 1 ? "s" : ""}`
+                            : p.description}
+                        </p>
                       </div>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {"models" in p
-                          ? `${p.models.length} model${p.models.length !== 1 ? "s" : ""}`
-                          : p.description}
-                      </p>
                     </div>
-                  </div>
-                </Card>
-              ))}
+                  </Card>
+                ))}
+              </div>
             </div>
             <Button
               variant="ghost"
               size="sm"
               onClick={onClose}
-              className="mt-4 text-[10px] text-muted-foreground"
+              className="mt-4 shrink-0 text-[10px] text-muted-foreground"
             >
               Cancel
             </Button>
@@ -273,7 +264,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
 
         {step === "fill-fields" && (
           <>
-            <div className="mb-4 flex items-center gap-2">
+            <div className="mb-4 shrink-0 flex items-center gap-2">
               {!isEditMode && (
                 <Button
                   variant="ghost"
@@ -285,90 +276,92 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
                 </Button>
               )}
               {selectedProvider && (
-                <ProviderIcon icon={selectedProvider.icon ?? selectedProvider.id} size={16} className="text-foreground/70" />
+                <ProviderIcon icon={selectedProvider.icon} size={16} className="text-foreground/70" />
               )}
               <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                 {isEditMode ? "Edit Credential" : selectedProvider?.name ?? "Credential"}
               </h2>
             </div>
 
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1">
-                <Label className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Name
-                </Label>
-                <Input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="My API Key"
-                />
-              </div>
-
-              {fieldsToRender.map((field) => (
-                <div key={field.key} className="flex flex-col gap-1">
+            <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1">
                   <Label className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                    {field.label}
-                    {"optional" in field && field.optional && (
-                      <span className="ml-1 normal-case text-muted-foreground/50">(optional)</span>
-                    )}
-                    {"helpUrl" in field && field.helpUrl && (
-                      <a
-                        href={field.helpUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-1 text-primary normal-case underline"
-                      >
-                        Get key
-                      </a>
-                    )}
+                    Name
                   </Label>
                   <Input
-                    type={field.type === "password" ? "password" : "text"}
-                    value={fields[field.key] ?? ""}
-                    onChange={(e) => updateField(field.key, e.target.value)}
-                    placeholder={
-                      isEditMode
-                        ? editCredential.redactedFields[field.key] ?? field.placeholder
-                        : field.placeholder
-                    }
-                    className="font-mono"
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="My API Key"
                   />
-                  {isEditMode && (
-                    <p className="text-[9px] text-muted-foreground/60">
-                      Leave empty to keep current value
-                    </p>
-                  )}
-                  {"helpText" in field && field.helpText && !isEditMode && (
-                    <p className="text-[9px] leading-relaxed text-muted-foreground">
-                      {field.helpText}
-                    </p>
-                  )}
                 </div>
-              ))}
+
+                {fieldsToRender.map((field) => (
+                  <div key={field.key} className="flex flex-col gap-1">
+                    <Label className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      {field.label}
+                      {"optional" in field && field.optional && (
+                        <span className="ml-1 normal-case text-muted-foreground/50">(optional)</span>
+                      )}
+                      {"helpUrl" in field && field.helpUrl && (
+                        <a
+                          href={field.helpUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-1 text-primary normal-case underline"
+                        >
+                          Get key
+                        </a>
+                      )}
+                    </Label>
+                    <Input
+                      type={field.type === "password" ? "password" : "text"}
+                      value={fields[field.key] ?? ""}
+                      onChange={(e) => updateField(field.key, e.target.value)}
+                      placeholder={
+                        isEditMode
+                          ? editCredential.redactedFields[field.key] ?? field.placeholder
+                          : field.placeholder
+                      }
+                      className="font-mono"
+                    />
+                    {isEditMode && (
+                      <p className="text-[9px] text-muted-foreground/60">
+                        Leave empty to keep current value
+                      </p>
+                    )}
+                    {"helpText" in field && field.helpText && !isEditMode && (
+                      <p className="text-[9px] leading-relaxed text-muted-foreground">
+                        {field.helpText}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {testResult && (
+                <div
+                  className={`mt-3 rounded-md px-3 py-2 text-[10px] ${
+                    testResult.success
+                      ? "bg-green-500/10 text-green-400"
+                      : "bg-red-500/10 text-red-400"
+                  }`}
+                >
+                  {testResult.success
+                    ? "Connection OK"
+                    : `Failed: ${testResult.error}`}
+                </div>
+              )}
+
+              {error && (
+                <div className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-[10px] text-destructive">
+                  {error}
+                </div>
+              )}
             </div>
 
-            {testResult && (
-              <div
-                className={`mt-3 rounded-md px-3 py-2 text-[10px] ${
-                  testResult.success
-                    ? "bg-green-500/10 text-green-400"
-                    : "bg-red-500/10 text-red-400"
-                }`}
-              >
-                {testResult.success
-                  ? "Connection OK"
-                  : `Failed: ${testResult.error}`}
-              </div>
-            )}
-
-            {error && (
-              <div className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-[10px] text-destructive">
-                {error}
-              </div>
-            )}
-
-            <div className="mt-4 flex items-center justify-between">
+            <div className="mt-4 shrink-0 flex items-center justify-between">
               <Button
                 variant="ghost"
                 size="sm"

@@ -15,6 +15,8 @@ import { SkillsPanel } from "../panels/SkillsPanel";
 import { ToolsPanel } from "../panels/ToolsPanel";
 import { ToolDetailPanel } from "../panels/ToolDetailPanel";
 import { IntegrationDetailPanel } from "../panels/IntegrationDetailPanel";
+import { ConnectionsPanel } from "../panels/ConnectionsPanel";
+import { IntegrationsPanel } from "../panels/IntegrationsPanel";
 import { ConversationsPanel } from "../panels/ConversationsPanel";
 import ActivityPanel from "../panels/ActivityPanel";
 import { EmotionHistoryPanel } from "../panels/EmotionHistoryPanel";
@@ -30,7 +32,7 @@ import { useExecution } from "../../hooks/use-execution";
 import { useGateway } from "../../hooks/use-gateway";
 import { cn } from "@/lib/utils";
 
-const MOBILE_NAV_ITEMS: Array<{ panel: PanelId; label: string }> = [
+const MOBILE_NAV_ITEMS: Array<{ panel: PanelId | "settings"; label: string }> = [
   { panel: "brain", label: "Brain" },
   { panel: "persona", label: "Persona" },
   { panel: "memory", label: "Memory" },
@@ -77,7 +79,6 @@ function MobileMenu() {
 
 const PANEL_META: Record<string, { title: string; subtitle: string; width?: number; info?: string }> = {
   brain: { title: "Brain", subtitle: "LLM, persona & memory", info: "Central AI configuration — model, behavior, persona, and memory." },
-  settings: { title: "Settings", subtitle: "API keys, voice, security & sessions", info: "API keys, voice, security, session lifecycle, and backups." },
   schedules: { title: "Schedules", subtitle: "Automated tasks & pulse", info: "Automated tasks that run on a cron schedule." },
   webhooks: { title: "Webhooks", subtitle: "External event subscriptions", info: "Incoming triggers from external services like GitHub or Notion." },
   memory: { title: "Memory", subtitle: "Learned facts & context", info: "Facts your AI has learned and remembers across conversations." },
@@ -88,6 +89,8 @@ const PANEL_META: Record<string, { title: string; subtitle: string; width?: numb
   tools: { title: "Tools", subtitle: "MCP capabilities & integrations", info: "External tools — filesystem, web, MCP servers." },
   "tool-detail": { title: "Tool", subtitle: "Details & MCP config" },
   "integration-detail": { title: "Connection", subtitle: "Status & credential" },
+  connections: { title: "Connections", subtitle: "LLM provider credentials", info: "API keys and credentials for AI model providers." },
+  integrations: { title: "Integrations", subtitle: "Channels & services", info: "External services — Telegram, Discord, Slack, and more." },
   conversations: { title: "Conversations", subtitle: "Browse and manage chat history" },
   activity: { title: "Activity", subtitle: "System events" },
   "emotion-history": { title: "Emotional World", subtitle: "Inner state, arc & patterns" },
@@ -98,8 +101,6 @@ function PanelContent({ panel }: { panel: string }) {
   switch (panel) {
     case "brain":
       return <BrainPanel />;
-    case "settings":
-      return null; // Settings now uses SettingsOverlay; all entry points redirect to openSettings()
     case "schedules":
       return <SchedulesPanel />;
     case "webhooks":
@@ -120,6 +121,10 @@ function PanelContent({ panel }: { panel: string }) {
       return <ToolDetailPanel />;
     case "integration-detail":
       return <IntegrationDetailPanel />;
+    case "connections":
+      return <ConnectionsPanel />;
+    case "integrations":
+      return <IntegrationsPanel />;
     case "conversations":
       return <ConversationsPanel />;
     case "activity":
