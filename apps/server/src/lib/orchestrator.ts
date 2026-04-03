@@ -1172,7 +1172,11 @@ export async function executeConversation(
         });
         if (emotionEngine) toolOutcomeResults.push({ success: true, severity: "medium" });
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
+        let errorMsg = err instanceof Error ? err.message : String(err);
+        // Nudge LLM toward native fallback on rate-limit errors
+        if (/rate.?limit|429|too many req/i.test(errorMsg)) {
+          errorMsg += " — Try using native__web_search as a fallback.";
+        }
         logError("tool_failure", err, { toolName: tc.toolName, toolId, sessionId: options?.sessionId });
         emit({
           type: "tool.failed",
