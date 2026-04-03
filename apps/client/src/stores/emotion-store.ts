@@ -106,7 +106,7 @@ export const useEmotionStore = create<EmotionStoreState>((set, get) => ({
 
   loadSessionHistory: async (sessionId: string) => {
     try {
-      const history = await api.get<EmotionSnapshot[]>(`/emotions/session/${sessionId}`);
+      const history = await api.get<EmotionSnapshot[]>(`/emotions/session/${sessionId}`) ?? [];
       const last = history.length > 0 ? history[history.length - 1] : null;
       set({
         sessionHistory: history,
