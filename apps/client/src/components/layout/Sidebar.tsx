@@ -6,7 +6,7 @@ import { useUIStore } from "../../stores/ui-store";
 import { usePcStore } from "../../stores/pc-store";
 import type { PanelId } from "../../stores/ui-store";
 
-const NAV_ITEMS: { id: PanelId; label: string; icon: ReactNode }[] = [
+const NAV_ITEMS: { id: PanelId | "settings"; label: string; icon: ReactNode }[] = [
   {
     id: "persona",
     label: "Persona",
@@ -154,7 +154,7 @@ export function Sidebar() {
               key={item.id}
               variant="ghost"
               size="icon"
-              onClick={() => isSettings ? openSettings() : togglePanel(item.id)}
+              onClick={() => isSettings ? openSettings() : togglePanel(item.id as PanelId)}
               className={cn(
                 "group relative",
                 isActive

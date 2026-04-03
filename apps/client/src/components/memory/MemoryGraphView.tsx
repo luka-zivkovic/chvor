@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -54,19 +54,18 @@ const nodeTypes = { memory: MemoryNode };
 
 const MAX_VISIBLE_NODES = 100;
 
-export function MemoryGraphView() {
-  const { graphNodes, graphEdges, graphLoading } = useMemoryStore();
+function useGraphData() {
+  const { graphNodes, graphEdges } = useMemoryStore();
 
-  const { nodes, edges, totalCount } = useMemo(() => {
+  return useMemo(() => {
     if (graphNodes.length === 0) return { nodes: [], edges: [], totalCount: 0 };
 
-    // Simple radial layout grouped by category
     const categories = [...new Set(graphNodes.map((n) => n.category))];
     const limitedNodes = graphNodes
       .sort((a, b) => b.strength - a.strength)
       .slice(0, MAX_VISIBLE_NODES);
 
-    const rfNodes: Node[] = limitedNodes.map((n, i) => {
+    const rfNodes: Node[] = limitedNodes.map((n) => {
       const catIdx = categories.indexOf(n.category);
       const nodesInCat = limitedNodes.filter((m) => m.category === n.category);
       const posInCat = nodesInCat.indexOf(n);
@@ -103,6 +102,11 @@ export function MemoryGraphView() {
 
     return { nodes: rfNodes, edges: rfEdges, totalCount: graphNodes.length };
   }, [graphNodes, graphEdges]);
+}
+
+/** Button shown in the sidebar to launch the full-screen graph overlay */
+export function MemoryGraphButton({ onClick }: { onClick: () => void }) {
+  const { graphNodes, graphLoading } = useMemoryStore();
 
   if (graphLoading) return <p className="text-xs text-muted-foreground">Loading graph...</p>;
 
@@ -118,26 +122,121 @@ export function MemoryGraphView() {
   }
 
   return (
-    <div className="flex flex-col gap-1">
-      {totalCount > MAX_VISIBLE_NODES && (
-        <p className="text-[9px] text-muted-foreground/60 text-right">
-          Showing {MAX_VISIBLE_NODES} of {totalCount} memories (strongest)
-        </p>
-      )}
-    <div className="h-[400px] rounded-md border border-border/30 bg-muted/5">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        fitView
-        minZoom={0.3}
-        maxZoom={2}
-        proOptions={{ hideAttribution: true }}
+    <div className="flex flex-col items-center gap-3 py-8">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/40">
+        <circle cx="12" cy="12" r="2" />
+        <circle cx="5" cy="6" r="1.5" />
+        <circle cx="19" cy="6" r="1.5" />
+        <circle cx="5" cy="18" r="1.5" />
+        <circle cx="19" cy="18" r="1.5" />
+        <line x1="6.3" y1="7" x2="10.5" y2="10.8" />
+        <line x1="17.7" y1="7" x2="13.5" y2="10.8" />
+        <line x1="6.3" y1="17" x2="10.5" y2="13.2" />
+        <line x1="17.7" y1="17" x2="13.5" y2="13.2" />
+      </svg>
+      <p className="text-xs text-muted-foreground">
+        {graphNodes.length} memories in graph
+      </p>
+      <button
+        onClick={onClick}
+        className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/10 px-4 py-2 text-xs font-medium text-foreground hover:bg-muted/20 hover:border-border transition-colors"
       >
-        <Background gap={20} size={1} />
-        <Controls showInteractive={false} className="!bg-background !border-border !shadow-sm" />
-      </ReactFlow>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+        </svg>
+        Open Graph View
+      </button>
     </div>
+  );
+}
+
+/** Full-screen overlay for the memory graph */
+export function MemoryGraphOverlay({ onClose }: { onClose: () => void }) {
+  const { graphLoading } = useMemoryStore();
+  const { nodes, edges, totalCount } = useGraphData();
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-background/80 backdrop-blur-md"
+        onClick={onClose}
+      />
+
+      {/* Graph container */}
+      <div
+        className="relative z-10 m-4 md:m-8 flex flex-1 flex-col overflow-hidden rounded-xl border border-border/50"
+        style={{ background: "var(--glass-bg-strong)" }}
+      >
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-border/30 px-6 py-3">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-medium text-foreground">Memory Graph</h3>
+            {totalCount > 0 && (
+              <span className="text-[10px] text-muted-foreground">
+                {totalCount > MAX_VISIBLE_NODES
+                  ? `Showing ${MAX_VISIBLE_NODES} of ${totalCount} (strongest)`
+                  : `${totalCount} memories`}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Legend */}
+            <div className="hidden md:flex items-center gap-2">
+              {Object.entries(CATEGORY_COLORS).map(([cat, color]) => (
+                <div key={cat} className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                  <span className="text-[9px] text-muted-foreground">{cat}</span>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={onClose}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
+              title="Close (Esc)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Graph */}
+        <div className="flex-1">
+          {graphLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-xs text-muted-foreground">Loading graph...</p>
+            </div>
+          ) : nodes.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-xs text-muted-foreground">No memories to display</p>
+            </div>
+          ) : (
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              fitView
+              minZoom={0.1}
+              maxZoom={3}
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background gap={20} size={1} />
+              <Controls showInteractive={false} className="!bg-background !border-border !shadow-sm" />
+            </ReactFlow>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

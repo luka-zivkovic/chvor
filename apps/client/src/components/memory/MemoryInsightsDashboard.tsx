@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { useMemoryStore } from "../../stores/memory-store";
 import { MemoryList } from "./MemoryList";
 import { MemoryStatsView } from "./MemoryStatsView";
-import { MemoryGraphView } from "./MemoryGraphView";
+import { MemoryGraphButton, MemoryGraphOverlay } from "./MemoryGraphView";
 import { MemoryTimeline } from "./MemoryTimeline";
 import { cn } from "../../lib/utils";
 
@@ -20,6 +20,7 @@ export function MemoryInsightsDashboard() {
   const [newFact, setNewFact] = useState("");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [graphOpen, setGraphOpen] = useState(false);
 
   useEffect(() => {
     fetchAll();
@@ -105,7 +106,12 @@ export function MemoryInsightsDashboard() {
         </div>
       )}
 
-      {tab === "graph" && <MemoryGraphView />}
+      {tab === "graph" && (
+        <>
+          <MemoryGraphButton onClick={() => setGraphOpen(true)} />
+          {graphOpen && <MemoryGraphOverlay onClose={() => setGraphOpen(false)} />}
+        </>
+      )}
       {tab === "timeline" && <MemoryTimeline />}
     </div>
   );

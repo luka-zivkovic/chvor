@@ -76,6 +76,9 @@ export function getMaxTokens(model: string): number {
 // ── Model creation (supports all 5 providers) ────────────────────
 
 export function createModel(config: LLMConfig): LanguageModelV1 {
+  if (!config.model?.trim()) {
+    throw new Error(`No model selected for provider "${config.providerId}". Please select a model in Brain → Models.`);
+  }
   switch (config.providerId) {
     case "anthropic": {
       const provider = createAnthropic({ apiKey: config.apiKey });

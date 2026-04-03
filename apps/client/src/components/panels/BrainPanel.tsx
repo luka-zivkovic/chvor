@@ -165,7 +165,7 @@ function BrainConfigContent() {
         <section className="rounded-lg border border-status-warning/30 p-3">
           <p className="text-xs font-medium text-status-warning">No LLM configured</p>
           <button
-            onClick={() => useUIStore.getState().openPanel("settings")}
+            onClick={() => useUIStore.getState().openSettings("connections")}
             className="mt-1 text-[10px] text-primary hover:underline"
           >
             Add a provider key →
