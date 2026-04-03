@@ -5,7 +5,7 @@
  * into a rolling buffer of ThoughtSegments for canvas rendering.
  */
 
-import { useRef, useMemo, useEffect } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../stores/app-store";
 import type { ThoughtSegment } from "../lib/thought-stream/text-layout";
 import { clearLayoutCache } from "../lib/thought-stream/text-layout";
@@ -65,19 +65,15 @@ function fontForType(type: ThoughtSegment["type"]): string {
 export function useThoughtStream(): {
   segments: ThoughtSegment[];
   isActive: boolean;
-  streamingThoughtRef: React.RefObject<string | null>;
 } {
   const executionEvents = useAppStore((s) => s.executionEvents);
   const streamingThought = useAppStore((s) => s.streamingThought);
   const prevLengthRef = useRef(0);
   const segmentsRef = useRef<ThoughtSegment[]>([]);
-  const streamingThoughtRef = useRef<string | null>(null);
+  const [version, setVersion] = useState(0);
 
-  // Keep streaming thought in a ref so render() can read it without
-  // causing segments to get a new reference on every token
-  streamingThoughtRef.current = streamingThought;
-
-  const segments = useMemo(() => {
+  // Process new events into the segment buffer (side-effect, not in useMemo)
+  useEffect(() => {
     const prevLen = prevLengthRef.current;
     const currentLen = executionEvents.length;
 
@@ -88,10 +84,13 @@ export function useThoughtStream(): {
 
     // Process only new events
     const startIdx = currentLen < prevLen ? 0 : prevLen;
+    let changed = currentLen < prevLen;
+
     for (let i = startIdx; i < currentLen; i++) {
       const ev = executionEvents[i];
       if (ev.type === "execution.started") {
         segmentsRef.current = [];
+        changed = true;
         continue;
       }
 
@@ -113,11 +112,28 @@ export function useThoughtStream(): {
       if (segmentsRef.current.length > MAX_SEGMENTS) {
         segmentsRef.current = segmentsRef.current.slice(-MAX_SEGMENTS);
       }
+      changed = true;
     }
 
     prevLengthRef.current = currentLen;
-    return segmentsRef.current;
+    if (changed) setVersion((v) => v + 1);
   }, [executionEvents]);
+
+  // Derive the segments array (pure computation)
+  const segments = useMemo(() => {
+    const result = [...segmentsRef.current];
+    if (streamingThought) {
+      result.push({
+        id: "streaming-thought",
+        text: streamingThought,
+        font: FONT_THOUGHT,
+        type: "thought",
+        createdAt: Date.now(),
+      });
+    }
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, streamingThought]);
 
   const isActive = executionEvents.some(
     (e) => e.type === "execution.started",
@@ -134,5 +150,5 @@ export function useThoughtStream(): {
     prevActiveRef.current = isActive;
   }, [isActive]);
 
-  return { segments, isActive, streamingThoughtRef };
+  return { segments, isActive };
 }

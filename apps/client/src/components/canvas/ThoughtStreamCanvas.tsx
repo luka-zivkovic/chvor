@@ -30,7 +30,7 @@ interface Props {
 export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstance }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
-  const { segments, isActive, streamingThoughtRef } = useThoughtStream();
+  const { segments, isActive } = useThoughtStream();
   const nodes = useCanvasStore((s) => s.nodes);
   const emotionColor = useEmotionStore((s) => s.displayColor);
 
@@ -58,20 +58,7 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    // Build render-time segments: stable segments + live streaming thought
-    const renderSegments = [...segments];
-    const liveThought = streamingThoughtRef.current;
-    if (liveThought) {
-      renderSegments.push({
-        id: "streaming-thought",
-        text: liveThought,
-        font: "11px 'IBM Plex Sans', sans-serif",
-        type: "thought" as const,
-        createdAt: Date.now(),
-      });
-    }
-
-    if (renderSegments.length === 0) return;
+    if (segments.length === 0) return;
 
     // Get viewport transform from ReactFlow
     const vp = rfInstance.current?.getViewport() ?? { x: 0, y: 0, zoom: 1 };
@@ -86,7 +73,7 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
 
     // Layout all segments through pretext
     const lines: RenderedLine[] = layoutThoughtStream(
-      renderSegments,
+      segments,
       getLineWidth,
       centerY,
       LINE_HEIGHT,
@@ -115,7 +102,7 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
 
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
-  }, [segments, nodes, rfInstance, emotionColor, streamingThoughtRef]);
+  }, [segments, nodes, rfInstance, emotionColor]);
 
   // Animation loop
   useEffect(() => {
