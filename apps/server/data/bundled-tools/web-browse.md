@@ -1,13 +1,9 @@
 ---
 name: Web Browse
 description: Search the web and fetch content from URLs and APIs
-version: 1.0.0
+version: 1.1.0
 category: web
 icon: globe
-mcp:
-  command: npx
-  args: ["-y", "duckduckgo-mcp-server"]
-  transport: stdio
 inputs:
   - name: query
     type: string
@@ -15,6 +11,19 @@ inputs:
     required: true
 ---
 You have two groups of web browsing tools:
+
+## Web Search (native__web_search)
+Search the web for current information via DuckDuckGo. Use for:
+- Current events or recent news
+- Facts that may have changed since your training
+- Real-time information (weather, stock prices, sports scores)
+- Anything where up-to-date information is important
+
+Parameters: **query** (required), **maxResults** (optional, default 8).
+
+Always cite your sources when presenting search results.
+
+> If a Brave Search or SearXNG tool is available, prefer those for higher quality and throughput. Fall back to native__web_search if they fail or are not configured.
 
 ## Web Request (native__web_request)
 Make lightweight HTTP requests to URLs and APIs. Use for:
@@ -25,16 +34,8 @@ Make lightweight HTTP requests to URLs and APIs. Use for:
 Parameters: **url** (required), **method** (optional, default GET), **headers** (optional), **body** (optional for POST/PUT/PATCH).
 Always include appropriate Content-Type headers for POST/PUT requests. Summarize long responses.
 
-## Web Search (duckduckgo_search via MCP)
-Search the web for current information via DuckDuckGo. Use for:
-- Current events or recent news
-- Facts that may have changed since your training
-- Real-time information (weather, stock prices, sports scores)
-- Anything where up-to-date information is important
-
-Always cite your sources when presenting search results.
-
 ## When to use which
-- **Web Request** for simple API calls, JSON endpoints, and static pages
-- **Web Search** when the user needs current/up-to-date information from the internet
+- **Brave Search / SearXNG** (if available) for the best search quality and throughput
+- **Web Search** (native__web_search) as the always-available default for current information
+- **Web Request** for direct API calls, JSON endpoints, and fetching specific URLs
 - Use **Web Agent** (separate skill) when the page requires JavaScript rendering, interaction, or multi-step navigation

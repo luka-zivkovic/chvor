@@ -73,7 +73,7 @@ export const SKILL_CATALOG: SkillEntry[] = [
   // --- Built-in Tools (always active) ---
   { id: "filesystem", label: "Filesystem", description: "Read, write, and search local files", category: "builtin" },
   { id: "http-fetch", label: "HTTP Fetch", description: "Call any REST API or fetch web pages", category: "builtin" },
-  { id: "web-search", label: "Web Search", description: "Search the web via DuckDuckGo", category: "builtin" },
+  { id: "web-search", label: "Web Search", description: "Search the web for current information", category: "builtin" },
   { id: "memory", label: "Memory", description: "Persistent long-term memory across chats", category: "builtin" },
   { id: "time", label: "Date & Time", description: "Timezone-aware date/time awareness", category: "builtin" },
   { id: "browser", label: "Browser", description: "Browse websites and interact with web pages", category: "builtin" },

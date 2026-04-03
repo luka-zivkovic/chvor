@@ -17,6 +17,7 @@ interface McpConnection {
   transport: StdioClientTransport;
   tools: McpToolInfo[];
   toolId: string;
+  tool: Tool; // stored for auto-reconnect on failure
 }
 
 class McpManager {
@@ -104,6 +105,7 @@ class McpManager {
       transport,
       tools,
       toolId: tool.id,
+      tool,
     };
 
     this.connections.set(tool.id, connection);
@@ -115,6 +117,7 @@ class McpManager {
 
   /**
    * Call a tool on an MCP server.
+   * On failure, attempts to close the stale connection, respawn, and retry once.
    */
   async callTool(
     toolId: string,
@@ -124,12 +127,28 @@ class McpManager {
     const conn = this.connections.get(toolId);
     if (!conn) throw new Error(`No MCP connection for tool: ${toolId}`);
 
-    const result = await conn.client.callTool({
-      name: toolName,
-      arguments: args,
-    });
-
-    return result;
+    try {
+      return await conn.client.callTool({
+        name: toolName,
+        arguments: args,
+      });
+    } catch (firstErr) {
+      console.warn(`[mcp] callTool failed for ${toolId}/${toolName}, attempting reconnect…`);
+      const toolRef = conn.tool;
+      await this.closeConnection(toolId);
+      try {
+        await this.getConnection(toolRef);
+        const newConn = this.connections.get(toolId);
+        if (!newConn) throw firstErr;
+        return await newConn.client.callTool({
+          name: toolName,
+          arguments: args,
+        });
+      } catch (retryErr) {
+        // Second failure is final — throw the retry error
+        throw retryErr;
+      }
+    }
   }
 
   /**

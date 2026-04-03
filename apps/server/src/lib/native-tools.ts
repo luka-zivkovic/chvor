@@ -261,6 +261,171 @@ handlers.set(FETCH_TOOL_NAME, handleFetch);
 nativeToolMapping.set(FETCH_TOOL_NAME, { kind: "tool", id: "web-browse" });
 
 // ---------------------------------------------------------------------------
+// Web Search tool (zero-config, scrapes DuckDuckGo HTML — no MCP or API key)
+// ---------------------------------------------------------------------------
+const WEB_SEARCH_TOOL_NAME = "native__web_search";
+
+const webSearchToolDef = tool({
+  description:
+    "[Web Browse] Search the web for current information. Zero-config default — no API key required. For higher quality results, configure Brave Search or SearXNG in your credentials.",
+  parameters: z.object({
+    query: z.string().describe("The search query"),
+    maxResults: z
+      .number()
+      .optional()
+      .describe("Maximum number of results to return (default: 8)"),
+  }),
+});
+
+function stripHtmlTags(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractRealUrl(ddgHref: string): string {
+  try {
+    const full = ddgHref.startsWith("//") ? "https:" + ddgHref : ddgHref;
+    const parsed = new URL(full);
+    const uddg = parsed.searchParams.get("uddg");
+    return uddg ? decodeURIComponent(uddg) : full;
+  } catch {
+    return ddgHref;
+  }
+}
+
+function parseDuckDuckGoHTML(
+  html: string,
+  maxResults: number
+): Array<{ title: string; url: string; snippet: string }> {
+  const results: Array<{ title: string; url: string; snippet: string }> = [];
+
+  // Match result links: <a rel="nofollow" class="result__a" href="...">TITLE</a>
+  const linkRegex =
+    /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+  // Match snippets: <a class="result__snippet" ...>SNIPPET</a>
+  const snippetRegex =
+    /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+
+  const links: Array<{ rawHref: string; title: string }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = linkRegex.exec(html)) !== null) {
+    links.push({ rawHref: match[1], title: stripHtmlTags(match[2]) });
+  }
+
+  const snippets: string[] = [];
+  while ((match = snippetRegex.exec(html)) !== null) {
+    snippets.push(stripHtmlTags(match[1]));
+  }
+
+  for (let i = 0; i < Math.min(links.length, maxResults); i++) {
+    const url = extractRealUrl(links[i].rawHref);
+    // Skip DuckDuckGo internal links
+    if (url.includes("duckduckgo.com/y.js")) continue;
+    results.push({
+      title: links[i].title,
+      url,
+      snippet: snippets[i] ?? "",
+    });
+  }
+  return results;
+}
+
+async function handleWebSearch(
+  args: Record<string, unknown>
+): Promise<NativeToolResult> {
+  const query = String(args.query ?? "");
+  const maxResults = Number(args.maxResults ?? 8);
+
+  if (!query.trim()) {
+    return {
+      content: [{ type: "text", text: "Error: search query is required." }],
+    };
+  }
+
+  const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+
+  try {
+    const response = await fetch(searchUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      body: `q=${encodeURIComponent(query)}`,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Web search failed: HTTP ${response.status} ${response.statusText}`,
+          },
+        ],
+      };
+    }
+
+    const html = await response.text();
+    const results = parseDuckDuckGoHTML(html, maxResults);
+
+    if (results.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `No results found for "${query}".`,
+          },
+        ],
+      };
+    }
+
+    const formatted = results
+      .map(
+        (r, i) =>
+          `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`
+      )
+      .join("\n\n");
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Search results for "${query}":\n\n${formatted}`,
+        },
+      ],
+    };
+  } catch (err) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Web search failed: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ],
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+handlers.set(WEB_SEARCH_TOOL_NAME, handleWebSearch);
+nativeToolMapping.set(WEB_SEARCH_TOOL_NAME, { kind: "tool", id: "web-browse" });
+
+// ---------------------------------------------------------------------------
 // Create Skill tool
 // ---------------------------------------------------------------------------
 const CREATE_SKILL_TOOL_NAME = "native__create_skill";
@@ -4492,6 +4657,7 @@ export function getNativeToolDefinitions(): Record<
 
   return {
     [FETCH_TOOL_NAME]: fetchToolDef,
+    [WEB_SEARCH_TOOL_NAME]: webSearchToolDef,
     [CREATE_SKILL_TOOL_NAME]: createSkillToolDef,
     [CREATE_SCHEDULE_NAME]: createScheduleToolDef,
     [LIST_SCHEDULES_NAME]: listSchedulesToolDef,
