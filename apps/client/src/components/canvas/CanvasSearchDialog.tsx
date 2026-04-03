@@ -30,7 +30,7 @@ export function CanvasSearchDialog({ open, onClose, initialKind = null }: Props)
   const [installing, setInstalling] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Reset state when opening
   useEffect(() => {
@@ -55,6 +55,11 @@ export function CanvasSearchDialog({ open, onClose, initialKind = null }: Props)
     return () => window.removeEventListener("keydown", handler, true);
   }, [open, onClose]);
 
+  // Clean up debounce on unmount
+  useEffect(() => {
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, []);
+
   // Close on click outside
   useEffect(() => {
     if (!open) return;
@@ -76,7 +81,8 @@ export function CanvasSearchDialog({ open, onClose, initialKind = null }: Props)
         q: q || undefined,
         kind: k || undefined,
       });
-      setResults(data);
+      // Filter out templates — they need the setup wizard, not one-click install
+      setResults(data.filter((e) => e.kind !== "template"));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

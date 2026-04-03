@@ -9,11 +9,12 @@ type Step = "overview" | "credentials" | "done";
 
 interface Props {
   template: TemplateManifest;
+  includes?: string[];
   onComplete: () => void | Promise<void>;
   onCancel: () => void;
 }
 
-export function TemplateSetupWizard({ template, onComplete, onCancel }: Props) {
+export function TemplateSetupWizard({ template, includes, onComplete, onCancel }: Props) {
   const { credentials, fetchAll: fetchCredentials } = useCredentialStore();
   const [step, setStep] = useState<Step>("overview");
   const [setupCredType, setSetupCredType] = useState<string | null>(null);
@@ -73,13 +74,13 @@ export function TemplateSetupWizard({ template, onComplete, onCancel }: Props) {
             </div>
 
             {/* Included skills/tools */}
-            {(template as TemplateManifest & { includes?: string[] }).includes?.length ? (
+            {includes?.length ? (
               <div className="space-y-2">
                 <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Included skills &amp; tools
                 </h3>
                 <div className="flex flex-wrap gap-1">
-                  {(template as TemplateManifest & { includes?: string[] }).includes!.map((id) => (
+                  {includes.map((id) => (
                     <Badge key={id} variant="outline" className="text-[9px] font-mono px-1.5 py-0">
                       {id}
                     </Badge>

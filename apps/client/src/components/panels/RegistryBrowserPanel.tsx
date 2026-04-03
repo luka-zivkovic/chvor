@@ -174,7 +174,7 @@ export function RegistryBrowserPanel() {
   const { fetchAll: fetchCredentials } = useCredentialStore();
 
   const [inputValue, setInputValue] = useState(searchQuery);
-  const [activeTemplate, setActiveTemplate] = useState<{ id: string; manifest: TemplateManifest } | null>(null);
+  const [activeTemplate, setActiveTemplate] = useState<{ id: string; manifest: TemplateManifest; includes?: string[] } | null>(null);
   const [templateLoading, setTemplateLoading] = useState(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
 
@@ -213,7 +213,7 @@ export function RegistryBrowserPanel() {
     setTemplateError(null);
     try {
       const manifest = await api.templates.getManifest(entry.id);
-      setActiveTemplate({ id: entry.id, manifest });
+      setActiveTemplate({ id: entry.id, manifest, includes: entry.includes });
     } catch (err) {
       setTemplateError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -238,6 +238,7 @@ export function RegistryBrowserPanel() {
       {activeTemplate && (
         <TemplateSetupWizard
           template={activeTemplate.manifest}
+          includes={activeTemplate.includes}
           onComplete={handleTemplateActivate}
           onCancel={() => setActiveTemplate(null)}
         />
