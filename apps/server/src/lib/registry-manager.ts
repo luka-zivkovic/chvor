@@ -84,7 +84,7 @@ export { compareSemver };
  * Runtime validation of a parsed template manifest.
  * Ensures all fields have the expected types before provisioning.
  */
-function validateManifest(entryId: string, raw: unknown): TemplateManifest {
+export function validateManifest(entryId: string, raw: unknown): TemplateManifest {
   if (!raw || typeof raw !== "object") {
     throw new Error(`Invalid template manifest for "${entryId}": expected an object`);
   }

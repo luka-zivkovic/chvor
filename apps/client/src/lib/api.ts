@@ -505,6 +505,10 @@ export const api = {
         if (!r.ok) throw new Error(`Export failed: ${r.status}`);
         return r.text();
       }),
+    getManifest: (id: string) =>
+      request<import("@chvor/shared").TemplateManifest>(
+        `/registry/entry/${encodeURIComponent(id)}/manifest`,
+      ),
   },
 
   securityConfig: {

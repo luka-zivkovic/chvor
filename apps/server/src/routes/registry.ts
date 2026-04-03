@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { fetchRegistryIndex, readCachedIndex } from "../lib/registry-client.ts";
+import { fetchRegistryIndex, readCachedIndex, fetchEntryContent, getDefaultRegistryUrl } from "../lib/registry-client.ts";
+import { parse as parseYaml } from "yaml";
 import {
   installEntry,
   uninstallEntry,
@@ -8,6 +9,7 @@ import {
   updateAll,
   readLock,
   assertSafeEntryId,
+  validateManifest,
 } from "../lib/registry-manager.ts";
 import { getBundledCapabilities } from "../lib/capability-loader.ts";
 import type { RegistryEntry, RegistryEntryKind } from "@chvor/shared";
@@ -105,6 +107,37 @@ registry.get("/entry/:id", async (c) => {
     });
   } catch (err) {
     console.error("[api] GET /registry/entry error:", err);
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
+// GET /api/registry/entry/:id/manifest — fetch and parse template manifest (pre-install preview)
+registry.get("/entry/:id/manifest", async (c) => {
+  try {
+    const id = c.req.param("id");
+    assertSafeEntryId(id);
+
+    // Verify the entry exists and is a template
+    let index = readCachedIndex();
+    if (!index) {
+      index = await fetchRegistryIndex();
+    }
+    const entry = index.entries.find((e) => e.id === id);
+    if (!entry) return c.json({ error: "not found in registry" }, 404);
+    if (entry.kind !== "template") {
+      return c.json({ error: `entry "${id}" is a ${entry.kind}, not a template` }, 400);
+    }
+
+    // Fetch the YAML content from registry
+    const lock = readLock();
+    const registryUrl = lock.registryUrl || getDefaultRegistryUrl();
+    const content = await fetchEntryContent(registryUrl, "template", id);
+    const raw = parseYaml(content);
+    const manifest = validateManifest(id, raw);
+
+    return c.json({ data: manifest });
+  } catch (err) {
+    console.error("[api] GET /registry/entry/:id/manifest error:", err);
     return c.json({ error: String(err) }, 500);
   }
 });

@@ -18,6 +18,7 @@ import { IntegrationDetailPanel } from "../panels/IntegrationDetailPanel";
 import { ConversationsPanel } from "../panels/ConversationsPanel";
 import ActivityPanel from "../panels/ActivityPanel";
 import { EmotionHistoryPanel } from "../panels/EmotionHistoryPanel";
+import { RegistryBrowserPanel } from "../panels/RegistryBrowserPanel";
 import { CanvasPage } from "../canvas-page/CanvasPage";
 import { SettingsOverlay } from "../settings/SettingsOverlay";
 import { KnowledgePanel } from "../panels/KnowledgePanel";
@@ -90,6 +91,7 @@ const PANEL_META: Record<string, { title: string; subtitle: string; width?: numb
   conversations: { title: "Conversations", subtitle: "Browse and manage chat history" },
   activity: { title: "Activity", subtitle: "System events" },
   "emotion-history": { title: "Emotional World", subtitle: "Inner state, arc & patterns" },
+  registry: { title: "Registry", subtitle: "Browse & install templates, skills & tools" },
 };
 
 function PanelContent({ panel }: { panel: string }) {
@@ -124,6 +126,8 @@ function PanelContent({ panel }: { panel: string }) {
       return <ActivityPanel />;
     case "emotion-history":
       return <EmotionHistoryPanel />;
+    case "registry":
+      return <RegistryBrowserPanel />;
     default:
       return null;
   }

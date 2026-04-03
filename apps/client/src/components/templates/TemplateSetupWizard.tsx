@@ -9,14 +9,17 @@ type Step = "overview" | "credentials" | "done";
 
 interface Props {
   template: TemplateManifest;
-  onComplete: () => void;
+  includes?: string[];
+  onComplete: () => void | Promise<void>;
   onCancel: () => void;
 }
 
-export function TemplateSetupWizard({ template, onComplete, onCancel }: Props) {
+export function TemplateSetupWizard({ template, includes, onComplete, onCancel }: Props) {
   const { credentials, fetchAll: fetchCredentials } = useCredentialStore();
   const [step, setStep] = useState<Step>("overview");
   const [setupCredType, setSetupCredType] = useState<string | null>(null);
+  const [activating, setActivating] = useState(false);
+  const [activateError, setActivateError] = useState<string | null>(null);
 
   useEffect(() => { fetchCredentials(); }, [fetchCredentials]);
 
@@ -69,6 +72,22 @@ export function TemplateSetupWizard({ template, onComplete, onCancel }: Props) {
                 {template.pipeline && <Badge variant="secondary" className="text-[10px]">Pipeline</Badge>}
               </div>
             </div>
+
+            {/* Included skills/tools */}
+            {includes?.length ? (
+              <div className="space-y-2">
+                <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  Included skills &amp; tools
+                </h3>
+                <div className="flex flex-wrap gap-1">
+                  {includes.map((id) => (
+                    <Badge key={id} variant="outline" className="text-[9px] font-mono px-1.5 py-0">
+                      {id}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
@@ -148,9 +167,30 @@ export function TemplateSetupWizard({ template, onComplete, onCancel }: Props) {
                 {template.name} will be applied to your assistant. You can uninstall it later to restore your previous configuration.
               </p>
             </div>
+            {activateError && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+                <p className="text-[10px] text-destructive">{activateError}</p>
+              </div>
+            )}
             <div className="flex justify-center gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={() => setStep(hasCredentialRequirements ? "credentials" : "overview")}>Back</Button>
-              <Button size="sm" onClick={onComplete}>Activate Template</Button>
+              <Button variant="outline" size="sm" disabled={activating} onClick={() => setStep(hasCredentialRequirements ? "credentials" : "overview")}>Back</Button>
+              <Button
+                size="sm"
+                disabled={activating}
+                onClick={async () => {
+                  setActivating(true);
+                  setActivateError(null);
+                  try {
+                    await onComplete();
+                  } catch (err) {
+                    setActivateError(err instanceof Error ? err.message : String(err));
+                  } finally {
+                    setActivating(false);
+                  }
+                }}
+              >
+                {activating ? "Activating..." : "Activate Template"}
+              </Button>
             </div>
           </div>
         )}
