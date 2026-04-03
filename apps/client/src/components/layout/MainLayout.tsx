@@ -7,7 +7,7 @@ import { CanvasHint } from "../onboarding/CanvasHint";
 import { ChatPanel } from "../chat/ChatPanel";
 import { SchedulesPanel } from "../panels/SchedulesPanel";
 import { WebhooksPanel } from "../panels/WebhooksPanel";
-import { MemoryPanel } from "../panels/MemoryPanel";
+import { MemoryInsightsDashboard } from "../memory/MemoryInsightsDashboard";
 import { PersonaPanel } from "../panels/PersonaPanel";
 import { BrainPanel } from "../panels/BrainPanel";
 import { SkillDetailPanel } from "../panels/SkillDetailPanel";
@@ -22,6 +22,7 @@ import ActivityPanel from "../panels/ActivityPanel";
 import { EmotionHistoryPanel } from "../panels/EmotionHistoryPanel";
 import { RegistryBrowserPanel } from "../panels/RegistryBrowserPanel";
 import { CanvasPage } from "../canvas-page/CanvasPage";
+import { A2UIPreviewModal } from "../a2ui/A2UIPreviewModal";
 import { SettingsOverlay } from "../settings/SettingsOverlay";
 import { KnowledgePanel } from "../panels/KnowledgePanel";
 import { PcViewer } from "../pc-viewer/PcViewer";
@@ -106,7 +107,7 @@ function PanelContent({ panel }: { panel: string }) {
     case "webhooks":
       return <WebhooksPanel />;
     case "memory":
-      return <MemoryPanel />;
+      return <MemoryInsightsDashboard />;
     case "knowledge":
       return <KnowledgePanel />;
     case "persona":
@@ -301,6 +302,9 @@ export function MainLayout() {
 
       {/* ─── Mobile navigation menu ─── */}
       <MobileMenu />
+
+      {/* ─── A2UI Preview modal ─── */}
+      <A2UIPreviewModal />
 
       {/* ─── PC Viewer overlay ─── */}
       <PcViewer />

@@ -30,6 +30,10 @@ interface UIState {
   closeMobileMenu: () => void;
   openCanvas: (surfaceId?: string) => void;
   exitCanvas: () => void;
+  /** Floating A2UI preview modal */
+  previewModalOpen: boolean;
+  openPreviewModal: (surfaceId?: string) => void;
+  closePreviewModal: () => void;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
 }
@@ -78,6 +82,18 @@ export const useUIStore = create<UIState>((set, get) => ({
     }
   },
   exitCanvas: () => set({ layoutMode: "default" }),
+  previewModalOpen: false,
+  openPreviewModal: (surfaceId?: string) => {
+    set({ previewModalOpen: true });
+    if (surfaceId) {
+      import("./a2ui-store").then(({ useA2UIStore }) => {
+        useA2UIStore.getState().fetchSurface(surfaceId);
+      }).catch((err) => {
+        console.error("[ui] failed to load a2ui-store for preview:", err);
+      });
+    }
+  },
+  closePreviewModal: () => set({ previewModalOpen: false }),
   openSettings: (section?: SettingsSection) =>
     set({ settingsOpen: true, activePanel: null, settingsSection: section ?? get().settingsSection }),
   closeSettings: () => set({ settingsOpen: false }),
