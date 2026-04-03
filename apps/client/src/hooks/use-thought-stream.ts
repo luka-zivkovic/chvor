@@ -5,7 +5,7 @@
  * into a rolling buffer of ThoughtSegments for canvas rendering.
  */
 
-import { useRef, useMemo } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../stores/app-store";
 import type { ThoughtSegment } from "../lib/thought-stream/text-layout";
 
@@ -69,8 +69,10 @@ export function useThoughtStream(): {
   const streamingThought = useAppStore((s) => s.streamingThought);
   const prevLengthRef = useRef(0);
   const segmentsRef = useRef<ThoughtSegment[]>([]);
+  const [version, setVersion] = useState(0);
 
-  const segments = useMemo(() => {
+  // Process new events into the segment buffer (side-effect, not in useMemo)
+  useEffect(() => {
     const prevLen = prevLengthRef.current;
     const currentLen = executionEvents.length;
 
@@ -81,10 +83,13 @@ export function useThoughtStream(): {
 
     // Process only new events
     const startIdx = currentLen < prevLen ? 0 : prevLen;
+    let changed = currentLen < prevLen;
+
     for (let i = startIdx; i < currentLen; i++) {
       const ev = executionEvents[i];
       if (ev.type === "execution.started") {
         segmentsRef.current = [];
+        changed = true;
         continue;
       }
 
@@ -106,11 +111,15 @@ export function useThoughtStream(): {
       if (segmentsRef.current.length > MAX_SEGMENTS) {
         segmentsRef.current = segmentsRef.current.slice(-MAX_SEGMENTS);
       }
+      changed = true;
     }
 
     prevLengthRef.current = currentLen;
+    if (changed) setVersion((v) => v + 1);
+  }, [executionEvents]);
 
-    // Append the live streaming thought as a transient segment
+  // Derive the segments array (pure computation)
+  const segments = useMemo(() => {
     const result = [...segmentsRef.current];
     if (streamingThought) {
       result.push({
@@ -121,9 +130,9 @@ export function useThoughtStream(): {
         createdAt: Date.now(),
       });
     }
-
     return result;
-  }, [executionEvents, streamingThought]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, streamingThought]);
 
   const isActive = executionEvents.some(
     (e) => e.type === "execution.started",

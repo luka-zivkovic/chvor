@@ -132,7 +132,7 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
       running = false;
       cancelAnimationFrame(rafRef.current);
     };
-  }, [isActive, segments.length > 0, render]);
+  }, [isActive, segments.length, render]);
 
   // Also re-render on viewport changes (pan/zoom) via a resize observer
   useEffect(() => {

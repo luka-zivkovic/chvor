@@ -1,7 +1,8 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { toast } from "sonner";
 import { useModelsStore } from "../../stores/models-store";
 import { useCredentialStore } from "../../stores/credential-store";
+import { useUIStore } from "../../stores/ui-store";
 import { api } from "../../lib/api";
 import { cn } from "@/lib/utils";
 import type { ModelRole, ModelDef, LLMProviderDef, EmbeddingProviderDef, RoleFallbackEntry, CredentialSummary } from "@chvor/shared";
@@ -287,7 +288,7 @@ function ModelDropdown({
     }
   }, [open]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setHighlightIdx((i) => Math.min(i + 1, filtered.length - 1));
@@ -305,7 +306,7 @@ function ModelDropdown({
       setOpen(false);
       setSearch("");
     }
-  }, [filtered, highlightIdx, onSelect]);
+  };
 
   return (
     <div ref={dropdownRef} className="relative">
@@ -720,8 +721,8 @@ function RoleSelector({
           // No models discovered — set provider anyway, user must type model name
           await setRole(role, provider.id, "");
         }
-      } catch {
-        // Fetch failed — set provider with empty model, user can type manually
+      } catch (err) {
+        toast.error(`Failed to fetch models for ${provider.name}`);
         await setRole(role, provider.id, "");
       }
     }
@@ -981,12 +982,18 @@ function EmbeddingsSection() {
           return (
             <button
               key={p.id}
-              onClick={() => hasCreds && !isActive && handleProviderSwitch(p)}
+              onClick={() => {
+                if (!hasCreds) {
+                  useUIStore.getState().openSettings("connections");
+                  return;
+                }
+                if (!isActive) handleProviderSwitch(p);
+              }}
               title={!hasCreds ? `Add ${p.credentialType} API key in Settings > Connections` : undefined}
               className={cn(
                 "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-all",
                 !hasCreds
-                  ? "border-border/30 text-muted-foreground/40 cursor-not-allowed"
+                  ? "border-border/30 text-muted-foreground/50 hover:border-primary/30 hover:text-muted-foreground"
                   : isActive
                     ? "border-primary/60 bg-primary/10 text-foreground"
                     : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
@@ -994,7 +1001,7 @@ function EmbeddingsSection() {
             >
               <ProviderIcon icon={p.icon ?? p.id} size={16} />
               {p.name}
-              {!hasCreds && <span className="ml-1 text-[8px] opacity-60">needs key</span>}
+              {!hasCreds && <span className="ml-1 text-[8px] text-primary/60">+ add key</span>}
             </button>
           );
         })}
