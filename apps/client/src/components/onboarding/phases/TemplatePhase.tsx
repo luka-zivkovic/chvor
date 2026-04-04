@@ -35,6 +35,7 @@ export function TemplatePhase({ direction, onBack, onSkip, onSelectTemplate }: P
   }, []);
 
   async function handleSelect(entry: RegistryEntryWithStatus) {
+    setError(null);
     setLoadingManifest(entry.id);
     try {
       const manifest = await api.templates.getManifest(entry.id);

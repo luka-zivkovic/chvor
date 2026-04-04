@@ -175,12 +175,13 @@ export async function fetchRegistryIndex(): Promise<{ entries: RegistryIndexEntr
  */
 export async function resolveRegistryTemplate(
   id: string,
+  prefetchedIndex?: { entries: RegistryIndexEntry[] },
 ): Promise<{ path: string; manifest: TemplateManifest }> {
   assertSafeEntryId(id);
   const registryUrl = process.env.CHVOR_REGISTRY_URL || DEFAULT_REGISTRY_URL;
   assertValidRegistryUrl(registryUrl);
 
-  const index = await fetchRegistryIndex();
+  const index = prefetchedIndex ?? await fetchRegistryIndex();
   const entry = index.entries.find((e) => e.id === id && e.kind === "template");
   if (!entry) {
     throw new Error(

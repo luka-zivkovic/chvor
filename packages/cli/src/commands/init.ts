@@ -57,7 +57,7 @@ async function pickRegistryTemplate(): Promise<{ path: string; manifest: Templat
   if (choice === "__back__") return pickTemplate();
 
   console.log(`  Downloading template "${choice}"...`);
-  return resolveRegistryTemplate(choice);
+  return resolveRegistryTemplate(choice, index);
 }
 
 async function pickTemplate(): Promise<{ path: string; manifest: TemplateManifest }> {

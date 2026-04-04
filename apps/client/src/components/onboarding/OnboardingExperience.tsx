@@ -71,7 +71,8 @@ export function OnboardingExperience({ onComplete }: Props) {
 
   // Derive personality color for orb
   const selectedPresetObj = PERSONALITY_PRESETS.find((p) => p.id === selectedPreset);
-  const personalityColor = phaseIndex >= phaseSequence.indexOf("personality")
+  const personalityPhaseIdx = phaseSequence.indexOf("personality");
+  const personalityColor = (personalityPhaseIdx !== -1 && phaseIndex >= personalityPhaseIdx)
     ? (showCustom && customProfile.trim()
         ? PERSONALITY_COLORS.custom
         : selectedPresetObj

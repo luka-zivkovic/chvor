@@ -93,7 +93,7 @@ export const ORB_EVOLUTIONS = [
     animation: "animate-glass-breathe",
     ripples: 0,
   },
-  // Phase 3: Identity (color overridden by personality)
+  // Phase 4: Identity (color overridden by personality)
   {
     size: 160,
     color: "oklch(0.62 0.13 250)",
@@ -106,7 +106,7 @@ export const ORB_EVOLUTIONS = [
     animation: "animate-glass-float",
     ripples: 0,
   },
-  // Phase 4: Power
+  // Phase 5: Power
   {
     size: 180,
     color: "oklch(0.62 0.13 250)",
@@ -119,7 +119,7 @@ export const ORB_EVOLUTIONS = [
     animation: "animate-glass-breathe",
     ripples: 1,
   },
-  // Phase 5: Radiant
+  // Phase 6: Radiant
   {
     size: 200,
     color: "oklch(0.62 0.13 250)",
