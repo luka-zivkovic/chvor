@@ -70,12 +70,15 @@ import type {
   CreateDaemonTaskRequest,
   MemoryGraphExport,
   MemoryStats,
+  OAuthProviderDef,
+  OAuthConnection,
 } from "@chvor/shared";
 
 export interface ProvidersResponse {
   llm: LLMProviderDef[];
   embedding: EmbeddingProviderDef[];
   integration: IntegrationProviderDef[];
+  oauth?: OAuthProviderDef[];
 }
 
 export interface ModelsConfigResponse {
@@ -702,5 +705,28 @@ export const api = {
       }),
     disconnect: (id: string) =>
       request<null>(`/pc/connections/${id}`, { method: "DELETE" }),
+  },
+
+  oauth: {
+    providers: () =>
+      request<{
+        providers: (OAuthProviderDef & { connected: boolean; hasSetupCredentials: boolean })[];
+        connections: OAuthConnection[];
+        hasComposioKey: boolean;
+      }>("/oauth/providers"),
+    initiate: (provider: string) =>
+      request<{ redirectUrl: string; connectionId: string; method: string }>("/oauth/initiate", {
+        method: "POST",
+        body: JSON.stringify({ provider }),
+      }),
+    connections: () => request<OAuthConnection[]>("/oauth/connections"),
+    disconnect: (id: string) =>
+      request<{ disconnected: boolean; method: string }>(`/oauth/connections/${id}`, {
+        method: "DELETE",
+      }),
+    refresh: (credentialId: string) =>
+      request<{ refreshed: boolean; expiresAt?: string }>(`/oauth/refresh/${credentialId}`, {
+        method: "POST",
+      }),
   },
 };

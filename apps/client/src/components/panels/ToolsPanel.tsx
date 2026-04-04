@@ -3,6 +3,7 @@ import { useUIStore } from "../../stores/ui-store";
 import { useCanvasStore } from "../../stores/canvas-store";
 import { api } from "../../lib/api";
 import { cn } from "@/lib/utils";
+import { RegistrySearchBar } from "../registry/RegistrySearchBar";
 
 export function ToolsPanel() {
   const { tools, fetchTools } = useToolStore();
@@ -24,17 +25,23 @@ export function ToolsPanel() {
 
   if (tools.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-        <p className="text-xs text-muted-foreground">No tools configured</p>
-        <p className="text-[10px] text-muted-foreground/60">
-          Tools provide MCP capabilities like web browsing and file access
-        </p>
+      <div className="flex flex-col gap-3">
+        <RegistrySearchBar kind="tool" onInstalled={fetchTools} />
+        <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
+          <p className="text-xs text-muted-foreground">No tools configured</p>
+          <p className="text-[10px] text-muted-foreground/60">
+            Search the registry above to discover and install tools
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-2">
+      {/* Registry search */}
+      <RegistrySearchBar kind="tool" onInstalled={fetchTools} />
+
       {tools.map((tool) => {
         const isEnabled = tool.enabled !== false;
         return (

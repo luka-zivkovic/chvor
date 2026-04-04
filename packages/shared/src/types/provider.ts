@@ -117,6 +117,33 @@ export interface ImageGenProviderDef {
   models: ImageGenModelDef[];
 }
 
+// ── OAuth Provider Definitions ──────────────────────────────────
+
+export type OAuthMethod = "direct" | "composio";
+
+export interface OAuthProviderDef {
+  id: string;
+  name: string;
+  icon: string;
+  method: OAuthMethod;
+  category: "social" | "productivity" | "life" | "developer";
+  description: string;
+  /** Composio toolkit slug (only for method: "composio") */
+  composioToolkit?: string;
+  /** Credential type for storing the user's OAuth app credentials (only for method: "direct") */
+  setupCredentialType?: string;
+}
+
+export interface OAuthConnection {
+  id: string;
+  platform: string;
+  method: OAuthMethod;
+  status: "active" | "pending" | "failed" | "expired";
+  connectedAt: string;
+  /** Credential ID for direct OAuth connections */
+  credentialId?: string;
+}
+
 export interface MediaTypeConfig {
   enabled: boolean;
   maxSizeBytes: number;

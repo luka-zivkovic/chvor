@@ -3,6 +3,7 @@ import {
   LLM_PROVIDERS,
   EMBEDDING_PROVIDERS,
   INTEGRATION_PROVIDERS,
+  OAUTH_PROVIDERS,
 } from "../lib/provider-registry.ts";
 import { fetchModelsForProvider, clearModelCache } from "../lib/model-fetcher.ts";
 
@@ -14,6 +15,7 @@ providers.get("/", (c) => {
       llm: LLM_PROVIDERS,
       embedding: EMBEDDING_PROVIDERS,
       integration: INTEGRATION_PROVIDERS,
+      oauth: OAUTH_PROVIDERS,
     },
   });
 });
