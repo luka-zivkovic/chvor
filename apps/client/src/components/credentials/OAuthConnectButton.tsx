@@ -17,7 +17,10 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
   const [status, setStatus] = useState<Status>(provider.connected ? "success" : "idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const popupRef = useRef<Window | null>(null);
+  const statusRef = useRef<Status>(status);
+  statusRef.current = status;
 
   // Listen for postMessage from the OAuth callback popup
   useEffect(() => {
@@ -38,6 +41,7 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
     return () => {
       window.removeEventListener("message", handler);
       if (pollRef.current) clearInterval(pollRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, [onConnected]);
 
@@ -58,7 +62,7 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
         if (popup && popup.closed) {
           clearInterval(pollRef.current);
           // Give a moment for the callback to process, then refresh state
-          setTimeout(async () => {
+          timeoutRef.current = setTimeout(async () => {
             await useCredentialStore.getState().fetchOAuthState();
             const state = useCredentialStore.getState();
             const conn = state.oauthConnections.find(
@@ -67,7 +71,7 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
             if (conn) {
               setStatus("success");
               onConnected?.();
-            } else if (status === "polling") {
+            } else if (statusRef.current === "polling") {
               // Still polling — user may have closed without completing
               setStatus("idle");
             }
@@ -84,7 +88,7 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
         setErrorMsg(error.message ?? String(err));
       }
     }
-  }, [provider.id, onConnected, onSetupRequired, status]);
+  }, [provider.id, onConnected, onSetupRequired]);
 
   const handleDisconnect = useCallback(async () => {
     const connections = useCredentialStore.getState().oauthConnections;

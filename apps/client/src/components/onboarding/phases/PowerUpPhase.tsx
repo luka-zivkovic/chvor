@@ -57,7 +57,7 @@ export function PowerUpPhase({ direction, onBack, onNext }: Props) {
           <motion.div variants={staggerItem}>
             <AddCredentialDialog
               initialCredType={setupCredType}
-              onClose={() => { setSetupCredType(null); fetchCredentials(); }}
+              onClose={() => { setSetupCredType(null); fetchCredentials(); fetchOAuthState(); }}
             />
           </motion.div>
         ) : (

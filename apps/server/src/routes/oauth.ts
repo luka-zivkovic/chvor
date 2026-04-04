@@ -29,7 +29,7 @@ import type { OAuthConnection, OAuthMethod } from "@chvor/shared";
 const oauth = new Hono();
 
 const PORT = Number(process.env.PORT ?? 9147);
-const CALLBACK_URL = `http://localhost:${PORT}/api/oauth/callback`;
+const CALLBACK_URL = process.env.OAUTH_CALLBACK_URL ?? `http://localhost:${PORT}/api/oauth/callback`;
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -335,7 +335,12 @@ oauth.post("/refresh/:credentialId", async (c) => {
 
 // ── Callback HTML ────────────────────────────────────────────────
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 function callbackHtml(success: boolean, message: string): string {
+  const safeMessage = escapeHtml(message);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -361,13 +366,13 @@ function callbackHtml(success: boolean, message: string): string {
 <body>
   <div class="card">
     <div class="icon">${success ? "&#10003;" : "&#10007;"}</div>
-    <h1>${message}</h1>
+    <h1>${safeMessage}</h1>
     <p>${success ? "You can close this tab and return to Chvor." : "Please try again in Chvor."}</p>
   </div>
   <script>
     // Notify the opener window that OAuth is complete
     if (window.opener) {
-      window.opener.postMessage({ type: "chvor-oauth-callback", success: ${success} }, "*");
+      window.opener.postMessage({ type: "chvor-oauth-callback", success: ${success} }, window.location.origin);
     }
   </script>
 </body>
