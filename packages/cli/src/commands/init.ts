@@ -17,6 +17,7 @@ import {
   resolveTemplate,
   resolveRegistryTemplate,
   listBundledTemplates,
+  fetchRegistryIndex,
 } from "../lib/template-loader.js";
 import { provision } from "../lib/template-provisioner.js";
 import type { TemplateManifest, TemplateCredentialDef } from "../types/template.js";
@@ -32,22 +33,55 @@ interface InitOptions {
   from?: string;
 }
 
+async function pickRegistryTemplate(): Promise<{ path: string; manifest: TemplateManifest }> {
+  console.log("\n  Fetching templates from registry...");
+  const index = await fetchRegistryIndex();
+  const templates = index.entries.filter((e) => e.kind === "template");
+
+  if (templates.length === 0) {
+    console.log("  No templates found in registry.");
+    return pickTemplate();
+  }
+
+  const choice = await select({
+    message: "Choose a registry template:",
+    choices: [
+      ...templates.map((t) => ({
+        name: `${t.name ?? t.id} — ${t.description ?? ""}`,
+        value: t.id,
+      })),
+      { name: "← Back to bundled templates", value: "__back__" },
+    ],
+  });
+
+  if (choice === "__back__") return pickTemplate();
+
+  console.log(`  Downloading template "${choice}"...`);
+  return resolveRegistryTemplate(choice, index);
+}
+
 async function pickTemplate(): Promise<{ path: string; manifest: TemplateManifest }> {
   const bundled = listBundledTemplates();
 
-  if (bundled.length === 0) {
-    throw new Error(
-      "No bundled templates found. Use --template <path> or --from <path> to specify a template directory."
-    );
+  const choices: Array<{ name: string; value: string }> = bundled.map((t) => ({
+    name: `${t.name} — ${t.description}`,
+    value: t.id,
+  }));
+
+  choices.push({ name: "── Browse community registry ──", value: "__registry__" });
+
+  if (choices.length === 1) {
+    // Only the registry option — no bundled templates
+    console.log("  No bundled templates found. Checking registry...");
+    return pickRegistryTemplate();
   }
 
   const choice = await select({
     message: "Choose a template:",
-    choices: bundled.map((t) => ({
-      name: `${t.name} — ${t.description}`,
-      value: t.id,
-    })),
+    choices,
   });
+
+  if (choice === "__registry__") return pickRegistryTemplate();
 
   return resolveTemplate(choice);
 }

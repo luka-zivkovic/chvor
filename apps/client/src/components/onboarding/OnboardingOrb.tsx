@@ -12,7 +12,7 @@ interface Props {
 }
 
 export function OnboardingOrb({ evolution, personalityColor, launching }: Props) {
-  const level = Math.min(Math.max(evolution, 0), 5);
+  const level = Math.min(Math.max(evolution, 0), ORB_EVOLUTIONS.length - 1);
   const config = ORB_EVOLUTIONS[level];
   const color = personalityColor ?? config.color;
 

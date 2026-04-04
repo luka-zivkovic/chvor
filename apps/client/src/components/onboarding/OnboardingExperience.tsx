@@ -1,17 +1,23 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import { usePersonaStore } from "@/stores/persona-store";
 import { PERSONALITY_PRESETS } from "@/lib/personality-presets";
 import type { PersonalityTag } from "@/lib/personality-presets";
+import type { TemplateManifest } from "@chvor/shared";
+import { api } from "@/lib/api";
 import { OnboardingOrb } from "./OnboardingOrb";
 import { WelcomePhase } from "./phases/WelcomePhase";
+import { TemplatePhase } from "./phases/TemplatePhase";
 import { BrainPhase } from "./phases/BrainPhase";
 import { PersonalityPhase } from "./phases/PersonalityPhase";
 import { PowerUpPhase } from "./phases/PowerUpPhase";
 import { VoicePhase } from "./phases/VoicePhase";
 import { LaunchPhase } from "./phases/LaunchPhase";
 import { PERSONALITY_COLORS } from "./onboarding-variants";
+
+// Phase IDs for dynamic sequencing
+type PhaseId = "intro" | "welcome" | "template" | "brain" | "personality" | "powerup" | "voice" | "launch";
 
 interface Props {
   onComplete: () => void;
@@ -20,8 +26,8 @@ interface Props {
 export function OnboardingExperience({ onComplete }: Props) {
   const { updatePersona } = usePersonaStore();
 
-  // Phase state
-  const [phase, setPhase] = useState(0); // 0 = intro, 1-6 = phases
+  // Phase state — now tracks PhaseId instead of raw index
+  const [currentPhase, setCurrentPhase] = useState<PhaseId>("intro");
   const [direction, setDirection] = useState(1);
   const [launching, setLaunching] = useState(false);
   const launchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -40,7 +46,10 @@ export function OnboardingExperience({ onComplete }: Props) {
   );
   const [language, setLanguage] = useState("English");
 
-  // Phase 3: Personality
+  // Phase 2: Template selection
+  const [selectedTemplate, setSelectedTemplate] = useState<{ id: string; manifest: TemplateManifest } | null>(null);
+
+  // Phase 4: Personality
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [tagFilter, setTagFilter] = useState<PersonalityTag | null>(null);
   const [customProfile, setCustomProfile] = useState("");
@@ -48,9 +57,22 @@ export function OnboardingExperience({ onComplete }: Props) {
   const [aiName, setAiName] = useState("Chvor");
   const [userNickname, setUserNickname] = useState("");
 
+  // Dynamic phase sequence — skip personality if template defines persona
+  const phaseSequence = useMemo<PhaseId[]>(() => {
+    const phases: PhaseId[] = ["intro", "welcome", "template", "brain"];
+    if (!selectedTemplate?.manifest.persona) {
+      phases.push("personality");
+    }
+    phases.push("powerup", "voice", "launch");
+    return phases;
+  }, [selectedTemplate]);
+
+  const phaseIndex = phaseSequence.indexOf(currentPhase);
+
   // Derive personality color for orb
   const selectedPresetObj = PERSONALITY_PRESETS.find((p) => p.id === selectedPreset);
-  const personalityColor = phase >= 3
+  const personalityPhaseIdx = phaseSequence.indexOf("personality");
+  const personalityColor = (personalityPhaseIdx !== -1 && phaseIndex >= personalityPhaseIdx)
     ? (showCustom && customProfile.trim()
         ? PERSONALITY_COLORS.custom
         : selectedPresetObj
@@ -60,21 +82,33 @@ export function OnboardingExperience({ onComplete }: Props) {
 
   // Auto-advance from intro
   useEffect(() => {
-    if (phase === 0) {
+    if (currentPhase === "intro") {
       const timer = setTimeout(() => {
         setDirection(1);
-        setPhase(1);
+        setCurrentPhase("welcome");
       }, 1800);
       return () => clearTimeout(timer);
     }
-  }, [phase]);
+  }, [currentPhase]);
 
-  const goTo = useCallback((target: number) => {
-    setPhase((prev) => {
-      setDirection(target > prev ? 1 : -1);
+  const goTo = useCallback((target: PhaseId) => {
+    setCurrentPhase((prev) => {
+      const prevIdx = phaseSequence.indexOf(prev);
+      const targetIdx = phaseSequence.indexOf(target);
+      setDirection(targetIdx > prevIdx ? 1 : -1);
       return target;
     });
-  }, []);
+  }, [phaseSequence]);
+
+  const goNext = useCallback(() => {
+    const idx = phaseSequence.indexOf(currentPhase);
+    if (idx < phaseSequence.length - 1) goTo(phaseSequence[idx + 1]);
+  }, [currentPhase, phaseSequence, goTo]);
+
+  const goBack = useCallback(() => {
+    const idx = phaseSequence.indexOf(currentPhase);
+    if (idx > 0) goTo(phaseSequence[idx - 1]);
+  }, [currentPhase, phaseSequence, goTo]);
 
   const resolvedProfile = showCustom
     ? customProfile
@@ -83,19 +117,28 @@ export function OnboardingExperience({ onComplete }: Props) {
   const handleLaunch = useCallback(async () => {
     setLaunching(true);
     try {
+      // If a template was selected, install it first
+      if (selectedTemplate) {
+        try {
+          await api.registry.install(selectedTemplate.id, "template");
+        } catch {
+          toast.error("Template installation failed — launching without it");
+        }
+      }
+
       await updatePersona({
-        profile: resolvedProfile,
+        profile: selectedTemplate?.manifest.persona?.profile ?? resolvedProfile,
         onboarded: true,
         name: name.trim() || undefined,
         timezone,
         language,
-        aiName: aiName.trim() || undefined,
+        aiName: (selectedTemplate?.manifest.persona?.aiName ?? aiName.trim()) || undefined,
         userNickname: userNickname.trim() || undefined,
-        personalityPresetId: selectedPreset ?? undefined,
-        tone: selectedPresetObj?.tone ?? undefined,
-        boundaries: selectedPresetObj?.boundaries ?? undefined,
-        communicationStyle: selectedPresetObj?.communicationStyle ?? undefined,
-        exampleResponses: selectedPresetObj?.exampleResponses ?? undefined,
+        personalityPresetId: selectedTemplate ? undefined : selectedPreset ?? undefined,
+        tone: selectedTemplate?.manifest.persona?.tone ?? selectedPresetObj?.tone ?? undefined,
+        boundaries: selectedTemplate?.manifest.persona?.boundaries ?? selectedPresetObj?.boundaries ?? undefined,
+        communicationStyle: selectedTemplate?.manifest.persona?.communicationStyle ?? selectedPresetObj?.communicationStyle ?? undefined,
+        exampleResponses: selectedTemplate?.manifest.persona?.exampleResponses ?? selectedPresetObj?.exampleResponses ?? undefined,
       });
       // Wait for launch burst animation to complete
       launchTimerRef.current = setTimeout(() => onComplete(), 800);
@@ -105,11 +148,16 @@ export function OnboardingExperience({ onComplete }: Props) {
     }
   }, [
     updatePersona, resolvedProfile, name, timezone, language,
-    aiName, userNickname, selectedPreset, selectedPresetObj, onComplete,
+    aiName, userNickname, selectedPreset, selectedPresetObj,
+    selectedTemplate, onComplete,
   ]);
 
-  // Compute orb evolution level
-  const orbEvolution = phase;
+  // Compute orb evolution level — maps sequence position to 0-based index
+  const orbEvolution = phaseIndex;
+
+  // For the launch phase orb position, check if we're on the last phase
+  const isLaunch = currentPhase === "launch";
+  const isIntro = currentPhase === "intro";
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center bg-background overflow-hidden">
@@ -118,9 +166,9 @@ export function OnboardingExperience({ onComplete }: Props) {
         className="absolute inset-0 pointer-events-none"
         animate={{
           background: `radial-gradient(ellipse at 50% 30%, ${
-            phase <= 1
+            phaseIndex <= 1
               ? "oklch(0.19 0.005 250 / 0.4)"
-              : phase <= 3
+              : phaseIndex <= 3
                 ? "oklch(0.20 0.01 250 / 0.5)"
                 : "oklch(0.21 0.015 250 / 0.6)"
           } 0%, oklch(0.17 0 0) 60%)`,
@@ -133,7 +181,7 @@ export function OnboardingExperience({ onComplete }: Props) {
         className="relative z-10 flex items-center justify-center"
         style={{ marginTop: "10vh" }}
         animate={{
-          marginTop: phase === 0 ? "28vh" : phase === 6 ? "8vh" : "10vh",
+          marginTop: isIntro ? "28vh" : isLaunch ? "8vh" : "10vh",
         }}
         transition={{ type: "spring", stiffness: 80, damping: 20 }}
       >
@@ -146,7 +194,7 @@ export function OnboardingExperience({ onComplete }: Props) {
 
       {/* Phase 0: Intro — wordmark */}
       <AnimatePresence>
-        {phase === 0 && (
+        {isIntro && (
           <motion.div
             key="intro-wordmark"
             className="relative z-10 mt-8"
@@ -165,7 +213,7 @@ export function OnboardingExperience({ onComplete }: Props) {
       {/* Phase content panel */}
       <div className="relative z-10 mt-6 w-full max-w-2xl px-4 sm:px-6">
         <AnimatePresence mode="wait" custom={direction}>
-          {phase === 1 && (
+          {currentPhase === "welcome" && (
             <WelcomePhase
               name={name}
               timezone={timezone}
@@ -174,17 +222,32 @@ export function OnboardingExperience({ onComplete }: Props) {
               onChangeName={setName}
               onChangeTimezone={setTimezone}
               onChangeLanguage={setLanguage}
-              onNext={() => goTo(2)}
+              onNext={goNext}
             />
           )}
-          {phase === 2 && (
+          {currentPhase === "template" && (
+            <TemplatePhase
+              direction={direction}
+              onBack={goBack}
+              onSkip={goNext}
+              onSelectTemplate={(id, manifest) => {
+                setSelectedTemplate({ id, manifest });
+                // If template has an AI name, use it
+                if (manifest.persona?.aiName) {
+                  setAiName(manifest.persona.aiName);
+                }
+                goNext();
+              }}
+            />
+          )}
+          {currentPhase === "brain" && (
             <BrainPhase
               direction={direction}
-              onBack={() => goTo(1)}
-              onNext={() => goTo(3)}
+              onBack={goBack}
+              onNext={goNext}
             />
           )}
-          {phase === 3 && (
+          {currentPhase === "personality" && (
             <PersonalityPhase
               direction={direction}
               selectedPreset={selectedPreset}
@@ -200,30 +263,30 @@ export function OnboardingExperience({ onComplete }: Props) {
               onSetShowCustom={setShowCustom}
               onSetAiName={setAiName}
               onSetUserNickname={setUserNickname}
-              onBack={() => goTo(2)}
-              onNext={() => goTo(4)}
+              onBack={goBack}
+              onNext={goNext}
             />
           )}
-          {phase === 4 && (
+          {currentPhase === "powerup" && (
             <PowerUpPhase
               direction={direction}
-              onBack={() => goTo(3)}
-              onNext={() => goTo(5)}
+              onBack={goBack}
+              onNext={goNext}
             />
           )}
-          {phase === 5 && (
+          {currentPhase === "voice" && (
             <VoicePhase
               direction={direction}
-              onBack={() => goTo(4)}
-              onNext={() => goTo(6)}
+              onBack={goBack}
+              onNext={goNext}
             />
           )}
-          {phase === 6 && (
+          {currentPhase === "launch" && (
             <LaunchPhase
               direction={direction}
-              aiName={aiName}
+              aiName={selectedTemplate?.manifest.persona?.aiName ?? aiName}
               userName={name}
-              onBack={() => goTo(5)}
+              onBack={goBack}
               onLaunch={handleLaunch}
             />
           )}

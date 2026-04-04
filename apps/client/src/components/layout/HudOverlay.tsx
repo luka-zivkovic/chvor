@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "../../stores/app-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useActivityStore } from "../../stores/activity-store";
+import { useRegistryStore } from "../../stores/registry-store";
 import { TokenCounter } from "./TokenCounter";
 import type { LayoutMode } from "../../stores/ui-store";
 
@@ -138,6 +139,28 @@ export function TopBar({ layoutMode }: { layoutMode?: LayoutMode }) {
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => {
+            const store = useRegistryStore.getState();
+            const ui = useUIStore.getState();
+            store.setKindFilter("template");
+            if (ui.activePanel === "registry") {
+              // Already open — just re-search with new filter
+              store.search(undefined, undefined, "template");
+            } else {
+              togglePanel("registry");
+            }
+          }}
+          className="flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
+          title="Templates"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <path d="M17.5 14v7M14 17.5h7" />
+          </svg>
         </button>
         <button
           onClick={() => useUIStore.getState().openSettings()}
