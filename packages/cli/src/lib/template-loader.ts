@@ -146,6 +146,29 @@ export function getTemplateToolsDir(templatePath: string): string | null {
   return existsSync(dir) ? dir : null;
 }
 
+export interface RegistryIndexEntry {
+  id: string;
+  kind: string;
+  name?: string;
+  description?: string;
+  includes?: string[];
+}
+
+/** Fetch the registry index. Reusable by both resolveRegistryTemplate and interactive pickers. */
+export async function fetchRegistryIndex(): Promise<{ entries: RegistryIndexEntry[] }> {
+  const registryUrl = process.env.CHVOR_REGISTRY_URL || DEFAULT_REGISTRY_URL;
+  assertValidRegistryUrl(registryUrl);
+
+  const indexRes = await fetch(`${registryUrl}/index.json`, {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!indexRes.ok) {
+    throw new Error(`Failed to fetch registry index (${indexRes.status})`);
+  }
+
+  return (await indexRes.json()) as { entries: RegistryIndexEntry[] };
+}
+
 /**
  * Resolve a template from the community registry.
  * Fetches the template.yaml and any included skills/tools into a temp directory.
@@ -157,17 +180,7 @@ export async function resolveRegistryTemplate(
   const registryUrl = process.env.CHVOR_REGISTRY_URL || DEFAULT_REGISTRY_URL;
   assertValidRegistryUrl(registryUrl);
 
-  // Fetch registry index
-  const indexRes = await fetch(`${registryUrl}/index.json`, {
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-  if (!indexRes.ok) {
-    throw new Error(`Failed to fetch registry index (${indexRes.status})`);
-  }
-
-  const index = (await indexRes.json()) as {
-    entries: Array<{ id: string; kind: string; includes?: string[] }>;
-  };
+  const index = await fetchRegistryIndex();
   const entry = index.entries.find((e) => e.id === id && e.kind === "template");
   if (!entry) {
     throw new Error(
