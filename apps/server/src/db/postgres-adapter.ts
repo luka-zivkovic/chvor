@@ -257,7 +257,11 @@ export async function createPostgresAdapter(): Promise<DbAdapter> {
     },
 
     close(): void {
-      sendToWorker(worker, mainPort, { type: "close" });
+      try {
+        sendToWorker(worker, mainPort, { type: "close" });
+      } catch {
+        // Timeout or worker already dead — proceed to terminate
+      }
       worker.terminate();
     },
   };

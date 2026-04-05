@@ -51,29 +51,86 @@ export interface DbAdapter {
 
 /**
  * Converts SQLite-style `?` placeholders to PostgreSQL-style `$1, $2, ...`
- * Handles quoted strings and avoids rewriting `?` inside them.
+ * Skips `?` inside single-quoted strings, double-quoted identifiers,
+ * and SQL comments (-- line comments and /* block comments *\/).
  */
 export function sqliteToPostgresParams(sql: string): string {
   let idx = 0;
-  let inSingleQuote = false;
   let result = "";
+  const len = sql.length;
 
-  for (let i = 0; i < sql.length; i++) {
+  for (let i = 0; i < len; i++) {
     const ch = sql[i];
+    const next = sql[i + 1];
+
+    // Single-quoted string literal
     if (ch === "'") {
-      if (inSingleQuote) {
-        if (sql[i + 1] === "'") {
-          // Escaped quote ('') — emit both and skip next
+      let j = i + 1;
+      result += "'";
+      while (j < len) {
+        if (sql[j] === "'" && sql[j + 1] === "'") {
           result += "''";
-          i++;
-          continue;
+          j += 2;
+        } else if (sql[j] === "'") {
+          result += "'";
+          j++;
+          break;
+        } else {
+          result += sql[j];
+          j++;
         }
-        inSingleQuote = false;
-      } else {
-        inSingleQuote = true;
       }
-      result += ch;
-    } else if (ch === "?" && !inSingleQuote) {
+      i = j - 1;
+      continue;
+    }
+
+    // Double-quoted identifier
+    if (ch === '"') {
+      let j = i + 1;
+      result += '"';
+      while (j < len) {
+        if (sql[j] === '"' && sql[j + 1] === '"') {
+          result += '""';
+          j += 2;
+        } else if (sql[j] === '"') {
+          result += '"';
+          j++;
+          break;
+        } else {
+          result += sql[j];
+          j++;
+        }
+      }
+      i = j - 1;
+      continue;
+    }
+
+    // Line comment: -- ...
+    if (ch === "-" && next === "-") {
+      const eol = sql.indexOf("\n", i);
+      if (eol === -1) {
+        result += sql.slice(i);
+        break;
+      }
+      result += sql.slice(i, eol);
+      i = eol - 1;
+      continue;
+    }
+
+    // Block comment: /* ... */
+    if (ch === "/" && next === "*") {
+      const end = sql.indexOf("*/", i + 2);
+      if (end === -1) {
+        result += sql.slice(i);
+        break;
+      }
+      result += sql.slice(i, end + 2);
+      i = end + 1;
+      continue;
+    }
+
+    // Placeholder rewriting
+    if (ch === "?") {
       idx++;
       result += `$${idx}`;
     } else {
@@ -113,6 +170,15 @@ function findValuesClauseEnd(sql: string): number {
   return -1;
 }
 
+/** Known primary keys by table name — used by INSERT OR REPLACE rewriting. */
+const KNOWN_PKS: Record<string, string> = {
+  credentials: "id", config: "key", sessions: "id", memories: "id",
+  messages: "id", schedules: "id", schedule_runs: "id", workspaces: "id",
+  memory_nodes: "id", memory_edges: "id", memory_access_log: "id",
+  memory_node_vec: "id", memory_vec: "id", knowledge_resources: "id",
+  daemon_tasks: "id", _chvor_meta: "key",
+};
+
 /**
  * Rewrites common SQLite SQL idioms to PostgreSQL equivalents.
  * Applied transparently by the PostgreSQL adapter.
@@ -127,7 +193,11 @@ export function rewriteSqlForPostgres(sql: string): string {
     const colMatch = result.match(/INSERT\s+INTO\s+\w+\s*\(([^)]+)\)/i);
     if (colMatch) {
       const cols = colMatch[1].split(",").map(c => c.trim());
-      const pk = cols[0]; // first column is always the PK in our schema
+      // Resolve PK: extract table name → look up known PK, fall back to first column.
+      // All tables in our schema use the first column as PK, but the map provides safety.
+      const tableMatch = result.match(/INSERT\s+INTO\s+(\w+)/i);
+      const tableName = tableMatch?.[1];
+      const pk = (tableName && KNOWN_PKS[tableName]) || cols[0];
       const updateCols = cols.slice(1);
       const updateSet = updateCols.map(c => `${c} = EXCLUDED.${c}`).join(", ");
       const valuesEnd = findValuesClauseEnd(result);

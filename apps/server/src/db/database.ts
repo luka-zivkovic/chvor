@@ -238,7 +238,7 @@ function runMigrations(db: DbAdapter): void {
   if (currentVersion < 2) {
     // Add embedding column to memories
     try {
-      db.exec("ALTER TABLE memories ADD COLUMN embedding BLOB");
+      db.exec(`ALTER TABLE memories ADD COLUMN embedding ${db.driver === "postgres" ? "bytea" : "BLOB"}`);
     } catch { /* already exists */ }
 
     // Create vector search table (requires sqlite-vec / pgvector)
@@ -313,12 +313,12 @@ function runMigrations(db: DbAdapter): void {
     try {
       db.exec("ALTER TABLE schedules ADD COLUMN workflow_id TEXT");
     } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.includes("duplicate column") && !e.message.includes("already exists")) throw e;
+      if (!(e instanceof Error) || (!e.message.includes("duplicate column") && !e.message.includes("already exists"))) throw e;
     }
     try {
       db.exec("ALTER TABLE schedules ADD COLUMN workflow_params TEXT");
     } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.includes("duplicate column") && !e.message.includes("already exists")) throw e;
+      if (!(e instanceof Error) || (!e.message.includes("duplicate column") && !e.message.includes("already exists"))) throw e;
     }
     db.pragma("user_version = 6");
     console.log("[db] migrated to v6: workflow_id + workflow_params on schedules");
@@ -328,7 +328,7 @@ function runMigrations(db: DbAdapter): void {
     try {
       db.exec("ALTER TABLE credentials ADD COLUMN usage_context TEXT");
     } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.includes("duplicate column") && !e.message.includes("already exists")) throw e;
+      if (!(e instanceof Error) || (!e.message.includes("duplicate column") && !e.message.includes("already exists"))) throw e;
     }
     db.pragma("user_version = 7");
     console.log("[db] migrated to v7: usage_context column on credentials");
@@ -451,7 +451,7 @@ function runMigrations(db: DbAdapter): void {
         source_channel    TEXT NOT NULL,
         source_session_id TEXT NOT NULL,
         source_message_id TEXT,
-        embedding     BLOB,
+        embedding     ${db.driver === "postgres" ? "bytea" : "BLOB"},
         created_at    TEXT NOT NULL,
         updated_at    TEXT NOT NULL
       )
