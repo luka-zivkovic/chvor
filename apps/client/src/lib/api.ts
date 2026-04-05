@@ -72,6 +72,8 @@ import type {
   MemoryStats,
   OAuthProviderDef,
   OAuthConnection,
+  TelemetryConfig,
+  UpdateTelemetryRequest,
 } from "@chvor/shared";
 
 export interface ProvidersResponse {
@@ -408,6 +410,15 @@ export const api = {
     get: () => request<RetentionConfig>("/config/retention"),
     update: (body: UpdateRetentionRequest) =>
       request<RetentionConfig>("/config/retention", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+  },
+
+  telemetry: {
+    get: () => request<TelemetryConfig>("/config/telemetry"),
+    update: (body: UpdateTelemetryRequest) =>
+      request<TelemetryConfig>("/config/telemetry", {
         method: "PATCH",
         body: JSON.stringify(body),
       }),

@@ -6,6 +6,7 @@ import { usePersonaStore } from "./stores/persona-store";
 import { useAuthStore } from "./stores/auth-store";
 import { LoginPage } from "./pages/LoginPage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { initAnalytics } from "./lib/analytics";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { authEnabled, authenticated, checkStatus } = useAuthStore();
@@ -38,7 +39,10 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    fetchPersona().then(() => setChecked(true));
+    fetchPersona().then(() => {
+      setChecked(true);
+      initAnalytics().catch(() => {});
+    });
   }, [fetchPersona]);
 
   useEffect(() => {

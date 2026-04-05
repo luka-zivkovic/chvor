@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { KnowledgeResource } from "@chvor/shared";
 import { api } from "@/lib/api";
+import { trackEvent } from "@/lib/analytics";
 
 // Track active poll timers and generation counters for cancellation
 const pollTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -51,6 +52,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     try {
       const resource = await api.knowledge.upload(file, title);
       set((s) => ({ resources: [resource, ...s.resources], uploading: false }));
+      trackEvent("feature:knowledge", { method: "upload" });
       // Start polling for status updates
       get().pollResource(resource.id);
     } catch (err) {
@@ -63,6 +65,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     try {
       const resource = await api.knowledge.ingestUrl(url, title);
       set((s) => ({ resources: [resource, ...s.resources], uploading: false }));
+      trackEvent("feature:knowledge", { method: "url" });
       get().pollResource(resource.id);
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err), uploading: false });

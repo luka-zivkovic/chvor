@@ -43,6 +43,7 @@ import { startBackupScheduler, stopBackupScheduler } from "./lib/backup-schedule
 import { initEmbedder } from "./lib/embedder.ts";
 import { backfillEmbeddings } from "./lib/embedding-backfill.ts";
 import retentionRoute from "./routes/retention.ts";
+import telemetryRoute from "./routes/telemetry.ts";
 import sessionLifecycleRoute from "./routes/session-lifecycle.ts";
 import brainConfigRoute from "./routes/brain-config.ts";
 import shellConfigRoute from "./routes/shell-config.ts";
@@ -65,7 +66,7 @@ import daemonRoute from "./routes/daemon.ts";
 import { initDocker } from "./lib/sandbox.ts";
 import { startOAuthTokenRefresh, stopOAuthTokenRefresh } from "./lib/oauth-token-refresh.ts";
 import { handlePcAgentConnection, handlePcAgentMessage, handlePcAgentClose, onPcAgentEvent, onPcFrame, shutdownPcAgents, initLocalBackend } from "./lib/pc-control.ts";
-import { getPcControlEnabled } from "./db/config-store.ts";
+import { getPcControlEnabled, ensureTelemetryDistinctId } from "./db/config-store.ts";
 import { initActivityTable } from "./db/activity-store.ts";
 import { initA2UIDb } from "./db/a2ui-store.ts";
 import a2uiRoute from "./routes/a2ui.ts";
@@ -284,6 +285,7 @@ app.route("/api/social", socialRoute);
 app.route("/api/oauth", oauthRoute);
 app.route("/api/config/sandbox", sandboxRoute);
 app.route("/api/daemon", daemonRoute);
+app.route("/api/config/telemetry", telemetryRoute);
 
 // Serve TTS audio files (no auth — ephemeral UUIDs)
 app.get("/audio/:filename", (c) => {
@@ -508,6 +510,7 @@ initEmbedder()
   .catch((err) => console.error("[embedder] init/backfill failed:", err));
 initActivityTable();
 initA2UIDb();
+ensureTelemetryDistinctId();
 const channelSenderFn = (ct: string, cid: string, text: string, tid?: string) =>
   gateway.sendToChannel(ct, cid, text, tid);
 initScheduler(wsManager, channelSenderFn).catch((err) =>

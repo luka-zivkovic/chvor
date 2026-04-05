@@ -8,6 +8,7 @@ import { usePersonaStore } from "../stores/persona-store";
 import { useEmotionStore } from "../stores/emotion-store";
 import type { GatewayClientEvent, GatewayServerEvent, MediaArtifact } from "@chvor/shared";
 import { SESSION_ID_KEY } from "../lib/constants";
+import { trackEvent } from "../lib/analytics";
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const MAX_RECONNECT_DELAY = 30_000;
@@ -123,6 +124,7 @@ export function useGateway() {
     (text: string, inputModality?: "voice", media?: MediaArtifact[]) => {
       const workspaceId = "default-constellation";
       send({ type: "chat.send", data: { text, workspaceId, inputModality, ...(media?.length ? { media } : {}) } });
+      trackEvent("message_sent");
     },
     [send]
   );

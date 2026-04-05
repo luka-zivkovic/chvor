@@ -13,8 +13,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { useTelemetryStore } from "../../stores/telemetry-store";
 
-type SettingsTab = "api-keys" | "voice" | "security" | "sessions" | "backup";
+type SettingsTab = "api-keys" | "voice" | "security" | "sessions" | "backup" | "privacy";
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "api-keys", label: "API Keys" },
@@ -22,6 +23,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: "security", label: "Security" },
   { id: "sessions", label: "Sessions" },
   { id: "backup", label: "Backup" },
+  { id: "privacy", label: "Privacy" },
 ];
 
 const RETENTION_OPTIONS = [
@@ -752,6 +754,46 @@ export function BackupContent() {
   );
 }
 
+export function PrivacyContent() {
+  const { config, loading, error, fetchConfig, updateConfig } = useTelemetryStore();
+
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
+
+  if (!config && loading) {
+    return <p className="text-xs text-muted-foreground">Loading...</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+        Anonymous Analytics
+      </h3>
+      {error && (
+        <p className="text-xs text-destructive">{error}</p>
+      )}
+      <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-0.5 rounded border-border"
+          checked={config?.enabled ?? false}
+          onChange={(e) => updateConfig({ enabled: e.target.checked })}
+        />
+        <div>
+          <span className="text-foreground">
+            Send anonymous usage data to help improve Chvor
+          </span>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            No personal data or message content is ever collected. Only feature
+            usage and session metrics are tracked. You can opt out at any time.
+          </p>
+        </div>
+      </label>
+    </div>
+  );
+}
+
 export function SettingsPanel() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("api-keys");
 
@@ -782,6 +824,7 @@ export function SettingsPanel() {
         {activeTab === "security" && <SecurityContent />}
         {activeTab === "sessions" && <SessionsContent />}
         {activeTab === "backup" && <BackupContent />}
+        {activeTab === "privacy" && <PrivacyContent />}
       </div>
     </div>
   );

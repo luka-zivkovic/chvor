@@ -35,7 +35,10 @@ import type {
   MediaModelConfig,
   MediaPipelineConfig,
   MediaTypeConfig,
+  TelemetryConfig,
+  UpdateTelemetryRequest,
 } from "@chvor/shared";
+import crypto from "node:crypto";
 import { getDb } from "./database.ts";
 import os from "node:os";
 
@@ -857,4 +860,27 @@ export function updateDaemonConfig(updates: UpdateDaemonConfigRequest): DaemonCo
   if (updates.wakeOnWebhook !== undefined) current.wakeOnWebhook = updates.wakeOnWebhook;
   setConfig("daemon.config", JSON.stringify(current));
   return current;
+}
+
+// ── Telemetry (anonymous analytics) ───────────────────────────────
+
+/** Call once at server startup to ensure the anonymous distinct ID exists. */
+export function ensureTelemetryDistinctId(): void {
+  if (!getConfig("telemetry.distinctId")) {
+    setConfig("telemetry.distinctId", crypto.randomUUID());
+  }
+}
+
+export function getTelemetryConfig(): TelemetryConfig {
+  return {
+    enabled: (getConfig("telemetry.enabled") ?? "false") === "true",
+    distinctId: getConfig("telemetry.distinctId") ?? "unknown",
+  };
+}
+
+export function updateTelemetryConfig(updates: UpdateTelemetryRequest): TelemetryConfig {
+  if (updates.enabled !== undefined) {
+    setConfig("telemetry.enabled", String(updates.enabled));
+  }
+  return getTelemetryConfig();
 }
