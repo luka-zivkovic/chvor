@@ -25,6 +25,7 @@ import { useA2UIStore } from "./a2ui-store";
 import { useUIStore } from "./ui-store";
 import { SESSION_ID_KEY } from "../lib/constants";
 import { api } from "../lib/api";
+import { trackEvent } from "../lib/analytics";
 
 // Streaming chunk buffer — avoids O(n²) string concat in immutable state
 let chunkBuffer: string[] = [];
@@ -335,6 +336,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       case "chat.modelInfo":
         // Model info (especially useful when a fallback was used)
         set({ pendingModelInfo: event.data });
+        trackEvent("model_used", {
+          provider_id: event.data.providerId,
+          was_fallback: event.data.wasFallback ?? false,
+        });
         break;
       case "chat.streamReset":
         // New LLM round after tool execution — clear stale text, keep tool indicators

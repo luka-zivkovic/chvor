@@ -1,5 +1,6 @@
 // apps/client/src/stores/voice-store.ts
 import { create } from "zustand";
+import { trackEvent } from "../lib/analytics";
 
 export type TtsMode = "off" | "always" | "inbound";
 
@@ -91,8 +92,10 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   setTtsMode: (mode) => set({ ttsMode: mode }),
   setRecording: (recording) => set({ recording }),
-  setTalkModeActive: (active) =>
-    set({ talkModeActive: active, talkPhase: active ? "listening" : "idle" }),
+  setTalkModeActive: (active) => {
+    set({ talkModeActive: active, talkPhase: active ? "listening" : "idle" });
+    if (active) trackEvent("feature:voice", { mode: "input" });
+  },
   setTalkPhase: (phase) => set({ talkPhase: phase }),
 
   audioUrls: {},
