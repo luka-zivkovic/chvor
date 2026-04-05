@@ -1,6 +1,6 @@
 {
   "name": "@chvor/pc-agent",
-  "version": "0.0.1",
+  "version": "0.1.19",
   "description": "Chvor PC Agent — library for screen capture, input control, and accessibility tree + standalone CLI for remote PC control",
   "type": "module",
   "exports": {
