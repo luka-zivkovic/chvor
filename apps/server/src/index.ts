@@ -68,6 +68,7 @@ import { handlePcAgentConnection, handlePcAgentMessage, handlePcAgentClose, onPc
 import { getPcControlEnabled } from "./db/config-store.ts";
 import { initActivityTable } from "./db/activity-store.ts";
 import { initA2UIDb } from "./db/a2ui-store.ts";
+import { initDb, closeDb } from "./db/database.ts";
 import a2uiRoute from "./routes/a2ui.ts";
 import { readAudio, startAudioCleanup, stopAudioCleanup } from "./lib/voice/audio-store.ts";
 import { getMediaDir, storeMediaFromBuffer, startMediaCleanup, stopMediaCleanup } from "./lib/media-store.ts";
@@ -456,6 +457,9 @@ if (!hasLLM) {
   console.warn("[chvor] No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY in .env");
 }
 
+// Initialize database adapter (required for PostgreSQL; lazy-inits for SQLite)
+await initDb();
+
 const server = serve({ fetch: app.fetch, port }, () => {
   console.log(`[chvor] server running at http://localhost:${port}`);
 });
@@ -570,6 +574,7 @@ process.on("SIGINT", async () => {
   shutdownDaemon();
   await gateway.stopAll();
   await mcpManager.shutdown();
+  closeDb();
   process.exit(0);
 });
 
@@ -593,5 +598,6 @@ process.on("SIGTERM", async () => {
   shutdownDaemon();
   await gateway.stopAll();
   await mcpManager.shutdown();
+  closeDb();
   process.exit(0);
 });
