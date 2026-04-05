@@ -1,14 +1,12 @@
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { createRequire } from "node:module";
 import { randomUUID, createHash } from "node:crypto";
-import { dirname, resolve, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  initAdapter,
+  getAdapter,
+  closeAdapter,
+  type DbAdapter,
+} from "./adapter.ts";
 
-const require = createRequire(import.meta.url);
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.CHVOR_DATA_DIR ?? resolve(__dirname, "../../data");
+// ─── Types ────────────────────────────────────────────────
 
 interface MigrationMessage {
   id: string;
@@ -20,19 +18,21 @@ interface MigrationMessage {
   actions?: unknown[];
 }
 
-function migrateJsonMessages(database: Database.Database): void {
-  const sessions = database.prepare(
+// ─── Migration helpers ────────────────────────────────────
+
+function migrateJsonMessages(adapter: DbAdapter): void {
+  const sessions = adapter.prepare(
     "SELECT id, channel_type, messages FROM sessions WHERE messages != '[]'"
   ).all() as { id: string; channel_type: string; messages: string }[];
 
   if (sessions.length === 0) return;
 
-  const insert = database.prepare(
+  const insert = adapter.prepare(
     `INSERT OR IGNORE INTO messages (id, session_id, role, content, channel_type, timestamp, execution_id, actions, token_count)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
-  const migrate = database.transaction(() => {
+  const migrate = adapter.transaction(() => {
     let count = 0;
     for (const session of sessions) {
       let msgs: MigrationMessage[];
@@ -63,30 +63,38 @@ function migrateJsonMessages(database: Database.Database): void {
   console.log(`[db] migrated ${migrated} messages from ${sessions.length} session(s)`);
 }
 
-let db: Database.Database | null = null;
-let vecAvailable = false;
+// ─── Public API ───────────────────────────────────────────
+
+let initialized = false;
 
 export function isVecAvailable(): boolean {
-  return vecAvailable;
+  return getAdapter().isVecAvailable();
 }
 
-export function getDb(): Database.Database {
-  if (db) return db;
+export function getDb(): DbAdapter {
+  return getAdapter();
+}
 
-  mkdirSync(DATA_DIR, { recursive: true });
-  db = new Database(join(DATA_DIR, "chvor.db"));
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+export function closeDb(): void {
+  closeAdapter();
+  initialized = false;
+}
 
-  // Load sqlite-vec extension for vector search
-  try {
-    const sqliteVec = require("sqlite-vec");
-    sqliteVec.load(db);
-    vecAvailable = true;
-    console.log("[db] sqlite-vec extension loaded");
-  } catch (err) {
-    console.warn("[db] sqlite-vec unavailable — falling back to recency-based memory retrieval:", (err as Error).message);
-  }
+// ─── Initialization ───────────────────────────────────────
+
+export async function initDb(): Promise<DbAdapter> {
+  if (initialized) return getAdapter();
+
+  const adapter = await initAdapter();
+  runMigrations(adapter);
+  initialized = true;
+  return adapter;
+}
+
+// ─── Schema & Migrations ─────────────────────────────────
+
+function runMigrations(db: DbAdapter): void {
+  // ── Base tables ───────────────────────────────────────
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS credentials (
@@ -182,7 +190,7 @@ export function getDb(): Database.Database {
     `CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule ON schedule_runs(schedule_id, started_at DESC)`
   );
 
-  // Migrations
+  // Migrations (column additions — ignore errors if already exist)
   try {
     db.exec(`ALTER TABLE schedules ADD COLUMN deliver_to TEXT`);
   } catch {
@@ -195,7 +203,8 @@ export function getDb(): Database.Database {
     // Column already exists
   }
 
-  // Version-based migrations
+  // ── Version-based migrations ─────────────────────────
+
   const currentVersion = (db.pragma("user_version") as { user_version: number }[])[0].user_version;
 
   if (currentVersion < 1) {
@@ -229,17 +238,26 @@ export function getDb(): Database.Database {
   if (currentVersion < 2) {
     // Add embedding column to memories
     try {
-      db.exec("ALTER TABLE memories ADD COLUMN embedding BLOB");
+      db.exec(`ALTER TABLE memories ADD COLUMN embedding ${db.driver === "postgres" ? "bytea" : "BLOB"}`);
     } catch { /* already exists */ }
 
-    // Create vector search table (requires sqlite-vec)
-    if (vecAvailable) {
-      db.exec(`
-        CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
-          id TEXT PRIMARY KEY,
-          embedding float[384]
-        )
-      `);
+    // Create vector search table (requires sqlite-vec / pgvector)
+    if (db.isVecAvailable()) {
+      if (db.driver === "postgres") {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS memory_vec (
+            id TEXT PRIMARY KEY,
+            embedding vector(384)
+          )
+        `);
+      } else {
+        db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
+            id TEXT PRIMARY KEY,
+            embedding float[384]
+          )
+        `);
+      }
     }
 
     db.pragma("user_version = 2");
@@ -295,12 +313,12 @@ export function getDb(): Database.Database {
     try {
       db.exec("ALTER TABLE schedules ADD COLUMN workflow_id TEXT");
     } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
+      if (!(e instanceof Error) || (!e.message.includes("duplicate column") && !e.message.includes("already exists"))) throw e;
     }
     try {
       db.exec("ALTER TABLE schedules ADD COLUMN workflow_params TEXT");
     } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
+      if (!(e instanceof Error) || (!e.message.includes("duplicate column") && !e.message.includes("already exists"))) throw e;
     }
     db.pragma("user_version = 6");
     console.log("[db] migrated to v6: workflow_id + workflow_params on schedules");
@@ -310,7 +328,7 @@ export function getDb(): Database.Database {
     try {
       db.exec("ALTER TABLE credentials ADD COLUMN usage_context TEXT");
     } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
+      if (!(e instanceof Error) || (!e.message.includes("duplicate column") && !e.message.includes("already exists"))) throw e;
     }
     db.pragma("user_version = 7");
     console.log("[db] migrated to v7: usage_context column on credentials");
@@ -433,7 +451,7 @@ export function getDb(): Database.Database {
         source_channel    TEXT NOT NULL,
         source_session_id TEXT NOT NULL,
         source_message_id TEXT,
-        embedding     BLOB,
+        embedding     ${db.driver === "postgres" ? "bytea" : "BLOB"},
         created_at    TEXT NOT NULL,
         updated_at    TEXT NOT NULL
       )
@@ -472,19 +490,35 @@ export function getDb(): Database.Database {
     db.exec("CREATE INDEX IF NOT EXISTS idx_access_topic ON memory_access_log(topic_hash, accessed_at DESC)");
 
     // Vector table for new memory nodes
-    if (vecAvailable) {
-      db.exec(`
-        CREATE VIRTUAL TABLE IF NOT EXISTS memory_node_vec USING vec0(
-          id TEXT PRIMARY KEY,
-          embedding float[384]
-        )
-      `);
+    if (db.isVecAvailable()) {
+      if (db.driver === "postgres") {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS memory_node_vec (
+            id TEXT PRIMARY KEY,
+            embedding vector(384)
+          )
+        `);
+      } else {
+        db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS memory_node_vec USING vec0(
+            id TEXT PRIMARY KEY,
+            embedding float[384]
+          )
+        `);
+      }
     }
 
     // Migrate existing memories to memory_nodes (if legacy table exists)
-    const hasLegacyTable = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='memories'"
-    ).get();
+    let hasLegacyTable: unknown;
+    if (db.driver === "postgres") {
+      hasLegacyTable = db.prepare(
+        "SELECT table_name AS name FROM information_schema.tables WHERE table_name = 'memories' AND table_schema = 'public'"
+      ).get();
+    } else {
+      hasLegacyTable = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='memories'"
+      ).get();
+    }
 
     if (hasLegacyTable) {
       const legacyMemories = db.prepare("SELECT * FROM memories").all() as Array<{
@@ -499,7 +533,7 @@ export function getDb(): Database.Database {
            source_channel, source_session_id, embedding, created_at, updated_at)
         VALUES (?, ?, ?, 'profile', 'user', 1.0, 0.1, 0.7, 'extracted', ?, ?, ?, ?, ?)
       `);
-      const insertVec = vecAvailable
+      const insertVec = db.isVecAvailable()
         ? db.prepare("INSERT OR IGNORE INTO memory_node_vec (id, embedding) VALUES (?, ?)")
         : null;
 
@@ -518,17 +552,24 @@ export function getDb(): Database.Database {
         }
         // Guard against crash-loop: if a previous partial migration already renamed
         // the table but user_version wasn't bumped, don't throw on re-entry.
-        const alreadyRenamed = db!.prepare(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_v1_backup'"
-        ).get();
+        let alreadyRenamed: unknown;
+        if (db.driver === "postgres") {
+          alreadyRenamed = db.prepare(
+            "SELECT table_name AS name FROM information_schema.tables WHERE table_name = 'memories_v1_backup' AND table_schema = 'public'"
+          ).get();
+        } else {
+          alreadyRenamed = db.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_v1_backup'"
+          ).get();
+        }
         if (!alreadyRenamed) {
-          db!.exec("ALTER TABLE memories RENAME TO memories_v1_backup");
+          db.exec("ALTER TABLE memories RENAME TO memories_v1_backup");
         }
       });
       migrateTx();
 
       // DROP IF EXISTS is always safe — remove guard so orphan table is cleaned up
-      // even when sqlite-vec is unavailable at this startup
+      // even when vec extension is unavailable at this startup
       try {
         db.exec("DROP TABLE IF EXISTS memory_vec");
       } catch { /* may not exist */ }
@@ -626,7 +667,7 @@ export function getDb(): Database.Database {
     db.exec("CREATE INDEX IF NOT EXISTS idx_kr_created ON knowledge_resources(created_at DESC)");
 
     // Link memory_nodes to their source resource (nullable)
-    const cols = db.prepare("PRAGMA table_info(memory_nodes)").all() as Array<{ name: string }>;
+    const cols = db.pragma("table_info(memory_nodes)") as Array<{ name: string }>;
     if (!cols.some((c) => c.name === "source_resource_id")) {
       db.exec("ALTER TABLE memory_nodes ADD COLUMN source_resource_id TEXT");
     }
@@ -676,32 +717,21 @@ export function getDb(): Database.Database {
         created_at TEXT NOT NULL,
         started_at TEXT,
         completed_at TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_daemon_tasks_status ON daemon_tasks(status, priority DESC, created_at);
+      )
     `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_daemon_tasks_status ON daemon_tasks(status, priority DESC, created_at)");
     db.pragma("user_version = 15");
     console.log("[db] migration v15 applied: daemon_tasks table for always-on daemon");
   }
 
   if (currentVersion < 16) {
-    db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_memory_nodes_category ON memory_nodes(category);
-      CREATE INDEX IF NOT EXISTS idx_memory_nodes_strength ON memory_nodes(strength);
-      CREATE INDEX IF NOT EXISTS idx_memory_nodes_created_at ON memory_nodes(created_at);
-      CREATE INDEX IF NOT EXISTS idx_memory_edges_source_target ON memory_edges(source_id, target_id);
-    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_nodes_category ON memory_nodes(category)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_nodes_strength ON memory_nodes(strength)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_nodes_created_at ON memory_nodes(created_at)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_memory_edges_source_target ON memory_edges(source_id, target_id)");
     db.pragma("user_version = 16");
     console.log("[db] migration v16 applied: memory indexes for graph & stats queries");
   }
 
-  console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
-  return db;
-}
-
-/** Close the database and clear the singleton. Used before restore overwrites the DB file. */
-export function closeDb(): void {
-  if (db) {
-    db.close();
-    db = null;
-  }
+  console.log(`[db] ${db.driver} database ready`);
 }

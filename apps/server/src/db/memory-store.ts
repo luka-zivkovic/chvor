@@ -79,6 +79,69 @@ function rowToEdge(row: EdgeRow): MemoryEdge {
   };
 }
 
+// ─── Vector helpers (sqlite-vec vs pgvector) ───────────────
+
+/**
+ * Convert a Float32Array embedding to the format expected by the current driver.
+ * - SQLite (sqlite-vec): raw Buffer of float32 bytes
+ * - PostgreSQL (pgvector): string like '[0.1,0.2,...]'
+ */
+function vecParam(vector: Float32Array): Buffer | string {
+  const db = getDb();
+  if (db.driver === "postgres") {
+    return `[${Array.from(vector).map(v => v.toFixed(10)).join(",")}]`;
+  }
+  return Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
+}
+
+/**
+ * Build a vector similarity search query. Returns { sql, params }.
+ * sqlite-vec:  WHERE v.embedding MATCH ? ... ORDER BY v.distance
+ * pgvector:    ORDER BY v.embedding <-> $N::vector ... (distance is inline)
+ *
+ * @param selectCols - columns to select (e.g. "m.*", "m.abstract")
+ * @param extraWhere - additional WHERE conditions (use ? placeholders)
+ * @param extraParams - parameters for extraWhere
+ * @param vecBuf - the embedding parameter (from vecParam())
+ * @param limit - max rows
+ */
+function buildVecSearchQuery(
+  selectCols: string,
+  extraWhere: string,
+  extraParams: unknown[],
+  vecBuf: Buffer | string,
+  limit: number,
+): { sql: string; params: unknown[] } {
+  const db = getDb();
+  if (db.driver === "postgres") {
+    // pgvector: distance is computed inline via <-> operator, no MATCH keyword.
+    // PostgreSQL allows ORDER BY alias, so we compute distance once in SELECT.
+    const wherePart = extraWhere ? `WHERE ${extraWhere}` : "";
+    const sql = `
+      SELECT ${selectCols}, (v.embedding <-> ?::vector) AS distance
+      FROM memory_node_vec v
+      JOIN memory_nodes m ON m.id = v.id
+      ${wherePart}
+      ORDER BY distance
+      LIMIT ?
+    `;
+    // Param order: vecBuf (for <->), extraParams (for WHERE), limit
+    return { sql, params: [vecBuf, ...extraParams, limit] };
+  }
+  // sqlite-vec: MATCH keyword + virtual distance column
+  const wherePart = extraWhere ? `AND ${extraWhere}` : "";
+  const sql = `
+    SELECT ${selectCols}, v.distance
+    FROM memory_node_vec v
+    JOIN memory_nodes m ON m.id = v.id
+    WHERE v.embedding MATCH ?
+      ${wherePart}
+    ORDER BY v.distance
+    LIMIT ?
+  `;
+  return { sql, params: [vecBuf, ...extraParams, limit] };
+}
+
 // ─── Vector operations ──────────────────────────────────────
 
 export async function embedAndStoreVector(id: string, content: string): Promise<void> {
@@ -86,10 +149,11 @@ export async function embedAndStoreVector(id: string, content: string): Promise<
   try {
     const db = getDb();
     const vector = await embed(content);
+    const param = vecParam(vector);
     const buf = Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
     const tx = db.transaction(() => {
       db.prepare("UPDATE memory_nodes SET embedding = ? WHERE id = ?").run(buf, id);
-      db.prepare("INSERT OR REPLACE INTO memory_node_vec (id, embedding) VALUES (?, ?)").run(id, buf);
+      db.prepare("INSERT OR REPLACE INTO memory_node_vec (id, embedding) VALUES (?, ?)").run(id, param);
     });
     tx();
   } catch (err) {
@@ -139,17 +203,12 @@ export async function getRelevantMemories(
   try {
     const db = getDb();
     const queryVector = await embed(query);
-    const buf = Buffer.from(queryVector.buffer, queryVector.byteOffset, queryVector.byteLength);
+    const vp = vecParam(queryVector);
 
-    const rows = db.prepare(`
-      SELECT m.abstract
-      FROM memory_node_vec v
-      JOIN memory_nodes m ON m.id = v.id
-      WHERE v.embedding MATCH ?
-        AND m.strength >= ?
-      ORDER BY v.distance
-      LIMIT ?
-    `).all(buf, strengthThreshold, limit) as { abstract: string }[];
+    const { sql, params } = buildVecSearchQuery(
+      "m.abstract", "m.strength >= ?", [strengthThreshold], vp, limit,
+    );
+    const rows = db.prepare(sql).all(...params) as { abstract: string }[];
 
     const results = rows.map((r) => r.abstract);
 
@@ -197,17 +256,12 @@ export async function getRelevantMemoriesWithScores(
   try {
     const db = getDb();
     const queryVector = await embed(query);
-    const buf = Buffer.from(queryVector.buffer, queryVector.byteOffset, queryVector.byteLength);
+    const vp = vecParam(queryVector);
 
-    const rows = db.prepare(`
-      SELECT m.*, v.distance
-      FROM memory_node_vec v
-      JOIN memory_nodes m ON m.id = v.id
-      WHERE v.embedding MATCH ?
-        AND m.strength >= ?
-      ORDER BY v.distance
-      LIMIT ?
-    `).all(buf, strengthThreshold, limit) as (MemoryNodeRow & { distance: number })[];
+    const { sql, params } = buildVecSearchQuery(
+      "m.*", "m.strength >= ?", [strengthThreshold], vp, limit,
+    );
+    const rows = db.prepare(sql).all(...params) as (MemoryNodeRow & { distance: number })[];
 
     const results = rows.map((r) => ({
       memory: rowToMemory(r),
@@ -263,7 +317,7 @@ export async function getRelevantMemoriesByCategoryTiers(
   try {
     const db = getDb();
     const queryVector = await embed(query);
-    const buf = Buffer.from(queryVector.buffer, queryVector.byteOffset, queryVector.byteLength);
+    const vp = vecParam(queryVector);
 
     const primaryBudget = Math.ceil(limit * 0.7);
     const seen = new Set<string>();
@@ -273,16 +327,10 @@ export async function getRelevantMemoriesByCategoryTiers(
     const perCategoryLimit = Math.ceil(primaryBudget / primaryCategories.length);
     for (const cat of primaryCategories) {
       try {
-        const rows = db.prepare(`
-          SELECT m.*, v.distance
-          FROM memory_node_vec v
-          JOIN memory_nodes m ON m.id = v.id
-          WHERE v.embedding MATCH ?
-            AND m.strength >= ?
-            AND m.category = ?
-          ORDER BY v.distance
-          LIMIT ?
-        `).all(buf, strengthThreshold, cat, perCategoryLimit) as (MemoryNodeRow & { distance: number })[];
+        const { sql: catSql, params: catParams } = buildVecSearchQuery(
+          "m.*", "m.strength >= ? AND m.category = ?", [strengthThreshold, cat], vp, perCategoryLimit,
+        );
+        const rows = db.prepare(catSql).all(...catParams) as (MemoryNodeRow & { distance: number })[];
 
         for (const r of rows) {
           if (seen.has(r.id)) continue;
@@ -300,15 +348,10 @@ export async function getRelevantMemoriesByCategoryTiers(
     const remaining = limit - results.length;
     if (remaining > 0) {
       try {
-        const rows = db.prepare(`
-          SELECT m.*, v.distance
-          FROM memory_node_vec v
-          JOIN memory_nodes m ON m.id = v.id
-          WHERE v.embedding MATCH ?
-            AND m.strength >= ?
-          ORDER BY v.distance
-          LIMIT ?
-        `).all(buf, strengthThreshold, remaining + seen.size) as (MemoryNodeRow & { distance: number })[];
+        const { sql: fbSql, params: fbParams } = buildVecSearchQuery(
+          "m.*", "m.strength >= ?", [strengthThreshold], vp, remaining + seen.size,
+        );
+        const rows = db.prepare(fbSql).all(...fbParams) as (MemoryNodeRow & { distance: number })[];
 
         for (const r of rows) {
           if (seen.has(r.id)) continue;
@@ -519,15 +562,9 @@ export async function findSimilarMemory(
     try {
       const db = getDb();
       const vector = await embed(content);
-      const buf = Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
-      const row = db.prepare(`
-        SELECT m.*, v.distance
-        FROM memory_node_vec v
-        JOIN memory_nodes m ON m.id = v.id
-        WHERE v.embedding MATCH ?
-        ORDER BY v.distance
-        LIMIT 1
-      `).get(buf) as (MemoryNodeRow & { distance: number }) | undefined;
+      const vp = vecParam(vector);
+      const { sql: simSql, params: simParams } = buildVecSearchQuery("m.*", "", [], vp, 1);
+      const row = db.prepare(simSql).get(...simParams) as (MemoryNodeRow & { distance: number }) | undefined;
 
       if (row) {
         // L2 distance → cosine similarity (valid for L2-normalized embeddings)
@@ -576,16 +613,11 @@ export async function findTopKSimilarMemories(
   try {
     const db = getDb();
     const vector = await embed(content);
-    const buf = Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
-    const rows = db.prepare(`
-      SELECT m.*, v.distance
-      FROM memory_node_vec v
-      JOIN memory_nodes m ON m.id = v.id
-      WHERE v.embedding MATCH ?
-        AND m.strength >= 0.05
-      ORDER BY v.distance
-      LIMIT ?
-    `).all(buf, k) as (MemoryNodeRow & { distance: number })[];
+    const vp = vecParam(vector);
+    const { sql: topKSql, params: topKParams } = buildVecSearchQuery(
+      "m.*", "m.strength >= 0.05", [], vp, k,
+    );
+    const rows = db.prepare(topKSql).all(...topKParams) as (MemoryNodeRow & { distance: number })[];
 
     return rows
       .map((r) => ({
