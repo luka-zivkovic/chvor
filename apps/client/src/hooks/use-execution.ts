@@ -98,7 +98,7 @@ export function useExecution() {
               setEdgeActive(`edge-tools-hub-${toolId}`, true);
             }
           } else {
-            const skillId = event.data.skillId;
+            const skillId = eventData.skillId as string | undefined;
             if (skillId) {
               setEdgeActive("edge-brain-skills-hub", true);
               setEdgeActive(`edge-skills-hub-${skillId}`, true);
