@@ -3,6 +3,7 @@
  * Shared across all channel adapters to avoid duplication.
  */
 export function splitText(text: string, maxLen: number): string[] {
+  if (maxLen <= 0) return [text];
   if (text.length <= maxLen) return [text];
   const chunks: string[] = [];
   let remaining = text;

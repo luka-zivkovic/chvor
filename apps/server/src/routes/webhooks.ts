@@ -125,10 +125,6 @@ webhooks.post("/:id/receive", async (c) => {
       break;
     }
     case "notion": {
-      // Notion verification challenge (initial setup handshake)
-      if (typeof body === "object" && body !== null && (body as Record<string, unknown>).type === "url_verification") {
-        return c.json({ challenge: (body as Record<string, unknown>).challenge });
-      }
       const notionSig = c.req.header("x-notion-signature");
       if (!notionSig || !verifyNotionSignature(sub.secret, rawBody, notionSig)) {
         return c.json({ error: "invalid signature" }, 401);

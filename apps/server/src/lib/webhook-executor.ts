@@ -50,7 +50,20 @@ export function matchesFilters(
 const rateLimits = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 10;
-const RATE_LIMIT_MAX_ENTRIES = 1000;
+const RATE_LIMIT_PRUNE_INTERVAL_MS = 5 * 60_000;
+let lastPruneTime = Date.now();
+
+function pruneRateLimits(now: number): void {
+  for (const [id, ts] of rateLimits) {
+    const active = ts.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+    if (active.length === 0) {
+      rateLimits.delete(id);
+    } else {
+      rateLimits.set(id, active);
+    }
+  }
+  lastPruneTime = now;
+}
 
 function checkRateLimit(subscriptionId: string): boolean {
   const now = Date.now();
@@ -60,16 +73,9 @@ function checkRateLimit(subscriptionId: string): boolean {
   recent.push(now);
   rateLimits.set(subscriptionId, recent);
 
-  // Prune stale entries to prevent unbounded growth
-  if (rateLimits.size > RATE_LIMIT_MAX_ENTRIES) {
-    for (const [id, ts] of rateLimits) {
-      const active = ts.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
-      if (active.length === 0) {
-        rateLimits.delete(id);
-      } else {
-        rateLimits.set(id, active);
-      }
-    }
+  // Prune stale entries periodically to prevent unbounded growth
+  if (now - lastPruneTime > RATE_LIMIT_PRUNE_INTERVAL_MS) {
+    pruneRateLimits(now);
   }
 
   return true;

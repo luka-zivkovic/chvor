@@ -64,7 +64,7 @@ channelPolicy.patch("/:channelType/policy", async (c) => {
     if (body.group?.allowlist && channelType === "whatsapp") {
       for (const entry of body.group.allowlist) {
         if (!entry.endsWith("@g.us") && !/^\d{7,15}$/.test(entry)) {
-          return c.json({ error: `Invalid WhatsApp group ID in group.allowlist: ${entry} (expected JID ending in @g.us)` }, 400);
+          return c.json({ error: `Invalid WhatsApp group ID in group.allowlist: ${entry} (expected JID ending in @g.us or numeric group ID)` }, 400);
         }
       }
     } else if (body.group?.allowlist) {
