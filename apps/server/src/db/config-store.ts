@@ -351,6 +351,7 @@ export function updateRetentionConfig(updates: UpdateRetentionRequest): Retentio
 export function getBrainConfig(): BrainConfig {
   return {
     maxToolRounds: parseInt(getConfig("brain.maxToolRounds") ?? "30", 10) || 30,
+    // Default 1: extract memories every turn for higher recall quality (was 3; reverted for responsiveness)
     memoryBatchSize: parseInt(getConfig("brain.memoryBatchSize") ?? "1", 10) || 1,
     lowTokenMode: (getConfig("brain.lowTokenMode") ?? "false") === "true",
   };

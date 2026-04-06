@@ -50,9 +50,8 @@ export function resolveEnvPlaceholders(
         );
         return "";
       }
-      // Return the first value (most credentials have a single field like apiKey)
-      const firstValue = Object.values(data)[0];
-      return firstValue ?? "";
+      // Prefer well-known field names, fall back to first value
+      return data.apiKey ?? data.token ?? data.key ?? Object.values(data)[0] ?? "";
     });
   }
 
@@ -84,9 +83,13 @@ export function resolveUrlPlaceholders(
   return url.replace(PLACEHOLDER_RE, (_match, credType: string) => {
     const data = credentialsByType.get(credType);
     if (!data) {
-      console.warn(`[credential-resolver] no credential found for type: ${credType}`);
-      return "";
+      throw new Error(`[credential-resolver] missing credential for type "${credType}" — add it in Settings > Credentials`);
     }
-    return encodeURIComponent(Object.values(data)[0] ?? "");
+    // Prefer well-known field names, fall back to first value
+    const value = data.apiKey ?? data.token ?? data.key ?? Object.values(data)[0];
+    if (!value) {
+      throw new Error(`[credential-resolver] credential "${credType}" has no usable value`);
+    }
+    return encodeURIComponent(value);
   });
 }

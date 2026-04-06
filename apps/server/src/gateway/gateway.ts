@@ -184,7 +184,7 @@ export class Gateway extends EventEmitter {
       // In multi-tab scenarios, other tabs sharing the same session will only
       // see the final chat.message (which fans out via getClientsBySessionId).
       const onChunk = (text: string) => {
-        this.emitEvent({ type: "chat.chunk", data: { content: redactSensitiveData(text) } }, targetClient);
+        this.emitEvent({ type: "chat.chunk", data: { content: redactSensitiveData(stripToolAnnotations(text)) } }, targetClient);
       };
       const onStreamReset = () => {
         this.emitEvent({ type: "chat.streamReset", data: {} }, targetClient);
@@ -203,7 +203,7 @@ export class Gateway extends EventEmitter {
         extraRounds,
         abortSignal: abortController.signal,
       });
-      responseText = stripToolAnnotations(redactSensitiveData(result.text));
+      responseText = redactSensitiveData(stripToolAnnotations(result.text));
       actions = result.actions;
       allMedia = result.media ?? [];
       totalMessages = result.totalMessages;
