@@ -61,38 +61,22 @@ function useStarterPrompts(): string[] {
   return useMemo(() => {
     if (!persona) return FALLBACK_PROMPTS;
 
-    const prompts: string[] = [];
     const name = persona.userNickname || persona.name || "";
     const tz = persona.timezone;
     const hasChannel = credentials.some((c) => CHANNEL_CRED_TYPES.has(c.type));
 
-    // Always lead with capability discovery
-    prompts.push("What can you do?");
-
-    // Personalized prompts based on what's configured
-    if (tz) {
-      prompts.push("Set up a daily morning briefing");
-    }
+    // Build all candidate prompts, take first 4
+    const candidates: string[] = ["What can you do?"];
+    if (tz) candidates.push("Set up a daily morning briefing");
     if (hasChannel) {
       const channelName = credentials.find((c) => CHANNEL_CRED_TYPES.has(c.type))?.type ?? "Telegram";
-      prompts.push(`Send me a reminder on ${channelName[0].toUpperCase() + channelName.slice(1)} in 1 hour`);
+      candidates.push(`Send me a reminder on ${channelName[0].toUpperCase() + channelName.slice(1)} in 1 hour`);
     }
-    if (schedules.length === 0) {
-      prompts.push("Create a scheduled task for me");
-    }
+    if (schedules.length === 0) candidates.push("Create a scheduled task for me");
+    candidates.push(name ? "Remember that I prefer concise answers" : "Get to know me");
+    candidates.push("Help me brainstorm", "Search the web for...");
 
-    // Memory demonstration
-    if (name) {
-      prompts.push("Remember that I prefer concise answers");
-    } else {
-      prompts.push("Get to know me");
-    }
-
-    // Fill remaining slots
-    if (prompts.length < 4) prompts.push("Help me brainstorm");
-    if (prompts.length < 4) prompts.push("Search the web for...");
-
-    return prompts.slice(0, 4);
+    return candidates.slice(0, 4);
   }, [persona, credentials, schedules]);
 }
 
@@ -261,15 +245,17 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
     }
     userScrolledUp.current = false;
     setShowScrollButton(false);
+    // Generate a single ID used both locally and sent to the server for consistency
+    const messageId = crypto.randomUUID();
     useAppStore.getState().addMessage({
-      id: crypto.randomUUID(),
+      id: messageId,
       role: "user",
       content: text,
       channelType: "web",
       timestamp: new Date().toISOString(),
       ...(media?.length ? { media } : {}),
     });
-    sendChat(text, inputModality, media);
+    sendChat(text, inputModality, media, messageId);
   };
 
   const lastIsUser = messages.length > 0 && messages[messages.length - 1].role === "user";

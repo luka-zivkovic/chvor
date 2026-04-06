@@ -48,7 +48,7 @@ export interface UpdateWorkspaceRequest {
 
 // Gateway WebSocket events (client <-> server)
 export type GatewayClientEvent =
-  | { type: "chat.send"; data: { text: string; workspaceId: string; inputModality?: "voice"; media?: import("./message.js").MediaArtifact[] } }
+  | { type: "chat.send"; data: { text: string; workspaceId: string; inputModality?: "voice"; media?: import("./message.js").MediaArtifact[]; messageId?: string } }
   | { type: "chat.stop"; data: Record<string, never> }
   | { type: "canvas.subscribe"; data: { workspaceId: string } }
   | { type: "session.init"; data: { sessionId: string } }

@@ -5,6 +5,40 @@ export type ClientMessageHandler = (clientId: string, event: GatewayClientEvent)
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const VALID_CLIENT_EVENT_TYPES = new Set([
+  "session.init",
+  "chat.send",
+  "chat.stop",
+  "approval.respond",
+  "command.respond",
+  "canvas.subscribe",
+]);
+
+/** Runtime validation — ensures the event has a known type and correct data shape. */
+function isValidClientEvent(event: unknown): event is GatewayClientEvent {
+  if (!event || typeof event !== "object") return false;
+  const e = event as Record<string, unknown>;
+  if (typeof e.type !== "string" || !VALID_CLIENT_EVENT_TYPES.has(e.type)) return false;
+  if (!e.data || typeof e.data !== "object") return false;
+  const d = e.data as Record<string, unknown>;
+  switch (e.type) {
+    case "session.init":
+      return typeof d.sessionId === "string";
+    case "chat.send":
+      return typeof d.text === "string" && typeof d.workspaceId === "string"
+        && (!d.messageId || (typeof d.messageId === "string" && UUID_RE.test(d.messageId)));
+    case "chat.stop":
+      return true;
+    case "approval.respond":
+    case "command.respond":
+      return typeof d.requestId === "string" && typeof d.approved === "boolean";
+    case "canvas.subscribe":
+      return typeof d.workspaceId === "string";
+    default:
+      return false;
+  }
+}
+
 export class WSManager {
   private clients = new Map<string, WSContext>();
   private messageHandler: ClientMessageHandler | null = null;
@@ -56,7 +90,11 @@ export class WSManager {
       return;
     }
     try {
-      const event = JSON.parse(data) as GatewayClientEvent;
+      const event = JSON.parse(data);
+      if (!isValidClientEvent(event)) {
+        console.warn(`[ws] malformed event from ${clientId}:`, event?.type);
+        return;
+      }
       this.messageHandler?.(clientId, event);
     } catch (err) {
       console.error(`[ws] invalid message from ${clientId}:`, err);

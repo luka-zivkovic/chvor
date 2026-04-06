@@ -80,7 +80,7 @@ export class Gateway extends EventEmitter {
 
     // ── Voice STT pre-processing ──
     if (rawMessage.audioData) {
-      this.emitEvent({ type: "voice.status", data: { state: "transcribing" } }, targetClient);
+      this.emitEvent({ type: "voice.status", data: { state: "transcribing" } }, targetClient); // voice events stay per-client
     }
     let message: NormalizedMessage;
     try {
@@ -179,15 +179,23 @@ export class Gateway extends EventEmitter {
     let executionSucceeded = false;
     let aborted = false;
     let modelUsed: ModelUsedResult | undefined;
+    // Broadcast streaming events to ALL WS clients sharing this session
+    // so multi-tab users see real-time updates in every tab.
+    const sessionBroadcastClients = () => {
+      const ws = getWSInstance();
+      return ws ? ws.getClientsBySessionId(message.channelId) : (targetClient ? [targetClient] : []);
+    };
     try {
-      // NOTE: Streaming chunks are sent only to the originating WS client.
-      // In multi-tab scenarios, other tabs sharing the same session will only
-      // see the final chat.message (which fans out via getClientsBySessionId).
       const onChunk = (text: string) => {
-        this.emitEvent({ type: "chat.chunk", data: { content: redactSensitiveData(stripToolAnnotations(text)) } }, targetClient);
+        const content = redactSensitiveData(stripToolAnnotations(text));
+        for (const clientId of sessionBroadcastClients()) {
+          this.emitEvent({ type: "chat.chunk", data: { content } }, clientId);
+        }
       };
       const onStreamReset = () => {
-        this.emitEvent({ type: "chat.streamReset", data: {} }, targetClient);
+        for (const clientId of sessionBroadcastClients()) {
+          this.emitEvent({ type: "chat.streamReset", data: {} }, clientId);
+        }
       };
       sessionSummary = getSessionSummary(session.id);
       const CONTINUATION_EXTRA_ROUNDS = 20;
@@ -211,10 +219,11 @@ export class Gateway extends EventEmitter {
       modelUsed = result.modelUsed;
       messagesAtExecution = [...session.messages];
       if (result.hitRoundLimit) session.continuationPending = true;
-      this.emitEvent({ type: "chat.streamEnd", data: {} }, targetClient);
-      // Notify client which model was used (especially useful for fallback scenarios)
-      if (modelUsed) {
-        this.emitEvent({ type: "chat.modelInfo", data: modelUsed }, targetClient);
+      for (const clientId of sessionBroadcastClients()) {
+        this.emitEvent({ type: "chat.streamEnd", data: {} }, clientId);
+        if (modelUsed) {
+          this.emitEvent({ type: "chat.modelInfo", data: modelUsed }, clientId);
+        }
       }
       executionSucceeded = true;
     } catch (err) {
@@ -222,8 +231,10 @@ export class Gateway extends EventEmitter {
         // User stopped generation — discard partial response
         aborted = true;
         console.log(`[gateway] generation stopped by user for session: ${sessionKey}`);
-        this.emitEvent({ type: "chat.streamEnd", data: {} }, targetClient);
-        this.emitEvent({ type: "chat.stopped", data: {} }, targetClient);
+        for (const clientId of sessionBroadcastClients()) {
+          this.emitEvent({ type: "chat.streamEnd", data: {} }, clientId);
+          this.emitEvent({ type: "chat.stopped", data: {} }, clientId);
+        }
         this.emitEvent({
           type: "execution.event",
           data: { type: "execution.failed", data: { error: "Stopped by user" } },

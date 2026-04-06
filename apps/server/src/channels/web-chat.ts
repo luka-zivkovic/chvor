@@ -23,9 +23,9 @@ export class WebChatChannel implements ChannelAdapter {
   }
 
   /** Called by the WS handler when a browser client sends a chat message */
-  handleClientMessage(clientId: string, text: string, workspaceId: string, sessionId?: string, inputModality?: "voice", media?: MediaArtifact[]): void {
+  handleClientMessage(clientId: string, text: string, workspaceId: string, sessionId?: string, inputModality?: "voice", media?: MediaArtifact[], messageId?: string): void {
     const message: NormalizedMessage = {
-      id: randomUUID(),
+      id: messageId ?? randomUUID(),
       channelType: "web",
       channelId: sessionId ?? clientId,
       senderId: clientId,

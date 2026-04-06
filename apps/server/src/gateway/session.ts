@@ -21,6 +21,9 @@ export interface SessionData {
 }
 
 const MAX_CACHE = 50;
+/** In-memory cap per session — keeps only the most recent messages to bound RAM usage.
+ *  DB always has the full history; this cap only affects the working set. */
+const MAX_SESSION_MESSAGES = 500;
 
 export class SessionManager {
   private cache = new Map<string, SessionData>();
@@ -65,13 +68,13 @@ export class SessionManager {
       channelType,
       channelId,
       threadId,
-      workspaceId: "default",
+      workspaceId: "default-constellation",
       messages: [],
       persistedCount: 0,
       createdAt: now,
       updatedAt: now,
     };
-    upsertSession(key, channelType, channelId, threadId, "default");
+    upsertSession(key, channelType, channelId, threadId, "default-constellation");
     this.addToCache(key, session);
     return session;
   }
@@ -108,6 +111,13 @@ export class SessionManager {
       addMessage(session.id, session.messages[i]);
     }
     session.persistedCount = session.messages.length;
+
+    // Cap in-memory messages to prevent unbounded RAM growth.
+    // DB always has the full history; this only trims the working set.
+    if (session.messages.length > MAX_SESSION_MESSAGES) {
+      session.messages = session.messages.slice(session.messages.length - MAX_SESSION_MESSAGES);
+      session.persistedCount = session.messages.length;
+    }
   }
 
   private addToCache(key: string, data: SessionData): void {

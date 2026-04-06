@@ -154,7 +154,8 @@ wsManager.onClientMessage((clientId, event) => {
         event.data.workspaceId,
         sessionId ?? undefined,
         event.data.inputModality,
-        event.data.media
+        event.data.media,
+        event.data.messageId
       );
       break;
     }

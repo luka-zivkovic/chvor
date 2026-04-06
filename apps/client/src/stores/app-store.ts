@@ -26,12 +26,16 @@ import { useUIStore } from "./ui-store";
 import { SESSION_ID_KEY } from "../lib/constants";
 import { api } from "../lib/api";
 
-// Streaming chunk buffer — avoids O(n²) string concat in immutable state
+// ── Module-level mutable state (intentional) ──────────────────
+// These live outside the Zustand store for performance. They are NOT reactive
+// and must only be read/written inside store actions.
+// chunkBuffer: avoids O(n²) string concat in immutable state during streaming.
+// switchGeneration: monotonic counter to discard stale async loads after conversation switch.
 let chunkBuffer: string[] = [];
 let switchGeneration = 0;
 const MAX_EXECUTION_EVENTS = 200;
 
-interface StreamingTool {
+export interface StreamingTool {
   name: string;
   status: "running" | "done";
   result?: string;
@@ -68,8 +72,8 @@ interface AppState {
 
   _send: (event: GatewayClientEvent) => void;
   setSend: (fn: (event: GatewayClientEvent) => void) => void;
-  _sendChat: (text: string, inputModality?: "voice", media?: MediaArtifact[]) => void;
-  setSendChat: (fn: (text: string, inputModality?: "voice", media?: MediaArtifact[]) => void) => void;
+  _sendChat: (text: string, inputModality?: "voice", media?: MediaArtifact[], messageId?: string) => void;
+  setSendChat: (fn: (text: string, inputModality?: "voice", media?: MediaArtifact[], messageId?: string) => void) => void;
   _stopGeneration: () => void;
   setStopGeneration: (fn: () => void) => void;
   loadConversations: () => Promise<void>;
@@ -131,9 +135,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const compositeId = `web:${sessionId}:default`;
       const messages = await api.sessions.messages(compositeId);
-      if (messages?.length) {
-        set({ messages });
-      }
+      set({ messages: messages ?? [] });
     } catch (err) {
       console.error("[app] failed to load session history:", err);
     }
@@ -369,93 +371,45 @@ export const useAppStore = create<AppState>((set, get) => ({
             streamingThought: null, streamingDecisionReason: null, memoryTrace: null, tokenBudget: null, toolTrace: [],
           });
         }
-        // Track tool invocations in streaming tools (deduplicate same skill)
-        if (execEvent.type === "skill.invoked") {
-          const toolName = execEvent.data.skillId;
+        // Unified skill/tool execution tracking (shared logic, different ID extraction)
+        if (execEvent.type === "skill.invoked" || execEvent.type === "tool.invoked") {
+          const name = execEvent.type === "skill.invoked" ? execEvent.data.skillId : execEvent.data.toolId;
           const reason = get().streamingDecisionReason ?? undefined;
           set((s) => {
-            const alreadyRunning = s.streamingTools.some(
-              (t) => t.name === toolName && t.status === "running"
-            );
+            const alreadyRunning = s.streamingTools.some((t) => t.name === name && t.status === "running");
             return {
-              streamingTools: alreadyRunning ? s.streamingTools : [...s.streamingTools, { name: toolName, status: "running" }],
-              toolTrace: [...s.toolTrace, { name: toolName, reason, status: "running" }],
+              streamingTools: alreadyRunning ? s.streamingTools : [...s.streamingTools, { name, status: "running" }],
+              toolTrace: [...s.toolTrace, { name, reason, status: "running" }],
             };
           });
-        } else if (execEvent.type === "skill.completed") {
-          const nodeId = execEvent.data.nodeId;
-          const skillId = nodeId.replace("skill-", "");
-          const skillMedia = execEvent.data.media;
+        } else if (execEvent.type === "skill.completed" || execEvent.type === "tool.completed") {
+          const prefix = execEvent.type === "skill.completed" ? "skill-" : "tool-";
+          const id = execEvent.data.nodeId.replace(prefix, "");
+          const media = execEvent.data.media;
           const outputStr = typeof execEvent.data.output === "string" ? execEvent.data.output : JSON.stringify(execEvent.data.output);
           set((s) => ({
             streamingTools: s.streamingTools.map((t) =>
-              t.name === skillId && t.status === "running"
-                ? { ...t, status: "done" as const, ...(skillMedia?.length ? { media: skillMedia } : {}) }
+              t.name === id && t.status === "running"
+                ? { ...t, status: "done" as const, ...(media?.length ? { media } : {}) }
                 : t
             ),
             toolTrace: s.toolTrace.map((t) =>
-              t.name === skillId && t.status === "running"
-                ? { ...t, status: "completed" as const, output: outputStr?.slice(0, 500), truncated: (outputStr?.length ?? 0) > 500, ...(skillMedia?.length ? { media: skillMedia } : {}) }
+              t.name === id && t.status === "running"
+                ? { ...t, status: "completed" as const, output: outputStr?.slice(0, 500), truncated: (outputStr?.length ?? 0) > 500, ...(media?.length ? { media } : {}) }
                 : t
             ),
           }));
-        } else if (execEvent.type === "skill.failed") {
-          const nodeId = execEvent.data.nodeId;
-          const skillId = nodeId.replace("skill-", "");
+        } else if (execEvent.type === "skill.failed" || execEvent.type === "tool.failed") {
+          const prefix = execEvent.type === "skill.failed" ? "skill-" : "tool-";
+          const id = execEvent.data.nodeId.replace(prefix, "");
           set((s) => ({
             streamingTools: s.streamingTools.map((t) =>
-              t.name === skillId && t.status === "running"
+              t.name === id && t.status === "running"
                 ? { ...t, status: "done" as const, result: execEvent.data.error }
                 : t
             ),
             toolTrace: s.toolTrace.map((t) =>
-              t.name === skillId && t.status === "running"
-                ? { ...t, status: "failed" as const, error: execEvent.data.error }
-                : t
-            ),
-          }));
-        }
-        // Tool execution tracking
-        else if (execEvent.type === "tool.invoked") {
-          const toolName = execEvent.data.toolId;
-          const reason = get().streamingDecisionReason ?? undefined;
-          set((s) => {
-            const alreadyRunning = s.streamingTools.some(
-              (t) => t.name === toolName && t.status === "running"
-            );
-            return {
-              streamingTools: alreadyRunning ? s.streamingTools : [...s.streamingTools, { name: toolName, status: "running" }],
-              toolTrace: [...s.toolTrace, { name: toolName, reason, status: "running" }],
-            };
-          });
-        } else if (execEvent.type === "tool.completed") {
-          const nodeId = execEvent.data.nodeId;
-          const toolId = nodeId.replace("tool-", "");
-          const toolMedia = execEvent.data.media;
-          const outputStr = typeof execEvent.data.output === "string" ? execEvent.data.output : JSON.stringify(execEvent.data.output);
-          set((s) => ({
-            streamingTools: s.streamingTools.map((t) =>
-              t.name === toolId && t.status === "running"
-                ? { ...t, status: "done" as const, ...(toolMedia?.length ? { media: toolMedia } : {}) }
-                : t
-            ),
-            toolTrace: s.toolTrace.map((t) =>
-              t.name === toolId && t.status === "running"
-                ? { ...t, status: "completed" as const, output: outputStr?.slice(0, 500), truncated: (outputStr?.length ?? 0) > 500, ...(toolMedia?.length ? { media: toolMedia } : {}) }
-                : t
-            ),
-          }));
-        } else if (execEvent.type === "tool.failed") {
-          const nodeId = execEvent.data.nodeId;
-          const toolId = nodeId.replace("tool-", "");
-          set((s) => ({
-            streamingTools: s.streamingTools.map((t) =>
-              t.name === toolId && t.status === "running"
-                ? { ...t, status: "done" as const, result: execEvent.data.error }
-                : t
-            ),
-            toolTrace: s.toolTrace.map((t) =>
-              t.name === toolId && t.status === "running"
+              t.name === id && t.status === "running"
                 ? { ...t, status: "failed" as const, error: execEvent.data.error }
                 : t
             ),

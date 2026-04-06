@@ -26,6 +26,8 @@ export function useGateway() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const attemptRef = useRef(0);
 
+  const intentionalCloseRef = useRef(false);
+
   const connect = useCallback(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     // Cookies are sent automatically for same-origin WebSocket connections
@@ -33,8 +35,7 @@ export function useGateway() {
 
     const ws = new WebSocket(url);
     wsRef.current = ws;
-
-    let closed = false;
+    intentionalCloseRef.current = false;
 
     ws.onopen = () => {
       console.log("[ws] connected");
@@ -75,7 +76,7 @@ export function useGateway() {
 
     ws.onclose = () => {
       console.log("[ws] disconnected");
-      if (closed) return;
+      if (intentionalCloseRef.current) return;
       useAppStore.getState().setConnected(false);
       if (attemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
         useAppStore.getState().setReconnecting(false);
@@ -91,25 +92,14 @@ export function useGateway() {
     ws.onerror = (err) => {
       console.error("[ws] error:", err);
     };
-
-    (ws as any)._intentionalClose = () => {
-      closed = true;
-      ws.close();
-    };
   }, []);
 
   useEffect(() => {
     connect();
     return () => {
       clearTimeout(reconnectTimer.current);
-      const ws = wsRef.current;
-      if (ws) {
-        if ((ws as any)._intentionalClose) {
-          (ws as any)._intentionalClose();
-        } else {
-          ws.close();
-        }
-      }
+      intentionalCloseRef.current = true;
+      wsRef.current?.close();
     };
   }, [connect]);
 
@@ -120,9 +110,9 @@ export function useGateway() {
   }, []);
 
   const sendChat = useCallback(
-    (text: string, inputModality?: "voice", media?: MediaArtifact[]) => {
+    (text: string, inputModality?: "voice", media?: MediaArtifact[], messageId?: string) => {
       const workspaceId = "default-constellation";
-      send({ type: "chat.send", data: { text, workspaceId, inputModality, ...(media?.length ? { media } : {}) } });
+      send({ type: "chat.send", data: { text, workspaceId, inputModality, ...(media?.length ? { media } : {}), ...(messageId ? { messageId } : {}) } });
     },
     [send]
   );

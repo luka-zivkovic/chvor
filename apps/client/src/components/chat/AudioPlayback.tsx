@@ -10,6 +10,7 @@ interface Props {
 export function AudioPlayback({ audioUrl, autoPlay = false }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [blocked, setBlocked] = useState(false);
 
   const toggle = () => {
     const el = audioRef.current;
@@ -19,8 +20,9 @@ export function AudioPlayback({ audioUrl, autoPlay = false }: Props) {
       el.currentTime = 0;
       setPlaying(false);
     } else {
-      el.play().catch(() => {});
-      setPlaying(true);
+      el.play()
+        .then(() => { setPlaying(true); setBlocked(false); })
+        .catch(() => { setPlaying(false); setBlocked(true); });
     }
   };
 
@@ -35,7 +37,7 @@ export function AudioPlayback({ audioUrl, autoPlay = false }: Props) {
       />
       <button
         onClick={toggle}
-        title={playing ? "Stop" : "Play"}
+        title={blocked ? "Tap to play" : playing ? "Stop" : "Play"}
         className={cn(
           "ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full transition-all",
           playing
@@ -50,7 +52,7 @@ export function AudioPlayback({ audioUrl, autoPlay = false }: Props) {
           fill="currentColor"
           stroke="none"
         >
-          {playing ? (
+          {playing && !blocked ? (
             <rect x="6" y="6" width="12" height="12" rx="1" />
           ) : (
             <path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14" />

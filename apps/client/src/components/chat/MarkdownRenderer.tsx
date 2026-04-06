@@ -2,8 +2,9 @@ import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import type { Options as ReactMarkdownOptions } from "react-markdown";
 
-const remarkPlugins = [remarkGfm];
+const remarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [remarkGfm];
 
 const sanitizeSchema = {
   ...defaultSchema,
@@ -17,7 +18,7 @@ const sanitizeSchema = {
   tagNames: [...(defaultSchema.tagNames ?? []), "input"],
 };
 
-const rehypePlugins = [[rehypeSanitize, sanitizeSchema] as const];
+const rehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [[rehypeSanitize, sanitizeSchema]];
 
 interface Props {
   content: string;
@@ -28,7 +29,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Prop
     <ReactMarkdown
       className="cb-markdown text-sm leading-relaxed text-foreground/90"
       remarkPlugins={remarkPlugins}
-      rehypePlugins={rehypePlugins as any}
+      rehypePlugins={rehypePlugins}
     >
       {content}
     </ReactMarkdown>
