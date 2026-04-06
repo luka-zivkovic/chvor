@@ -44,7 +44,7 @@ const SAFE_COMMANDS = new Set([
 ]);
 
 const MODERATE_COMMANDS = new Set([
-  "env", "set", "printenv", // reveal env vars — require approval
+  "set", "printenv", // reveal env vars — require approval
   "mkdir", "cp", "mv", "touch", "chmod", "chown", "ln",
   "npm", "npx", "yarn", "pnpm", "pip", "pip3", "brew", "apt", "apt-get",
   "git", "curl", "wget", "tar", "unzip", "zip",
@@ -67,9 +67,13 @@ const DANGEROUS_COMMANDS = new Set([
   "reg", "regedit",
   "net", "netsh",
   "dd",
+  // Shell wrappers that can execute arbitrary commands
+  "env", "eval", "exec", "source", "xargs",
+  "bash", "sh", "zsh", "dash", "fish", "csh", "ksh",
+  "cmd", "powershell", "pwsh",
   // PowerShell
   "remove-item", "stop-process", "restart-computer", "stop-computer",
-  "clear-content", "set-executionpolicy",
+  "clear-content", "set-executionpolicy", "invoke-expression",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -168,8 +172,8 @@ function classifySingle(commandName: string): CommandTier {
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Detect command substitution ($(...) or backticks) — escalate to dangerous since we can't reliably parse nested commands */
-const SUBSHELL_PATTERN = /\$\(|`[^`]+`/;
+/** Detect command substitution ($(...), backticks, process substitution) — escalate to dangerous since we can't reliably parse nested commands */
+const SUBSHELL_PATTERN = /\$\(|`[^`]+`|<\(|>\(/;
 
 export function classifyCommand(command: string): ClassificationResult {
   if (isBlocked(command)) {

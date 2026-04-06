@@ -85,7 +85,7 @@ async function gatherHealthDelta(since: string | null): Promise<string> {
 
   // Dynamic import to avoid circular dependency
   const { mcpManager } = await import("./mcp-manager.ts");
-  const mcpStatus = mcpManager.getConnectionStatus();
+  const mcpStatus = await mcpManager.getConnectionStatus();
 
   const creds = listCredentials().filter(
     (c) => !c.testStatus || c.testStatus === "failed" || c.testStatus === "untested"

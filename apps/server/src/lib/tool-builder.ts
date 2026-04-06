@@ -7,15 +7,55 @@ import { hasRequiredCredentials } from "./credential-resolver.ts";
 import { getNativeToolDefinitions } from "./native-tools.ts";
 import { buildCapabilityRegistry, invalidateCapabilityRegistry } from "./capability-resolver.ts";
 
+const MAX_SCHEMA_DEPTH = 5;
+
 /**
- * Convert a JSON Schema properties object to a Zod schema.
- * Handles basic types: string, number, boolean, array, object.
+ * Convert a JSON Schema property to a Zod type.
+ * Recurses into nested objects and typed arrays up to MAX_SCHEMA_DEPTH.
  */
-function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodType {
-  const properties = (schema.properties ?? {}) as Record<
-    string,
-    Record<string, unknown>
-  >;
+function jsonSchemaPropertyToZod(prop: Record<string, unknown>, depth: number): z.ZodType {
+  if (depth > MAX_SCHEMA_DEPTH) return z.unknown();
+
+  switch (prop.type) {
+    case "number":
+    case "integer":
+      return z.number();
+    case "boolean":
+      return z.boolean();
+    case "array": {
+      const items = prop.items as Record<string, unknown> | undefined;
+      if (items && typeof items === "object") {
+        return z.array(jsonSchemaPropertyToZod(items, depth + 1));
+      }
+      return z.array(z.unknown());
+    }
+    case "object": {
+      const nested = prop.properties as Record<string, Record<string, unknown>> | undefined;
+      if (nested && typeof nested === "object" && Object.keys(nested).length > 0) {
+        return jsonSchemaObjectToZod(prop, depth + 1);
+      }
+      // No inner properties — use record
+      const additionalProps = prop.additionalProperties as Record<string, unknown> | undefined;
+      if (additionalProps && typeof additionalProps === "object" && additionalProps.type) {
+        return z.record(jsonSchemaPropertyToZod(additionalProps, depth + 1));
+      }
+      return z.record(z.unknown());
+    }
+    default:
+      // Enums
+      if (Array.isArray(prop.enum) && prop.enum.length > 0) {
+        const values = prop.enum.map(String) as [string, ...string[]];
+        return z.enum(values);
+      }
+      return z.string();
+  }
+}
+
+/**
+ * Convert a JSON Schema object (with properties) to a Zod object schema.
+ */
+function jsonSchemaObjectToZod(schema: Record<string, unknown>, depth = 0): z.ZodType {
+  const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
   const required = (schema.required ?? []) as string[];
 
   if (Object.keys(properties).length === 0) {
@@ -25,25 +65,7 @@ function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodType {
   const shape: Record<string, z.ZodType> = {};
 
   for (const [key, prop] of Object.entries(properties)) {
-    let fieldSchema: z.ZodType;
-
-    switch (prop.type) {
-      case "number":
-      case "integer":
-        fieldSchema = z.number();
-        break;
-      case "boolean":
-        fieldSchema = z.boolean();
-        break;
-      case "array":
-        fieldSchema = z.array(z.unknown());
-        break;
-      case "object":
-        fieldSchema = z.record(z.unknown());
-        break;
-      default:
-        fieldSchema = z.string();
-    }
+    let fieldSchema = jsonSchemaPropertyToZod(prop, depth);
 
     if (prop.description) {
       fieldSchema = fieldSchema.describe(String(prop.description));
@@ -63,12 +85,15 @@ function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodType {
 // This helps prompt caching by keeping tool JSON stable across turns.
 let cachedToolHash: string | null = null;
 let cachedToolDefs: Record<string, ReturnType<typeof tool>> | null = null;
+// Dedup: return in-flight build promise to concurrent callers
+let inflightBuild: Promise<Record<string, ReturnType<typeof tool>>> | null = null;
 
 /**
  * Build Vercel AI SDK tool definitions from loaded tools.
  * Tool names are prefixed: "toolId__mcpToolName" to avoid collisions.
  * No execute callback — orchestrator handles the loop manually.
  * Results are memoized by tool IDs to improve prompt cache hit rates.
+ * Concurrent calls are deduplicated.
  */
 export async function buildToolDefinitions(
   tools: Tool[]
@@ -82,13 +107,38 @@ export async function buildToolDefinitions(
     return cachedToolDefs;
   }
 
+  // Dedup concurrent calls
+  if (inflightBuild) return inflightBuild;
+
+  const buildPromise = doBuild(eligibleTools, tools, hash);
+  inflightBuild = buildPromise;
+  try {
+    return await buildPromise;
+  } finally {
+    inflightBuild = null;
+  }
+}
+
+async function doBuild(
+  eligibleTools: Tool[],
+  allTools: Tool[],
+  hash: string,
+): Promise<Record<string, ReturnType<typeof tool>>> {
   const toolDefs: Record<string, ReturnType<typeof tool>> = {};
   const discoveredMcpTools = new Map<string, Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>>();
   let hadErrors = false;
 
-  for (const t of eligibleTools) {
-    try {
+  // Discover MCP tools in parallel — each server is independent
+  const results = await Promise.allSettled(
+    eligibleTools.map(async (t) => {
       const mcpTools = await mcpManager.discoverTools(t);
+      return { tool: t, mcpTools };
+    })
+  );
+
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      const { tool: t, mcpTools } = result.value;
       discoveredMcpTools.set(t.id, mcpTools);
 
       for (const mcpTool of mcpTools) {
@@ -96,15 +146,16 @@ export async function buildToolDefinitions(
 
         toolDefs[qualifiedName] = tool({
           description: `[${t.metadata.name}] ${mcpTool.description}`,
-          parameters: jsonSchemaToZod(mcpTool.inputSchema),
+          parameters: jsonSchemaObjectToZod(mcpTool.inputSchema),
         });
       }
-    } catch (err) {
+    } else {
       hadErrors = true;
-      logError("mcp_crash", err, { toolId: t.id });
+      const failedTool = eligibleTools[results.indexOf(result)];
+      logError("mcp_crash", result.reason, { toolId: failedTool?.id });
       console.warn(
-        `[tool-builder] failed to discover tools for ${t.id}:`,
-        err
+        `[tool-builder] failed to discover tools for ${failedTool?.id}:`,
+        result.reason
       );
     }
   }
@@ -113,7 +164,7 @@ export async function buildToolDefinitions(
   buildCapabilityRegistry(eligibleTools, discoveredMcpTools);
 
   // Log tools that were skipped due to missing credentials
-  for (const t of tools) {
+  for (const t of allTools) {
     if (t.mcpServer && !hasRequiredCredentials(t.metadata.requires?.credentials)) {
       console.log(`[tool-builder] skipping ${t.id}: missing required credentials`);
     }
@@ -134,5 +185,6 @@ export async function buildToolDefinitions(
 export function invalidateToolCache(): void {
   cachedToolHash = null;
   cachedToolDefs = null;
+  inflightBuild = null;
   invalidateCapabilityRegistry();
 }

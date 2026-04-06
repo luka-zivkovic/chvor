@@ -53,12 +53,12 @@ function parseHistory(content: string): HistoryRow[] {
 // Manifest generation
 // ---------------------------------------------------------------------------
 
-export function writeManifest(): void {
+export async function writeManifest(): Promise<void> {
   try {
     const now = new Date().toISOString();
     const skills = loadSkills();
     const tools = loadTools();
-    const mcpStatus = mcpManager.getConnectionStatus();
+    const mcpStatus = await mcpManager.getConnectionStatus();
     const browserCount = getActiveBrowserCount();
     const creds = listCredentials();
     const schedules = listSchedules();
@@ -178,8 +178,8 @@ export function initManifest(): void {
     clearInterval(timer);
     timer = null;
   }
-  writeManifest();
-  timer = setInterval(() => writeManifest(), INTERVAL_MS);
+  writeManifest().catch((err) => console.error("[health-manifest] initial write failed:", err));
+  timer = setInterval(() => writeManifest().catch((err) => console.error("[health-manifest] periodic write failed:", err)), INTERVAL_MS);
   console.log("[health-manifest] initialized (interval: 30m)");
 }
 
