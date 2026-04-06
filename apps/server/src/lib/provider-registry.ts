@@ -8,7 +8,7 @@ import type {
 
 // ── LLM Providers ────────────────────────────────────────────────
 
-export const LLM_PROVIDERS: LLMProviderDef[] = [
+export const LLM_PROVIDERS: readonly LLMProviderDef[] = Object.freeze([
   {
     id: "anthropic",
     name: "Anthropic",
@@ -267,7 +267,7 @@ export const LLM_PROVIDERS: LLMProviderDef[] = [
     ],
     models: [],
   },
-];
+]);
 
 // ── Default lightweight model per provider ───────────────────────
 
@@ -299,7 +299,7 @@ export const DEFAULT_MAX_TOKENS = 4_096;
 
 // ── Embedding Providers ──────────────────────────────────────────
 
-export const EMBEDDING_PROVIDERS: EmbeddingProviderDef[] = [
+export const EMBEDDING_PROVIDERS: readonly EmbeddingProviderDef[] = Object.freeze([
   {
     id: "local",
     name: "Local (Free)",
@@ -349,11 +349,11 @@ export const EMBEDDING_PROVIDERS: EmbeddingProviderDef[] = [
       { id: "text-embedding-004", name: "Text Embedding 004", dimensions: 768 },
     ],
   },
-];
+]);
 
 // ── Integration Providers ────────────────────────────────────────
 
-export const INTEGRATION_PROVIDERS: IntegrationProviderDef[] = [
+export const INTEGRATION_PROVIDERS: readonly IntegrationProviderDef[] = Object.freeze([
   {
     id: "telegram",
     name: "Telegram Bot",
@@ -680,11 +680,11 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDef[] = [
       },
     ],
   },
-];
+]);
 
 // ── Image Generation Providers ───────────────────────────────────
 
-export const IMAGE_GEN_PROVIDERS: ImageGenProviderDef[] = [
+export const IMAGE_GEN_PROVIDERS: readonly ImageGenProviderDef[] = Object.freeze([
   {
     id: "openai",
     name: "OpenAI",
@@ -713,11 +713,11 @@ export const IMAGE_GEN_PROVIDERS: ImageGenProviderDef[] = [
       { id: "fal-ai/flux-pro/v1.1-ultra", name: "Flux Pro 1.1 Ultra" },
     ],
   },
-];
+]);
 
 // ── OAuth Providers ─────────────────────────────────────────────
 
-export const OAUTH_PROVIDERS: OAuthProviderDef[] = [
+export const OAUTH_PROVIDERS: readonly OAuthProviderDef[] = Object.freeze([
   // --- Direct OAuth (Tier 2) — no third-party dependency ---
   {
     id: "google",
@@ -811,7 +811,7 @@ export const OAUTH_PROVIDERS: OAuthProviderDef[] = [
     category: "social",
     description: "Pin, board, and browse Pinterest.",
   },
-];
+]);
 
 // ── Derived sets ─────────────────────────────────────────────────
 

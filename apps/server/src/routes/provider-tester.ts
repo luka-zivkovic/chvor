@@ -3,6 +3,7 @@ import type {
   CredentialData,
   TestCredentialResponse,
 } from "@chvor/shared";
+import { assertSafeUrl, isLocalUrl } from "../lib/url-safety.ts";
 
 export async function testProvider(
   type: CredentialType,
@@ -65,7 +66,7 @@ export async function testProvider(
       case "homeassistant":
         return await testHomeAssistant(data.instanceUrl, data.token);
       default:
-        return { success: true };
+        return { success: false, error: `No test available for credential type: ${type}` };
     }
   } catch (err: unknown) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -91,34 +92,7 @@ async function testCustomLLM(baseUrl: string, apiKey: string): Promise<TestCrede
   if (!baseUrl) return { success: false, error: "Base URL is required" };
 
   try {
-    const parsed = new URL(baseUrl);
-
-    // Only allow http/https — block file://, ftp://, etc.
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-      return { success: false, error: "Only http:// and https:// URLs are allowed" };
-    }
-
-    // Block requests to private/internal networks (SSRF prevention)
-    const host = parsed.hostname.toLowerCase();
-    if (
-      host === "localhost" ||
-      host === "127.0.0.1" ||
-      host === "::1" ||
-      host === "0.0.0.0" ||
-      host.startsWith("10.") ||
-      host.startsWith("172.16.") || host.startsWith("172.17.") || host.startsWith("172.18.") ||
-      host.startsWith("172.19.") || host.startsWith("172.20.") || host.startsWith("172.21.") ||
-      host.startsWith("172.22.") || host.startsWith("172.23.") || host.startsWith("172.24.") ||
-      host.startsWith("172.25.") || host.startsWith("172.26.") || host.startsWith("172.27.") ||
-      host.startsWith("172.28.") || host.startsWith("172.29.") || host.startsWith("172.30.") ||
-      host.startsWith("172.31.") ||
-      host.startsWith("192.168.") ||
-      host.startsWith("169.254.") ||
-      host.endsWith(".local") ||
-      host.endsWith(".internal")
-    ) {
-      return { success: false, error: "URLs pointing to private/internal networks are not allowed" };
-    }
+    assertSafeUrl(baseUrl, "Custom LLM baseUrl");
 
     const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
     const url = new URL("models", base).toString();
@@ -142,6 +116,7 @@ async function testAnthropic(apiKey: string): Promise<TestCredentialResponse> {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!res.ok) {
@@ -157,7 +132,9 @@ async function testAnthropic(apiKey: string): Promise<TestCredentialResponse> {
 async function testTelegram(botToken: string): Promise<TestCredentialResponse> {
   if (!botToken) return { success: false, error: "Bot token is required" };
 
-  const res = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+  const res = await fetch(`https://api.telegram.org/bot${botToken}/getMe`, {
+    signal: AbortSignal.timeout(15_000),
+  });
 
   const body = await res.json().catch(() => ({})) as {
     ok?: boolean;
@@ -176,6 +153,7 @@ async function testDiscord(botToken: string): Promise<TestCredentialResponse> {
 
   const res = await fetch("https://discord.com/api/v10/users/@me", {
     headers: { Authorization: `Bot ${botToken}` },
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!res.ok) {
@@ -192,19 +170,38 @@ async function testSlack(botToken: string, appToken: string): Promise<TestCreden
   if (!botToken) return { success: false, error: "Bot token is required" };
   if (!appToken) return { success: false, error: "App-level token (xapp-) is required" };
 
-  const res = await fetch("https://slack.com/api/auth.test", {
+  // Test bot token
+  const botRes = await fetch("https://slack.com/api/auth.test", {
     method: "POST",
     headers: { Authorization: `Bearer ${botToken}` },
+    signal: AbortSignal.timeout(15_000),
   });
 
-  const body = await res.json().catch(() => ({})) as {
+  const botBody = await botRes.json().catch(() => ({})) as {
     ok?: boolean;
     error?: string;
   };
 
-  if (!body.ok) {
-    return { success: false, error: body.error ?? `HTTP ${res.status}` };
+  if (!botBody.ok) {
+    return { success: false, error: `Bot token: ${botBody.error ?? `HTTP ${botRes.status}`}` };
   }
+
+  // Test app-level token via Socket Mode handshake
+  const appRes = await fetch("https://slack.com/api/apps.connections.open", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${appToken}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  const appBody = await appRes.json().catch(() => ({})) as {
+    ok?: boolean;
+    error?: string;
+  };
+
+  if (!appBody.ok) {
+    return { success: false, error: `App token: ${appBody.error ?? `HTTP ${appRes.status}`}` };
+  }
+
   return { success: true };
 }
 
@@ -252,7 +249,7 @@ async function testMiniMax(apiKey: string): Promise<TestCredentialResponse> {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "MiniMax-M2",
+      model: "MiniMax-M2.5",
       messages: [{ role: "user", content: "hi" }],
       max_tokens: 1,
     }),
@@ -415,6 +412,12 @@ async function testMatrix(
   if (!homeserverUrl || !accessToken)
     return { success: false, error: "Homeserver URL and access token are required" };
 
+  try {
+    assertSafeUrl(homeserverUrl, "Homeserver URL");
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+
   const res = await fetch(
     `${homeserverUrl.replace(/\/$/, "")}/_matrix/client/v3/account/whoami`,
     {
@@ -430,19 +433,8 @@ async function testMatrix(
   return { success: true };
 }
 
-function isAllowedLocalUrl(raw: string): boolean {
-  try {
-    const u = new URL(raw);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-    const host = u.hostname.toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".local");
-  } catch {
-    return false;
-  }
-}
-
 async function testOllama(baseUrl: string): Promise<TestCredentialResponse> {
-  if (!isAllowedLocalUrl(baseUrl)) {
+  if (!isLocalUrl(baseUrl)) {
     return { success: false, error: "Base URL must point to localhost or a .local address" };
   }
   const ollamaBase = baseUrl.replace(/\/v1\/?$/, "");
@@ -475,7 +467,7 @@ async function testOllamaCloud(apiKey: string): Promise<TestCredentialResponse> 
 }
 
 async function testLMStudio(baseUrl: string): Promise<TestCredentialResponse> {
-  if (!isAllowedLocalUrl(baseUrl)) {
+  if (!isLocalUrl(baseUrl)) {
     return { success: false, error: "Base URL must point to localhost or a .local address" };
   }
   try {
@@ -493,7 +485,7 @@ async function testLMStudio(baseUrl: string): Promise<TestCredentialResponse> {
 }
 
 async function testVLLM(baseUrl: string, apiKey?: string): Promise<TestCredentialResponse> {
-  if (!isAllowedLocalUrl(baseUrl)) {
+  if (!isLocalUrl(baseUrl)) {
     return { success: false, error: "Base URL must point to localhost or a .local address" };
   }
   try {
@@ -534,6 +526,12 @@ async function testGitLab(
   if (!instanceUrl || !token)
     return { success: false, error: "Instance URL and token are required" };
 
+  try {
+    assertSafeUrl(instanceUrl, "GitLab instance URL");
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+
   const res = await fetch(
     `${instanceUrl.replace(/\/$/, "")}/api/v4/user`,
     {
@@ -557,8 +555,15 @@ async function testJira(
   if (!domain || !email || !apiToken)
     return { success: false, error: "Domain, email, and API token are required" };
 
+  const jiraUrl = `https://${domain}/rest/api/3/myself`;
+  try {
+    assertSafeUrl(jiraUrl, "Jira domain");
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+
   const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
-  const res = await fetch(`https://${domain}/rest/api/3/myself`, {
+  const res = await fetch(jiraUrl, {
     headers: { Authorization: `Basic ${auth}`, Accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
@@ -576,6 +581,15 @@ async function testHomeAssistant(
 ): Promise<TestCredentialResponse> {
   if (!instanceUrl || !token)
     return { success: false, error: "Instance URL and token are required" };
+
+  // Home Assistant is typically local — skip SSRF check for local URLs
+  if (!isLocalUrl(instanceUrl)) {
+    try {
+      assertSafeUrl(instanceUrl, "Home Assistant instance URL");
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
 
   const res = await fetch(`${instanceUrl.replace(/\/$/, "")}/api/`, {
     headers: { Authorization: `Bearer ${token}` },
