@@ -4373,7 +4373,7 @@ nativeToolMapping.set(SOCIAL_CONNECT_NAME, { kind: "tool", id: "composio" });
 const SOCIAL_LIST_NAME = "native__social_list";
 const socialListToolDef = tool({
   description:
-    "[Social] List connected social media accounts. Shows which platforms the user has authorized via Composio.",
+    "[Social] List connected social media accounts across all providers (Composio OAuth and custom MCP integrations).",
   parameters: z.object({
     platform: z
       .string()
@@ -4386,27 +4386,31 @@ async function handleSocialList(
   args: Record<string, unknown>,
 ): Promise<NativeToolResult> {
   try {
-    const { listConnectedAccounts } = await import("./composio-client.ts");
+    const { listAllSocialConnections } = await import("./social-aggregator.ts");
     const platform = args.platform ? String(args.platform).toLowerCase().trim() : undefined;
 
-    const accounts = await listConnectedAccounts(platform);
+    const connections = await listAllSocialConnections(platform);
 
-    if (accounts.length === 0) {
+    if (connections.length === 0) {
       return {
         content: [
           {
             type: "text",
             text: platform
-              ? `No connected ${platform} accounts found. Use native__social_connect to connect one.`
-              : "No social accounts connected yet. Use native__social_connect to connect a platform.",
+              ? `No connected ${platform} accounts found. Use native__social_connect to connect one via Composio, or add a custom MCP tool.`
+              : "No social accounts connected yet. Use native__social_connect to connect a platform via Composio, or add a custom MCP tool.",
           },
         ],
       };
     }
 
-    const lines = accounts.map(
-      (a, i) => `${i + 1}. **${a.platform}** — ${a.status} (connected ${a.connectedAt})\n   id: \`${a.id}\``,
-    );
+    const lines = connections.map((c, i) => {
+      const parts = [`${i + 1}. **${c.platform}** — ${c.status} (via ${c.provider})`];
+      if (c.connectedAt) parts[0] += `, connected ${c.connectedAt}`;
+      if (c.id) parts.push(`   id: \`${c.id}\``);
+      if (c.capabilities?.length) parts.push(`   capabilities: ${c.capabilities.join(", ")}`);
+      return parts.join("\n");
+    });
 
     return {
       content: [

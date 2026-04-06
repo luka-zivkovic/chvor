@@ -26,6 +26,7 @@ import { loadSkills, loadTools, reloadAll } from "./capability-loader.ts";
 import { listCredentials } from "../db/credential-store.ts";
 import { LLM_CRED_TYPES, CHANNEL_CRED_TYPES } from "./provider-registry.ts";
 import { redactSensitiveData } from "./sensitive-filter.ts";
+import { resolveCapabilityReferences } from "./capability-resolver.ts";
 import { getRelevantMemories, getRelevantMemoriesWithScores, getRelevantMemoriesByCategoryTiers, getMemory } from "../db/memory-store.ts";
 import { rerankMemories, classifyQueryCategories, computeCompositeScoreDetailed } from "./memory-projections.ts";
 import type { ScoreBreakdown } from "./memory-projections.ts";
@@ -205,8 +206,10 @@ function buildSystemPrompt(
   try {
     for (const o of getAllInstructionOverrides()) overrideMap.set(`${o.kind}:${o.id}`, o.instructions);
   } catch { /* fallback: no overrides */ }
-  const resolveInstructions = (kind: "skill" | "tool", id: string, original: string): string =>
-    overrideMap.get(`${kind}:${id}`) ?? original;
+  const resolveInstructions = (kind: "skill" | "tool", id: string, original: string): string => {
+    const base = overrideMap.get(`${kind}:${id}`) ?? original;
+    return resolveCapabilityReferences(base);
+  };
 
   const promptSkills = skills.filter((s) => s.skillType === "prompt" && resolveInstructions("skill", s.id, s.instructions).trim());
   const workflowSkills = skills.filter((s) => s.skillType === "workflow" && resolveInstructions("skill", s.id, s.instructions).trim());

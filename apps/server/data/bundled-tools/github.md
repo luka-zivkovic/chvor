@@ -16,6 +16,12 @@ tags:
   - mcp
   - version-control
   - source-code
+provides:
+  github:create-issue: create_issue
+  github:list-issues: list_issues
+  github:create-pr: create_pull_request
+  github:search-code: search_code
+  github:search-repos: search_repositories
 mcp:
   command: npx
   args: ["-y", "@modelcontextprotocol/server-github"]

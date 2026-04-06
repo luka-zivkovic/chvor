@@ -87,6 +87,6 @@ export function resolveUrlPlaceholders(
       console.warn(`[credential-resolver] no credential found for type: ${credType}`);
       return "";
     }
-    return Object.values(data)[0] ?? "";
+    return encodeURIComponent(Object.values(data)[0] ?? "");
   });
 }

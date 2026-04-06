@@ -13,24 +13,28 @@ tags:
   - linkedin
   - content
   - marketing
-requires:
-  credentials:
-    - composio
+needs:
+  - social:connect
+  - social:list
+  - twitter:post
+  - linkedin:post
+  - reddit:submit
+  - instagram:post
 ---
 When the user asks to post content to social media, share something on a platform, or cross-post across multiple platforms:
 
 ## First steps
 
-1. **Check connections**: Call `native__social_list` to see which platforms are connected.
-2. **Connect if needed**: If the target platform isn't connected, use `native__social_connect` to start the OAuth flow. Wait for the user to complete authorization before proceeding.
-3. **Discover actions**: Always call `native__social_actions` for the target platform to get the exact action names and parameter schemas. Never hardcode action names -- they may change.
+1. **Check connections**: Call {{cap:social:list}} to see which platforms are connected.
+2. **Connect if needed**: If the target platform isn't connected, use {{cap:social:connect}} to start the OAuth flow. Wait for the user to complete authorization before proceeding.
+3. **Post**: Use the appropriate platform tool — {{cap:twitter:post}} for Twitter, {{cap:linkedin:post}} for LinkedIn, {{cap:reddit:submit}} for Reddit, {{cap:instagram:post}} for Instagram.
 
 ## Single-platform posting
 
 1. Ask the user what they want to post (or use their provided content)
 2. Adapt the content for the target platform using the formatting rules below
 3. **Show a preview** of the formatted post and ask for confirmation
-4. Only after explicit approval, call `native__social_execute` with the discovered action name and formatted content
+4. Only after explicit approval, call the appropriate platform posting tool with the formatted content
 5. Report the result (success, post URL if available, or error details)
 
 ## Cross-posting workflow
@@ -57,7 +61,7 @@ When the user wants to post to multiple platforms at once:
 ## Error recovery
 
 - If a post fails, show the error message clearly
-- If the error suggests an expired token, offer to reconnect via `native__social_connect`
+- If the error suggests an expired token, offer to reconnect via {{cap:social:connect}}
 - If rate-limited, inform the user and suggest waiting or trying later
 - Never retry automatically without asking
 
@@ -68,5 +72,5 @@ When the user wants to post to multiple platforms at once:
 ## When NOT to use
 
 - User wants to write content from scratch without posting -- use the Writing Helper skill instead
-- User wants analytics, follower management, or metrics -- Composio may support these but they're outside this workflow
+- User wants analytics, follower management, or metrics -- outside this workflow
 - User wants to schedule recurring posts -- use the Social Content Scheduler skill instead

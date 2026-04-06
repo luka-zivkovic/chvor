@@ -72,6 +72,15 @@ function parseDependencies(raw: unknown): string[] | undefined {
   return raw.filter((d) => typeof d === "string" && d.length > 0) as string[];
 }
 
+function parseProvides(raw: unknown): Record<string, string> | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const result: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string") result[k] = v;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 export function parseCapabilityMd(
   content: string,
   filePath: string,
@@ -110,6 +119,8 @@ export function parseCapabilityMd(
       outputs: parseParams(fm.outputs),
       config: parseConfigParams(fm.config),
       dependencies: parseDependencies(fm.dependencies),
+      provides: parseProvides(fm.provides),
+      needs: parseDependencies(fm.needs),
     };
 
     const instructions = body.trim();

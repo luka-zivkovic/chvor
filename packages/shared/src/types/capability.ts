@@ -41,6 +41,18 @@ export interface CapabilityMetadata {
   outputs?: CapabilityParam[];
   config?: SkillConfigParam[];
   dependencies?: string[];
+  /**
+   * Capabilities this tool provides.
+   * Maps capability ID to MCP tool name, e.g. { "twitter:post": "TWITTER_CREATE_TWEET" }.
+   * Only meaningful for tools, not skills.
+   */
+  provides?: Record<string, string>;
+  /**
+   * Capabilities this skill needs (abstract references resolved before prompt).
+   * Array of capability IDs like ["twitter:post", "social:connect"].
+   * Only meaningful for skills, not tools.
+   */
+  needs?: string[];
 }
 
 export interface McpServerConfig {

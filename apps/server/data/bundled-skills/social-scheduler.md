@@ -13,19 +13,21 @@ tags:
   - automation
   - cron
   - recurring
-requires:
-  credentials:
-    - composio
+needs:
+  - social:list
+  - social:connect
+  - twitter:post
+  - linkedin:post
 ---
 When the user asks to schedule social media posts, set up recurring content, or create a content calendar:
 
 ## How it works
 
-This skill combines `native__create_schedule` (cron-based task scheduling) with the social posting tools (`native__social_execute`). A schedule runs a prompt at the specified time, and that prompt instructs the AI to generate and post content automatically.
+This skill combines `native__create_schedule` (cron-based task scheduling) with your available social posting tools. A schedule runs a prompt at the specified time, and that prompt instructs the AI to generate and post content automatically.
 
 ## First steps
 
-1. **Verify connections**: Call `native__social_list` to confirm the target platforms are connected.
+1. **Verify connections**: Call {{cap:social:list}} to confirm the target platforms are connected.
 2. **Clarify the content plan**: Ask what kind of recurring content they want, which platform(s), and how often.
 3. **Choose a schedule pattern** from the presets below or create a custom one.
 
@@ -54,7 +56,7 @@ Ask the user which pattern fits, or help them define a custom cron expression.
 
 2. **Build a self-contained prompt**: The scheduled prompt runs without the user present, so it must include ALL context needed to generate and post content. Use this template:
 
-   > Generate a [content type] about [topic/niche]. The tone should be [tone]. Format it for [platform] following these rules: [platform-specific rules from the relevant poster skill]. Keep it under [character limit] characters. Then post it to my connected [platform] account using native__social_execute. Before posting, discover the correct action name via native__social_actions for platform "[platform]".
+   > Generate a [content type] about [topic/niche]. The tone should be [tone]. Format it for [platform] following these rules: [platform-specific rules from the relevant poster skill]. Keep it under [character limit] characters. Then post it to my connected [platform] account.
 
 3. **Set delivery targets** (optional): Use the `deliverTo` parameter to also send the generated content to a channel (Telegram, Discord, Slack) for visibility.
 
@@ -65,7 +67,7 @@ Ask the user which pattern fits, or help them define a custom cron expression.
 **Automated posting carries risk.** Always recommend these safeguards:
 
 1. **Start with a dry run**: Create the schedule with `deliverTo` set to a private channel (Telegram, Discord) but WITHOUT the posting instruction in the prompt. This lets the user review generated content before it goes live.
-2. **Graduate to auto-posting**: Once the user is confident in the content quality, update the prompt to include the `native__social_execute` step.
+2. **Graduate to auto-posting**: Once the user is confident in the content quality, update the prompt to include the posting step.
 3. **Set a review cadence**: Suggest the user review scheduled output weekly to catch drift in tone or relevance.
 4. **Use one-shot for testing**: Create a `oneShot: true` schedule to test the flow once before committing to a recurring schedule.
 
@@ -79,20 +81,20 @@ Ask the user which pattern fits, or help them define a custom cron expression.
 ## Schedule prompt examples
 
 **Daily LinkedIn tip:**
-> Generate a concise professional tip about software engineering leadership. Format it for LinkedIn: hook in the first 2 lines, short paragraphs, 1300-2000 characters, end with an engaging question, 3-5 hashtags at the bottom. No external links in the body. Post it to my connected LinkedIn account using native__social_execute (discover the action name via native__social_actions first).
+> Generate a concise professional tip about software engineering leadership. Format it for LinkedIn: hook in the first 2 lines, short paragraphs, 1300-2000 characters, end with an engaging question, 3-5 hashtags at the bottom. No external links in the body. Post it to my connected LinkedIn account.
 
 **Weekly Twitter thread:**
-> Generate a Twitter thread (4-6 tweets) about a trending topic in AI/ML. Tweet 1 must be a compelling hook. Each tweet under 280 characters. Post as a thread by chaining replies using the tweet ID from each response. Use native__social_actions to discover the tweet creation action, then native__social_execute to post each tweet sequentially.
+> Generate a Twitter thread (4-6 tweets) about a trending topic in AI/ML. Tweet 1 must be a compelling hook. Each tweet under 280 characters. Post as a thread by chaining replies using the tweet ID from each response.
 
 **Daily motivational quote:**
-> Pick an inspiring quote from a notable figure in technology or science. Format it as a tweet: the quote in quotation marks, attributed to the author, with 1-2 relevant hashtags. Keep it under 280 characters. Post to my connected Twitter account using native__social_execute.
+> Pick an inspiring quote from a notable figure in technology or science. Format it as a tweet: the quote in quotation marks, attributed to the author, with 1-2 relevant hashtags. Keep it under 280 characters. Post to my connected Twitter account.
 
 ## Common mistakes
 
 - **Prompt too vague**: "Post something interesting" will produce inconsistent results. Be specific about topic, tone, length, and formatting.
-- **Forgetting action discovery**: The prompt must include the `native__social_actions` step since action names aren't guaranteed to be stable.
+- **Missing tool references**: The prompt should mention the target platform so the AI knows which posting tools to use.
 - **No safety net**: Always start with dry-run delivery to a channel before enabling auto-posting.
-- **Token expiration**: Long-running schedules may hit expired OAuth tokens. If a scheduled post fails, the error will appear in the schedule's `lastError`. The user may need to re-authorize via `native__social_connect`.
+- **Token expiration**: Long-running schedules may hit expired OAuth tokens. If a scheduled post fails, the error will appear in the schedule's `lastError`. The user may need to re-authorize via {{cap:social:connect}}.
 
 ## When NOT to use
 

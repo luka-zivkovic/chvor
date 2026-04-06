@@ -15,17 +15,18 @@ tags:
   - content
   - writing
   - cms
-requires:
-  credentials:
-    - composio
+needs:
+  - social:list
+  - social:connect
+  - wordpress:create-post
 ---
 When the user asks to write a blog post, publish an article, or push content to a CMS:
 
 ## First steps
 
 1. **Clarify the brief**: Ask for topic, target audience, target platform (WordPress, Ghost, Medium, etc.), and desired tone if not provided.
-2. **Check connection**: Call `native__social_list` to verify the target CMS platform is connected. If not, initiate `native__social_connect`.
-3. **Discover actions**: Call `native__social_actions` for the target platform to get the exact publish/create-post action names and parameter schemas.
+2. **Check connection**: Call {{cap:social:list}} to verify the target CMS platform is connected. If not, initiate {{cap:social:connect}}.
+3. **Find actions**: Use {{cap:wordpress:create-post}} for WordPress, or the equivalent tool for the target CMS platform.
 
 ## Writing workflow
 
@@ -39,7 +40,7 @@ When the user asks to write a blog post, publish an article, or push content to 
 2. **Show the full draft** to the user for review. Include title, meta description, and the complete body.
 3. **Iterate** based on feedback until the user approves.
 4. **Format for the target platform** (see platform-specific rules below).
-5. **Publish** via `native__social_execute` with the discovered action and formatted content.
+5. **Publish** using {{cap:wordpress:create-post}} or the equivalent CMS tool.
 6. **Report the result**: Published URL, post ID, or error details.
 
 ## Platform-specific formatting
@@ -77,6 +78,6 @@ After successful publication:
 
 ## When NOT to use
 
-- User wants to edit an already-published post -- most CMS update actions have different parameters; discover them via `native__social_actions` first
+- User wants to edit an already-published post -- check available tools for update/edit actions
 - User wants pure writing help without publishing -- use the Writing Helper skill instead
 - User wants to schedule blog posts for future dates -- use the Social Content Scheduler skill
