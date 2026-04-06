@@ -98,7 +98,8 @@ const BASE = "/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    // Only set JSON content-type when body is a string (not FormData/Blob)
+    ...(typeof init?.body === "string" || !init?.body ? { "Content-Type": "application/json" } : {}),
     ...(init?.headers as Record<string, string>),
   };
 

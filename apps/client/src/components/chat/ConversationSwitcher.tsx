@@ -16,6 +16,7 @@ function timeAgo(dateStr: string): string {
 
 export function ConversationSwitcher() {
   const [open, setOpen] = useState(false);
+  const [focusIdx, setFocusIdx] = useState(-1);
   const ref = useRef<HTMLDivElement>(null);
   const conversations = useAppStore((s) => s.conversations);
   const sessionId = useAppStore((s) => s.sessionId);
@@ -32,13 +33,44 @@ export function ConversationSwitcher() {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  // Reset focus index when opening
+  useEffect(() => {
+    if (open) setFocusIdx(-1);
+  }, [open]);
+
   const recent = conversations.slice(0, 10);
   const currentCompositeId = sessionId ? `web:${sessionId}:default` : null;
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!open) return;
+    const itemCount = recent.length + 1; // +1 for "View all" button
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusIdx((i) => (i + 1) % itemCount);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusIdx((i) => (i - 1 + itemCount) % itemCount);
+    } else if (e.key === "Escape") {
+      setOpen(false);
+    } else if (e.key === "Enter" && focusIdx >= 0) {
+      e.preventDefault();
+      if (focusIdx < recent.length) {
+        const c = recent[focusIdx];
+        if (c.id !== currentCompositeId) switchConversation(c.id);
+        setOpen(false);
+      } else {
+        openPanel("conversations");
+        setOpen(false);
+      }
+    }
+  };
+
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative" ref={ref} onKeyDown={handleKeyDown}>
       <button
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
         className="flex items-center gap-1 text-muted-foreground/70 hover:text-foreground transition-colors"
         title="Switch conversation"
       >
@@ -48,14 +80,16 @@ export function ConversationSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 w-72 rounded-lg border border-border/50 bg-popover shadow-lg z-50 overflow-hidden">
+        <div role="listbox" aria-label="Conversations" className="absolute top-full left-0 mt-1 w-72 rounded-lg border border-border/50 bg-popover shadow-lg z-50 overflow-hidden">
           {recent.length === 0 ? (
             <div className="px-3 py-4 text-xs text-muted-foreground text-center">No conversations yet</div>
           ) : (
             <div className="max-h-80 overflow-y-auto">
-              {recent.map((c) => (
+              {recent.map((c, i) => (
                 <button
                   key={c.id}
+                  role="option"
+                  aria-selected={c.id === currentCompositeId}
                   onClick={() => {
                     if (c.id !== currentCompositeId) {
                       switchConversation(c.id);
@@ -64,7 +98,8 @@ export function ConversationSwitcher() {
                   }}
                   className={cn(
                     "w-full px-3 py-2 text-left hover:bg-accent/50 transition-colors flex items-center justify-between gap-2",
-                    c.id === currentCompositeId && "bg-accent/30"
+                    c.id === currentCompositeId && "bg-accent/30",
+                    focusIdx === i && "bg-accent/50 outline-none"
                   )}
                 >
                   <div className="min-w-0 flex-1">
@@ -90,7 +125,10 @@ export function ConversationSwitcher() {
               openPanel("conversations");
               setOpen(false);
             }}
-            className="w-full px-3 py-2 text-[10px] text-muted-foreground hover:text-foreground border-t border-border/30 hover:bg-accent/30 transition-colors text-center"
+            className={cn(
+              "w-full px-3 py-2 text-[10px] text-muted-foreground hover:text-foreground border-t border-border/30 hover:bg-accent/30 transition-colors text-center",
+              focusIdx === recent.length && "bg-accent/50 outline-none"
+            )}
           >
             View all conversations
           </button>

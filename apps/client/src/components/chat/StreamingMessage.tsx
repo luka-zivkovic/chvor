@@ -1,14 +1,7 @@
-import type { MediaArtifact } from "@chvor/shared";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { prettifyToolName, sanitizeMessageContent } from "@/lib/chat-utils";
 import { useAppStore } from "@/stores/app-store";
-
-interface StreamingTool {
-  name: string;
-  status: "running" | "done";
-  result?: string;
-  media?: MediaArtifact[];
-}
+import type { StreamingTool } from "@/stores/app-store";
 
 interface Props {
   content: string | null;

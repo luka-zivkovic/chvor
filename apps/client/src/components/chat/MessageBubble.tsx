@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import type { ChatMessage } from "@chvor/shared";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { MediaRenderer } from "./MediaRenderer";
@@ -55,7 +55,7 @@ function Linkify({ text }: { text: string }) {
   );
 }
 
-function formatTime(iso: string): string {
+function formatTime(iso: string, _tick?: number): string {
   const date = new Date(iso);
   const diffMs = Date.now() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
@@ -66,8 +66,19 @@ function formatTime(iso: string): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+/** Force re-render every 60s so relative timestamps stay fresh. */
+function useTimeTick() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  return tick;
+}
+
 export function MessageBubble({ message }: Props) {
   const isUser = message.role === "user";
+  const tick = useTimeTick();
 
   if (isUser) {
     return (
@@ -85,14 +96,14 @@ export function MessageBubble({ message }: Props) {
             </p>
           </div>
           <span className="mt-1 block text-right font-mono text-[10px] text-muted-foreground/40" title={new Date(message.timestamp).toLocaleString()}>
-            {formatTime(message.timestamp)}
+            {formatTime(message.timestamp, tick)}
           </span>
         </div>
       </div>
     );
   }
 
-  return <AssistantBubble message={message} />;
+  return <AssistantBubble message={message} tick={tick} />;
 }
 
 function useEmotionForMessage(timestamp: string): { label: string; color: string } | null {
@@ -116,7 +127,7 @@ function useEmotionForMessage(timestamp: string): { label: string; color: string
   }, [history, timestamp]);
 }
 
-function AssistantBubble({ message }: Props) {
+function AssistantBubble({ message, tick }: Props & { tick: number }) {
   const [copied, setCopied] = useState(false);
   const emotion = useEmotionForMessage(message.timestamp);
   const trace = useAppStore((s) => s.messageTraces[message.id]);
@@ -163,7 +174,7 @@ function AssistantBubble({ message }: Props) {
         </button>
         <div className="mt-1 flex items-center gap-2">
           <span className="font-mono text-[10px] text-muted-foreground/40" title={new Date(message.timestamp).toLocaleString()}>
-            {formatTime(message.timestamp)}
+            {formatTime(message.timestamp, tick)}
           </span>
           {emotion && (
             <span className="flex items-center gap-1 text-[10px] text-muted-foreground/50">

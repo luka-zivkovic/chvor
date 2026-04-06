@@ -303,7 +303,7 @@ export function getStaleSessions(maxAgeDays: number): { id: string; channelType:
   return db.prepare(
     `SELECT s.id, s.channel_type as channelType,
             (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) as messageCount
-     FROM sessions s WHERE s.updated_at < ?`
+     FROM sessions s WHERE s.updated_at < ? AND s.archived_at IS NULL`
   ).all(cutoff) as { id: string; channelType: string; messageCount: number }[];
 }
 
