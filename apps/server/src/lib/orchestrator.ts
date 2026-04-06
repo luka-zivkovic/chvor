@@ -160,6 +160,26 @@ function buildPersonalitySection(cfg: PersonaConfig): string {
   return parts.join("\n").trimEnd();
 }
 
+/** Build a resource context block for directory-based skills (agents, references, scripts). */
+function buildSkillResourceContext(skill: Skill): string {
+  if (!skill.basedir) return "";
+  const parts: string[] = [];
+  if (skill.agents?.length) {
+    parts.push(`Agents: ${skill.agents.map((a) => a.name).join(", ")} (use native__spawn_skill_agent with skillId="${skill.id}")`);
+  }
+  if (skill.resources?.references?.length) {
+    parts.push(`References: ${skill.resources.references.join(", ")} (use native__read_skill_resource with skillId="${skill.id}")`);
+  }
+  if (skill.resources?.scripts?.length) {
+    parts.push(`Scripts: ${skill.resources.scripts.join(", ")} (in ${skill.basedir}/scripts/)`);
+  }
+  if (skill.resources?.assets?.length) {
+    parts.push(`Assets: ${skill.resources.assets.join(", ")} (in ${skill.basedir}/assets/)`);
+  }
+  if (parts.length === 0) return "";
+  return `\n\n**Skill Resources:**\n${parts.map((p) => `- ${p}`).join("\n")}`;
+}
+
 /**
  * Build system prompt split into stable (cacheable) and volatile (per-turn) parts.
  * Stable: core identity, tool usage, skills, personality, emotions, directives, personalization
@@ -213,12 +233,12 @@ function buildSystemPrompt(
   const toolsWithInstructions = tools.filter((t) => resolveInstructions("tool", t.id, t.instructions).trim());
 
   if (promptSkills.length > 0) {
-    const lines = promptSkills.map((s) => `### ${s.metadata.name}\n${resolveInstructions("skill", s.id, s.instructions)}`).join("\n\n");
+    const lines = promptSkills.map((s) => `### ${s.metadata.name}\n${resolveInstructions("skill", s.id, s.instructions)}${buildSkillResourceContext(s)}`).join("\n\n");
     stableSections.push(`## Behavioral Skills\n\n${lines}`);
   }
 
   if (workflowSkills.length > 0) {
-    const lines = workflowSkills.map((s) => `### ${s.metadata.name}\n${resolveInstructions("skill", s.id, s.instructions)}`).join("\n\n");
+    const lines = workflowSkills.map((s) => `### ${s.metadata.name}\n${resolveInstructions("skill", s.id, s.instructions)}${buildSkillResourceContext(s)}`).join("\n\n");
     stableSections.push(`## Workflow Procedures\n\nFollow these step-by-step procedures when the user requests them. Use your available tools to execute each step.\n\n${lines}`);
   }
 

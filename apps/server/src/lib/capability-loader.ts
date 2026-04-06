@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import type { Skill, Tool, Capability } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
-import { parseCapabilityMd } from "./capability-parser.ts";
+import { parseCapabilityMd, parseDirectorySkill } from "./capability-parser.ts";
 import { getInstalledRegistryIds } from "./registry-manager.ts";
 import { compareSemver } from "./semver.ts";
 
@@ -22,18 +22,37 @@ let cachedBundled: Capability[] | null = null;
 function scanDir(dir: string, source: "bundled" | "user"): Capability[] {
   if (!existsSync(dir)) return [];
   const capabilities: Capability[] = [];
-  const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
-  for (const file of files) {
-    const filePath = join(dir, file);
-    try {
-      const content = readFileSync(filePath, "utf8");
-      const capability = parseCapabilityMd(content, filePath, source);
-      if (capability) capabilities.push(capability);
-    } catch (err) {
-      console.warn(`[capability-loader] failed to read ${filePath}:`, err);
-      logError("capability_error", err, { filePath });
+  const entries = readdirSync(dir, { withFileTypes: true });
+
+  // Process single .md files (existing behavior)
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith(".md")) {
+      const filePath = join(dir, entry.name);
+      try {
+        const content = readFileSync(filePath, "utf8");
+        const capability = parseCapabilityMd(content, filePath, source);
+        if (capability) capabilities.push(capability);
+      } catch (err) {
+        console.warn(`[capability-loader] failed to read ${filePath}:`, err);
+        logError("capability_error", err, { filePath });
+      }
     }
   }
+
+  // Process directory-based skills (new: directories with SKILL.md entry point)
+  for (const entry of entries) {
+    if (entry.isDirectory() && !entry.name.startsWith(".")) {
+      const dirPath = join(dir, entry.name);
+      try {
+        const skill = parseDirectorySkill(dirPath, source);
+        if (skill) capabilities.push(skill);
+      } catch (err) {
+        console.warn(`[capability-loader] failed to parse dir skill ${dirPath}:`, err);
+        logError("capability_error", err, { filePath: dirPath });
+      }
+    }
+  }
+
   return capabilities;
 }
 

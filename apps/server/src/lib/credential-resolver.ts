@@ -58,3 +58,35 @@ export function resolveEnvPlaceholders(
 
   return resolved;
 }
+
+/**
+ * Resolve {{credentials.xxx}} placeholders in a URL string.
+ * Used for remote MCP transports (SSE/HTTP) where the API key is embedded in the URL.
+ */
+export function resolveUrlPlaceholders(
+  url: string,
+  requiredCredentials: string[] | undefined
+): string {
+  if (!url.includes("{{credentials.")) return url;
+
+  const credentialsByType = new Map<string, Record<string, string>>();
+  if (requiredCredentials) {
+    const allCreds = listCredentials();
+    for (const reqType of requiredCredentials) {
+      const match = allCreds.find((c) => c.type === reqType);
+      if (match) {
+        const full = getCredentialData(match.id);
+        if (full) credentialsByType.set(reqType, full.data);
+      }
+    }
+  }
+
+  return url.replace(PLACEHOLDER_RE, (_match, credType: string) => {
+    const data = credentialsByType.get(credType);
+    if (!data) {
+      console.warn(`[credential-resolver] no credential found for type: ${credType}`);
+      return "";
+    }
+    return Object.values(data)[0] ?? "";
+  });
+}

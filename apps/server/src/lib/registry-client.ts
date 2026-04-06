@@ -204,6 +204,52 @@ export async function fetchEntryContent(
   }
 }
 
+/** Fetch the file manifest for a directory-based skill from the registry. */
+export async function fetchDirectoryManifest(
+  registryUrl: string,
+  kind: RegistryEntryKind,
+  id: string,
+): Promise<{ files: string[] }> {
+  assertValidRegistryUrl(registryUrl);
+  const url = `${registryUrl}/${kind}s/${encodeURIComponent(id)}/manifest.json`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(`Failed to fetch directory manifest for "${id}": ${parseRegistryError(res.status, body)}`);
+    }
+    return await res.json() as { files: string[] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Fetch a specific file from a directory-based registry entry. */
+export async function fetchDirectoryFile(
+  registryUrl: string,
+  kind: RegistryEntryKind,
+  id: string,
+  filePath: string,
+): Promise<string> {
+  assertValidRegistryUrl(registryUrl);
+  const url = `${registryUrl}/${kind}s/${encodeURIComponent(id)}/${encodeURIComponent(filePath)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch file "${filePath}" for "${id}": ${res.status}`);
+    }
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** @deprecated Use fetchEntryContent(url, "skill", id) */
 export async function fetchSkillContent(
   registryUrl: string,

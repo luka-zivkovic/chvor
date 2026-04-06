@@ -4461,117 +4461,123 @@ handlers.set(SOCIAL_DISCONNECT_NAME, handleSocialDisconnect);
 nativeToolMapping.set(SOCIAL_DISCONNECT_NAME, { kind: "tool", id: "composio" });
 
 // ---------------------------------------------------------------------------
-// Social Action Execution (Composio — direct SDK, bypasses composio-mcp)
+// Skill Agent & Resource Tools (for directory-based skills)
 // ---------------------------------------------------------------------------
 
-const SOCIAL_ACTIONS_NAME = "native__social_actions";
-const socialActionsToolDef = tool({
+const SPAWN_SKILL_AGENT_NAME = "native__spawn_skill_agent";
+const spawnSkillAgentToolDef = tool({
   description:
-    "[Social] List available actions for a connected social platform. " +
-    "Call this to discover what actions you can perform (e.g. post, comment, browse) " +
-    "before using native__social_execute. The account must already be connected.",
+    "[Skill] Spawn a sub-agent defined by a directory-based skill. " +
+    "The agent has its own system prompt and processes the given task independently, " +
+    "returning its response as the tool result.",
   parameters: z.object({
-    platform: z
-      .string()
-      .describe(
-        "Platform toolkit name, e.g. 'reddit', 'twitter', 'linkedin', 'instagram'",
-      ),
+    skillId: z.string().describe("The parent skill ID"),
+    agentId: z.string().describe("The agent to spawn (matches an entry in the skill's agents list)"),
+    task: z.string().describe("The task/prompt to send to the sub-agent"),
+    context: z.string().optional().describe("Optional additional context to include"),
   }),
 });
 
-async function handleSocialActions(
+async function handleSpawnSkillAgent(
   args: Record<string, unknown>,
 ): Promise<NativeToolResult> {
   try {
-    const { listActions } = await import("./composio-client.ts");
-    const platform = String(args.platform).toLowerCase().trim();
+    const { loadSkills } = await import("./capability-loader.ts");
+    const { createModelForRole } = await import("./llm-router.ts");
 
-    const allActions = await listActions(platform);
+    const skillId = String(args.skillId).trim();
+    const agentId = String(args.agentId).trim();
+    const task = String(args.task);
+    const context = args.context ? String(args.context) : undefined;
 
-    if (allActions.length === 0) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `No actions found for "${platform}". Make sure the account is connected (use native__social_list) and the platform name is correct.`,
-          },
-        ],
-      };
+    const skills = loadSkills();
+    const skill = skills.find((s) => s.id === skillId);
+    if (!skill) {
+      return { content: [{ type: "text", text: `Skill "${skillId}" not found.` }] };
+    }
+    if (!skill.agents?.length) {
+      return { content: [{ type: "text", text: `Skill "${skillId}" has no sub-agents defined.` }] };
     }
 
-    const MAX_ACTIONS = 50;
-    const actions = allActions.slice(0, MAX_ACTIONS);
-    const truncNote = allActions.length > MAX_ACTIONS
-      ? `\n\nShowing first ${MAX_ACTIONS} of ${allActions.length} total actions.`
-      : "";
+    const agent = skill.agents.find((a) => a.id === agentId);
+    if (!agent) {
+      const available = skill.agents.map((a) => a.id).join(", ");
+      return { content: [{ type: "text", text: `Agent "${agentId}" not found in skill "${skillId}". Available: ${available}` }] };
+    }
 
-    const lines = actions.map(
-      (a) => `- **${a.name}** — ${a.description || a.displayName || "(no description)"}`,
-    );
+    // One-shot LLM call with the agent's system prompt (lightweight to control cost)
+    let model;
+    try {
+      model = createModelForRole("lightweight");
+    } catch {
+      return { content: [{ type: "text", text: "Sub-agent unavailable: no LLM configured for lightweight role." }] };
+    }
+    const { generateText } = await import("ai");
+    const userMessage = context ? `${task}\n\nContext:\n${context}` : task;
+    const result = await generateText({
+      model,
+      system: agent.systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    });
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Available ${platform} actions (${allActions.length}):\n\n${lines.join("\n")}${truncNote}\n\nUse native__social_execute with the action name and required arguments.`,
-        },
-      ],
-    };
+    return { content: [{ type: "text", text: result.text }] };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { content: [{ type: "text", text: `Failed to list actions: ${msg}` }] };
+    return { content: [{ type: "text", text: `Sub-agent execution failed: ${msg}` }] };
   }
 }
 
-handlers.set(SOCIAL_ACTIONS_NAME, handleSocialActions);
-nativeToolMapping.set(SOCIAL_ACTIONS_NAME, { kind: "tool", id: "composio" });
+handlers.set(SPAWN_SKILL_AGENT_NAME, handleSpawnSkillAgent);
+nativeToolMapping.set(SPAWN_SKILL_AGENT_NAME, { kind: "skill", id: "system" });
 
-const SOCIAL_EXECUTE_NAME = "native__social_execute";
-const socialExecuteToolDef = tool({
+const READ_SKILL_RESOURCE_NAME = "native__read_skill_resource";
+const readSkillResourceToolDef = tool({
   description:
-    "[Social] Execute a Composio action on a connected social account. " +
-    "Use native__social_actions first to discover available action names and their parameters. " +
-    "Example: action='REDDIT_GET_SUBREDDIT_POSTS', arguments={subreddit: 'programming'}",
+    "[Skill] Read a reference file bundled with a directory-based skill. " +
+    "Use this to access schemas, documentation, or other reference material.",
   parameters: z.object({
-    action: z
-      .string()
-      .describe("The Composio action name, e.g. 'REDDIT_GET_SUBREDDIT_POSTS'"),
-    arguments: z
-      .record(z.unknown())
-      .optional()
-      .default({})
-      .describe("Action-specific arguments as key-value pairs"),
+    skillId: z.string().describe("The skill ID"),
+    resourcePath: z.string().describe("Relative path within the skill directory, e.g. 'references/schemas.md'"),
   }),
 });
 
-async function handleSocialExecute(
+async function handleReadSkillResource(
   args: Record<string, unknown>,
 ): Promise<NativeToolResult> {
   try {
-    const { executeAction } = await import("./composio-client.ts");
-    const action = String(args.action).trim();
-    const actionArgs = (args.arguments ?? {}) as Record<string, unknown>;
+    const { loadSkills } = await import("./capability-loader.ts");
+    const { resolve: pathResolve, relative, isAbsolute, sep } = await import("node:path");
+    const { readFileSync } = await import("node:fs");
 
-    const result = await executeAction(action, actionArgs);
+    const skillId = String(args.skillId).trim();
+    const resourcePath = String(args.resourcePath).trim();
 
-    const raw =
-      typeof result === "string" ? result : JSON.stringify(result.data, null, 2);
-    const MAX_RESPONSE = 8000;
-    const text = raw.length > MAX_RESPONSE
-      ? raw.slice(0, MAX_RESPONSE) + `\n\n... (truncated, ${raw.length} chars total)`
-      : raw;
+    const skills = loadSkills();
+    const skill = skills.find((s) => s.id === skillId);
+    if (!skill) {
+      return { content: [{ type: "text", text: `Skill "${skillId}" not found.` }] };
+    }
+    if (!skill.basedir) {
+      return { content: [{ type: "text", text: `Skill "${skillId}" is not a directory-based skill.` }] };
+    }
 
-    return {
-      content: [{ type: "text", text }],
-    };
+    // Security: prevent path traversal using relative path check
+    const resolved = pathResolve(skill.basedir, resourcePath);
+    const rel = relative(skill.basedir, resolved);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      return { content: [{ type: "text", text: `Access denied: path "${resourcePath}" escapes skill directory.` }] };
+    }
+
+    const content = readFileSync(resolved, "utf8");
+    return { content: [{ type: "text", text: content }] };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { content: [{ type: "text", text: `Action execution failed: ${msg}` }] };
+    return { content: [{ type: "text", text: `Failed to read resource: ${msg}` }] };
   }
 }
 
-handlers.set(SOCIAL_EXECUTE_NAME, handleSocialExecute);
-nativeToolMapping.set(SOCIAL_EXECUTE_NAME, { kind: "tool", id: "composio" });
+handlers.set(READ_SKILL_RESOURCE_NAME, handleReadSkillResource);
+nativeToolMapping.set(READ_SKILL_RESOURCE_NAME, { kind: "skill", id: "system" });
 
 // ---------------------------------------------------------------------------
 // Sandbox: Docker code execution
@@ -4693,8 +4699,8 @@ export function getNativeToolDefinitions(): Record<
     [SOCIAL_CONNECT_NAME]: socialConnectToolDef,
     [SOCIAL_LIST_NAME]: socialListToolDef,
     [SOCIAL_DISCONNECT_NAME]: socialDisconnectToolDef,
-    [SOCIAL_ACTIONS_NAME]: socialActionsToolDef,
-    [SOCIAL_EXECUTE_NAME]: socialExecuteToolDef,
+    [SPAWN_SKILL_AGENT_NAME]: spawnSkillAgentToolDef,
+    [READ_SKILL_RESOURCE_NAME]: readSkillResourceToolDef,
     ...(isCapabilityEnabled("tool", "a2ui") ? {
       [A2UI_PUSH_NAME]: a2uiPushToolDef,
       [A2UI_RESET_NAME]: a2uiResetToolDef,
