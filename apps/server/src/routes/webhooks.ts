@@ -105,6 +105,16 @@ webhooks.post("/:id/receive", async (c) => {
     body = rawBody;
   }
 
+  // Reject requests when no secret is configured (except Notion verification challenges)
+  if (!sub.secret) {
+    // Allow Notion verification challenges through without a secret (initial handshake)
+    if (sub.source === "notion" && typeof body === "object" && body !== null && (body as Record<string, unknown>).type === "url_verification") {
+      return c.json({ challenge: (body as Record<string, unknown>).challenge });
+    }
+    console.warn(`[webhooks] rejecting unsigned request for "${sub.name}" — no secret configured`);
+    return c.json({ error: "webhook secret not configured — unsigned requests are rejected for security" }, 403);
+  }
+
   // Verify signature based on source
   switch (sub.source) {
     case "github": {
@@ -115,18 +125,9 @@ webhooks.post("/:id/receive", async (c) => {
       break;
     }
     case "notion": {
-      // Notion verification challenge (initial setup handshake)
-      if (typeof body === "object" && body !== null && (body as Record<string, unknown>).type === "url_verification") {
-        return c.json({ challenge: (body as Record<string, unknown>).challenge });
-      }
-      // Notion sends HMAC-SHA256 in x-notion-signature header when a secret is configured.
-      // When a secret is set, require and verify the signature header.
-      // Otherwise, fall back to the unique subscription UUID in the URL as baseline auth.
-      if (sub.secret) {
-        const notionSig = c.req.header("x-notion-signature");
-        if (!notionSig || !verifyNotionSignature(sub.secret, rawBody, notionSig)) {
-          return c.json({ error: "invalid signature" }, 401);
-        }
+      const notionSig = c.req.header("x-notion-signature");
+      if (!notionSig || !verifyNotionSignature(sub.secret, rawBody, notionSig)) {
+        return c.json({ error: "invalid signature" }, 401);
       }
       break;
     }
@@ -138,13 +139,8 @@ webhooks.post("/:id/receive", async (c) => {
       break;
     }
     case "gmail": {
-      // Gmail Pub/Sub sends base64-encoded JSON in message.data.
-      // Verify the Bearer token in Authorization header matches the subscription secret.
-      // Uses timing-safe comparison to prevent token leakage via timing attacks.
-      if (sub.secret) {
-        if (!verifyBearerToken(sub.secret, c.req.header("authorization"))) {
-          return c.json({ error: "invalid authorization" }, 401);
-        }
+      if (!verifyBearerToken(sub.secret, c.req.header("authorization"))) {
+        return c.json({ error: "invalid authorization" }, 401);
       }
       break;
     }

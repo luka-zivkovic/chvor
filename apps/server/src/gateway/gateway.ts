@@ -15,7 +15,7 @@ import { generateSessionTitle } from "../lib/title-generator.ts";
 import { getWSInstance } from "./ws-instance.ts";
 import { listCredentials } from "../db/credential-store.ts";
 import { redactSensitiveData, stripToolAnnotations } from "../lib/sensitive-filter.ts";
-import { getSessionLifecycleConfig, resolveResetPolicy } from "../db/config-store.ts";
+import { getSessionLifecycleConfig, resolveResetPolicy, getChannelPolicy } from "../db/config-store.ts";
 import { resetSession } from "../lib/session-reset.ts";
 
 export class Gateway extends EventEmitter {
@@ -68,7 +68,8 @@ export class Gateway extends EventEmitter {
   }
 
   private async processMessage(rawMessage: NormalizedMessage): Promise<void> {
-    console.log(`[gateway] message from ${rawMessage.channelType}/${rawMessage.senderId}: ${rawMessage.text}`);
+    const safePreview = redactSensitiveData(rawMessage.text).slice(0, 80);
+    console.log(`[gateway] message from ${rawMessage.channelType}/${rawMessage.senderId}: ${safePreview}`);
 
     const targetClient = rawMessage.originClientId;
 
@@ -423,6 +424,25 @@ export class Gateway extends EventEmitter {
     for (const [name, channel] of this.channels) {
       await channel.start();
       console.log(`[gateway] started channel: ${name}`);
+    }
+    this.warnDenyAllPolicies();
+  }
+
+  /** Log a warning for channels that have credentials but an effective deny-all policy. */
+  private warnDenyAllPolicies(): void {
+    const creds = listCredentials();
+    const externalTypes = ["telegram", "discord", "slack", "whatsapp", "matrix"] as const;
+    for (const ct of externalTypes) {
+      if (!creds.find((c) => c.type === ct)) continue;
+      const policy = getChannelPolicy(ct);
+      const dmBlocked = policy.dm.mode === "allowlist" && policy.dm.allowlist.length === 0;
+      const groupBlocked = policy.group.mode === "allowlist" && policy.group.allowlist.length === 0;
+      if (dmBlocked && groupBlocked) {
+        console.warn(
+          `[gateway] ⚠ channel "${ct}" has credentials but its policy blocks ALL messages (empty allowlist). ` +
+          `Configure the allowlist via PATCH /api/channels/${ct}/policy or set mode to "open".`
+        );
+      }
     }
   }
 

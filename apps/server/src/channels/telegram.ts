@@ -8,6 +8,8 @@ import {
 } from "../db/credential-store.ts";
 import { resolveApproval } from "../lib/native-tools.ts";
 import { storeMediaFromBuffer, MAX_ARTIFACT_BYTES } from "../lib/media-store.ts";
+import { splitText } from "./text-utils.ts";
+import { getChannelPolicy } from "../db/config-store.ts";
 
 export class TelegramChannel implements ChannelAdapter {
   name = "telegram" as const;
@@ -17,6 +19,14 @@ export class TelegramChannel implements ChannelAdapter {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private cachedBotToken: string | null = null;
+
+  /** Download a file from Telegram by file_path. Keeps the bot token out of logged URLs. */
+  private async downloadFile(filePath: string): Promise<Buffer> {
+    const url = `https://api.telegram.org/file/bot${this.cachedBotToken}/${filePath}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) throw new Error(`Telegram file download failed: ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  }
 
   async start(): Promise<void> {
     const token = this.loadBotToken();
@@ -37,6 +47,11 @@ export class TelegramChannel implements ChannelAdapter {
       if (!msg.from) return; // ignore anonymous/channel messages
 
       const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
+      const chatType = msg.message_thread_id ? "thread" : isGroup ? "group" : "dm";
+
+      // Access control — check policy before processing
+      if (this.shouldFilter(chatType as "dm" | "group" | "thread", String(msg.from.id))) return;
+
       const normalized: NormalizedMessage = {
         id: randomUUID(),
         channelType: "telegram",
@@ -50,7 +65,7 @@ export class TelegramChannel implements ChannelAdapter {
         threadId: msg.message_thread_id
           ? String(msg.message_thread_id)
           : undefined,
-        chatType: msg.message_thread_id ? "thread" : isGroup ? "group" : "dm",
+        chatType,
       };
 
       this.handler(normalized);
@@ -64,10 +79,7 @@ export class TelegramChannel implements ChannelAdapter {
       try {
         // Download voice file from Telegram
         const file = await ctx.getFile();
-        const url = `https://api.telegram.org/file/bot${this.cachedBotToken}/${file.file_path}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-        if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-        const audioData = new Uint8Array(await res.arrayBuffer());
+        const audioData = new Uint8Array(await this.downloadFile(file.file_path!));
 
         const isVoiceGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
         const normalized: NormalizedMessage = {
@@ -106,10 +118,7 @@ export class TelegramChannel implements ChannelAdapter {
           console.warn(`[telegram] skipping oversized photo: ${file.file_size} bytes`);
           return;
         }
-        const url = `https://api.telegram.org/file/bot${this.cachedBotToken}/${file.file_path}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-        if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-        const buffer = Buffer.from(await res.arrayBuffer());
+        const buffer = await this.downloadFile(file.file_path!);
         const artifact = storeMediaFromBuffer(buffer, "image/jpeg");
 
         const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
@@ -147,10 +156,7 @@ export class TelegramChannel implements ChannelAdapter {
           console.warn(`[telegram] skipping oversized document: ${file.file_size} bytes`);
           return;
         }
-        const url = `https://api.telegram.org/file/bot${this.cachedBotToken}/${file.file_path}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-        if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-        const buffer = Buffer.from(await res.arrayBuffer());
+        const buffer = await this.downloadFile(file.file_path!);
         const mimeType = doc.mime_type ?? "application/octet-stream";
         const artifact = storeMediaFromBuffer(buffer, mimeType, doc.file_name ?? undefined);
 
@@ -315,6 +321,22 @@ export class TelegramChannel implements ChannelAdapter {
     });
   }
 
+  private shouldFilter(chatType: "dm" | "group" | "thread", senderId: string): boolean {
+    const policy = getChannelPolicy("telegram");
+    const isGroup = chatType === "group" || chatType === "thread";
+
+    if (isGroup) {
+      if (policy.group.mode === "disabled") return true;
+      if (policy.group.mode === "allowlist" && !policy.group.allowlist.includes(senderId)) return true;
+      if (policy.groupSenderFilter.enabled && !policy.groupSenderFilter.allowlist.includes(senderId)) return true;
+    } else {
+      if (policy.dm.mode === "disabled") return true;
+      if (policy.dm.mode === "allowlist" && !policy.dm.allowlist.includes(senderId)) return true;
+    }
+
+    return false;
+  }
+
   private loadBotToken(): string | null {
     const creds = listCredentials();
     const match = creds.find((c) => c.type === "telegram");
@@ -329,15 +351,3 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function splitText(text: string, maxLen: number): string[] {
-  if (text.length <= maxLen) return [text];
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > 0) {
-    let splitAt = remaining.lastIndexOf("\n", maxLen);
-    if (splitAt <= 0) splitAt = maxLen;
-    chunks.push(remaining.slice(0, splitAt));
-    remaining = remaining.slice(splitAt).trimStart();
-  }
-  return chunks;
-}

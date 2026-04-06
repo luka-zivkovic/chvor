@@ -447,9 +447,11 @@ export function updateShellConfig(updates: UpdateShellConfigRequest): ShellConfi
 
 // --- Channel policy (access control) ---
 
+// Default policy is deny-by-default (allowlist with empty list) for external channels.
+// The web channel always bypasses policy checks so this only affects Telegram/Discord/Slack/WhatsApp/Matrix.
 const DEFAULT_CHANNEL_POLICY: ChannelPolicy = {
-  dm: { mode: "open", allowlist: [] },
-  group: { mode: "open", allowlist: [] },
+  dm: { mode: "allowlist", allowlist: [] },
+  group: { mode: "allowlist", allowlist: [] },
   groupSenderFilter: { enabled: false, allowlist: [] },
 };
 
