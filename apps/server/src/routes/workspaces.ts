@@ -20,12 +20,21 @@ workspaces.get("/:id", (c) => {
 });
 
 workspaces.put("/:id", async (c) => {
-  const body = await c.req.json();
-  const { data } = body as { data: Parameters<typeof saveWorkspace>[1] };
-  if (!data) {
-    return c.json({ error: "Missing data field" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
   }
-  const workspace = saveWorkspace(c.req.param("id"), data);
+  const { data } = (body as Record<string, unknown>) ?? {};
+  if (!data || typeof data !== "object") {
+    return c.json({ error: "Missing or invalid data field" }, 400);
+  }
+  const payload = data as Parameters<typeof saveWorkspace>[1];
+  if (!Array.isArray(payload.nodes) || !Array.isArray(payload.edges)) {
+    return c.json({ error: "data.nodes and data.edges must be arrays" }, 400);
+  }
+  const workspace = saveWorkspace(c.req.param("id"), payload);
   return c.json({ data: workspace });
 });
 

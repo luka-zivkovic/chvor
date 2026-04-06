@@ -19,15 +19,23 @@ interface WorkspaceRow {
   updated_at: string;
 }
 
+function safeJsonParse<T>(value: string, fallback: T): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 function rowToWorkspace(row: WorkspaceRow): Workspace {
   return {
     id: row.id,
     name: row.name,
     mode: row.mode as WorkspaceMode,
-    nodes: JSON.parse(row.nodes) as WorkspaceNode[],
-    edges: JSON.parse(row.edges) as WorkspaceEdge[],
-    viewport: JSON.parse(row.viewport) as { x: number; y: number; zoom: number },
-    settings: JSON.parse(row.settings) as WorkspaceSettings,
+    nodes: safeJsonParse<WorkspaceNode[]>(row.nodes, []),
+    edges: safeJsonParse<WorkspaceEdge[]>(row.edges, []),
+    viewport: safeJsonParse(row.viewport, { x: 0, y: 0, zoom: 1 }),
+    settings: safeJsonParse<WorkspaceSettings>(row.settings, { maxRetries: 3, timeoutMs: 30000 }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -55,7 +63,9 @@ export function getOrCreateDefault(mode: WorkspaceMode): Workspace {
      VALUES (?, ?, ?, '[]', '[]', '{"x":0,"y":0,"zoom":1}', '{"maxRetries":3,"timeoutMs":30000}', ?, ?)`
   ).run(id, name, mode, now, now);
 
-  return getWorkspace(id)!;
+  const ws = getWorkspace(id);
+  if (!ws) throw new Error(`Failed to create default workspace: ${id}`);
+  return ws;
 }
 
 export interface SaveWorkspaceData {
@@ -102,7 +112,9 @@ export function saveWorkspace(id: string, data: SaveWorkspaceData): Workspace {
     );
   }
 
-  return getWorkspace(id)!;
+  const ws = getWorkspace(id);
+  if (!ws) throw new Error(`Failed to save workspace: ${id}`);
+  return ws;
 }
 
 export function listWorkspaces(): Workspace[] {

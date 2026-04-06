@@ -12,8 +12,11 @@ import type {
 import type { Skill, Tool, Schedule, WebhookSubscription, CredentialSummary } from "@chvor/shared";
 import { computeOrbitalPositions, OFFSETS, INNER_RADIUS, HUB_SLOT_ANGLE } from "../hooks/use-orbital-layout";
 
+export const BRAIN_NODE_ID = "brain-0";
+
 type ExecStatus = "idle" | "pending" | "running" | "completed" | "failed" | "waiting";
 
+// React Flow requires Node data to satisfy Record<string, unknown>, hence the index signatures below
 export interface BrainNodeData {
   type: "brain";
   label: string;
@@ -205,7 +208,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const layout = computeOrbitalPositions(skills, tools, schedules, channelCreds, apiCreds, savedPositions, webhooks);
 
     const brainNode: ChvorNode = {
-      id: "brain-0",
+      id: BRAIN_NODE_ID,
       type: "brain",
       position: layout.brainPos,
       data: {
@@ -234,7 +237,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
     hubEdges.push({
       id: "edge-brain-skills-hub",
-      source: "brain-0",
+      source: BRAIN_NODE_ID,
       target: "skills-hub",
       type: "animated",
       animated: false,
@@ -280,7 +283,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
     hubEdges.push({
       id: "edge-brain-tools-hub",
-      source: "brain-0",
+      source: BRAIN_NODE_ID,
       target: "tools-hub",
       type: "animated",
       animated: false,
@@ -328,7 +331,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
     hubEdges.push({
       id: "edge-brain-integrations-hub",
-      source: "brain-0",
+      source: BRAIN_NODE_ID,
       target: "integrations-hub",
       type: "animated",
       animated: false,
@@ -373,7 +376,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
     hubEdges.push({
       id: "edge-brain-connections-hub",
-      source: "brain-0",
+      source: BRAIN_NODE_ID,
       target: "connections-hub",
       type: "animated",
       animated: false,
@@ -418,7 +421,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
     hubEdges.push({
       id: "edge-brain-schedule-hub",
-      source: "brain-0",
+      source: BRAIN_NODE_ID,
       target: "schedule-hub",
       type: "animated",
       animated: false,
@@ -464,7 +467,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
     hubEdges.push({
       id: "edge-brain-webhooks-hub",
-      source: "brain-0",
+      source: BRAIN_NODE_ID,
       target: "webhooks-hub",
       type: "animated",
       animated: false,
@@ -507,12 +510,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const pos = (id: string, dx: number, dy: number) =>
       savedPositions?.get(id) ?? { x: dx, y: dy };
 
-    const GHOST_OFFSET = { hw: 36, hh: 47 };
+    const GHOST_OFFSET = OFFSETS.hub; // Ghost hubs use same size as real hubs
 
     const brainNode: ChvorNode = {
-      id: "brain-0",
+      id: BRAIN_NODE_ID,
       type: "brain",
-      position: pos("brain-0", -OFFSETS.brain.hw, -OFFSETS.brain.hh),
+      position: pos(BRAIN_NODE_ID, -OFFSETS.brain.hw, -OFFSETS.brain.hh),
       data: { type: "brain", label: "Brain", providerId: "", model: "Not configured", executionStatus: "idle" },
     };
 
@@ -541,7 +544,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     const ghostEdges: ChvorEdge[] = ghosts.map((g) => ({
       id: `edge-brain-${g.id}`,
-      source: "brain-0",
+      source: BRAIN_NODE_ID,
       target: g.id,
       type: "animated",
       animated: false,
@@ -598,7 +601,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   updateBrainProvider: (providerId, model) => {
     const nodes = get().nodes;
-    const idx = nodes.findIndex((n) => n.type === "brain");
+    const idx = nodes.findIndex((n) => n.id === BRAIN_NODE_ID);
     if (idx === -1) return;
     const d = nodes[idx].data as ChvorNodeData;
     if ("providerId" in d && d.providerId === providerId && "model" in d && d.model === model) return;
@@ -609,7 +612,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   updateBrainLabel: (label: string) => {
     const nodes = get().nodes;
-    const idx = nodes.findIndex((n) => n.id === "brain-0");
+    const idx = nodes.findIndex((n) => n.id === BRAIN_NODE_ID);
     if (idx === -1) return;
     if ((nodes[idx].data as ChvorNodeData).label === label) return;
     const updated = [...nodes];

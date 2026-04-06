@@ -29,10 +29,17 @@ interface Props {
 
 export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstance }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>(0);
+  const rafRef = useRef<number | null>(null);
   const { segments, isActive } = useThoughtStream();
   const nodes = useCanvasStore((s) => s.nodes);
   const emotionColor = useEmotionStore((s) => s.displayColor);
+
+  const segmentsRef = useRef(segments);
+  const nodesRef = useRef(nodes);
+  const emotionColorRef = useRef(emotionColor);
+  segmentsRef.current = segments;
+  nodesRef.current = nodes;
+  emotionColorRef.current = emotionColor;
 
   const render = useCallback(() => {
     const canvas = canvasRef.current;
@@ -58,13 +65,13 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    if (segments.length === 0) return;
+    if (segmentsRef.current.length === 0) return;
 
     // Get viewport transform from ReactFlow
     const vp = rfInstance.current?.getViewport() ?? { x: 0, y: 0, zoom: 1 };
 
     // Build exclusion zones from current node positions
-    const getLineWidth = buildLineWidthFn(nodes, vp, w);
+    const getLineWidth = buildLineWidthFn(nodesRef.current, vp, w);
 
     // Compute the starting Y: below the top of the brain canvas with some offset
     // Use the center of the viewport, offset upward
@@ -73,7 +80,7 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
 
     // Layout all segments through pretext
     const lines: RenderedLine[] = layoutThoughtStream(
-      segments,
+      segmentsRef.current,
       getLineWidth,
       centerY,
       LINE_HEIGHT,
@@ -83,7 +90,7 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
     );
 
     // Render
-    const baseColor = emotionColor || "oklch(0.65 0.12 250)";
+    const baseColor = emotionColorRef.current || "oklch(0.65 0.12 250)";
 
     for (const line of lines) {
       ctx.font = line.font;
@@ -102,7 +109,7 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
 
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
-  }, [segments, nodes, rfInstance, emotionColor]);
+  }, []); // stable callback - reads from refs
 
   // Animation loop
   useEffect(() => {
@@ -130,9 +137,12 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
 
     return () => {
       running = false;
-      cancelAnimationFrame(rafRef.current);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
     };
-  }, [isActive, segments.length, render]);
+  }, [isActive, segments.length]);
 
   // Also re-render on viewport changes (pan/zoom) via a resize observer
   useEffect(() => {
@@ -144,7 +154,7 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
     });
     observer.observe(canvas.parentElement);
     return () => observer.disconnect();
-  }, [render]);
+  }, [render]); // render is now stable so this only runs once
 
   return (
     <canvas

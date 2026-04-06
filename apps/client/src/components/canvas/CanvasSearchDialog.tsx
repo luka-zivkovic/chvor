@@ -31,17 +31,20 @@ export function CanvasSearchDialog({ open, onClose, initialKind = null }: Props)
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const kindRef = useRef<RegistryEntryKind | null>(initialKind);
 
   // Reset state when opening
   useEffect(() => {
     if (open) {
       setKind(initialKind);
+      kindRef.current = initialKind;
       setQuery("");
       setResults([]);
       setError(null);
       // Fetch initial results
       doSearch("", initialKind);
-      setTimeout(() => inputRef.current?.focus(), 50);
+      const focusTimer = setTimeout(() => inputRef.current?.focus(), 50);
+      return () => clearTimeout(focusTimer);
     }
   }, [open, initialKind]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -93,11 +96,12 @@ export function CanvasSearchDialog({ open, onClose, initialKind = null }: Props)
   const handleQueryChange = (value: string) => {
     setQuery(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => doSearch(value, kind), 300);
+    debounceRef.current = setTimeout(() => doSearch(value, kindRef.current), 300);
   };
 
   const handleKindChange = (k: RegistryEntryKind | null) => {
     setKind(k);
+    kindRef.current = k;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     doSearch(query, k);
   };
@@ -172,7 +176,7 @@ export function CanvasSearchDialog({ open, onClose, initialKind = null }: Props)
       </div>
 
       {/* Results */}
-      <div className="flex-1 overflow-y-auto px-1.5 py-1.5" style={{ maxHeight: "calc(min(520px, 70vh) - 90px)" }}>
+      <div className="flex-1 overflow-y-auto px-1.5 py-1.5">
         {loading && results.length === 0 ? (
           <p className="py-8 text-center text-[10px] text-muted-foreground">Searching...</p>
         ) : error ? (

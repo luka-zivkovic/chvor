@@ -9,6 +9,8 @@ import { prepareWithSegments, layoutNextLine, clearCache } from "@chenglou/prete
 import type { PreparedTextWithSegments, LayoutCursor, LayoutLine } from "@chenglou/pretext";
 import type { LineSlot } from "./exclusion-zones";
 
+const MAX_THOUGHT_OPACITY = 0.5;
+
 export interface ThoughtSegment {
   id: string;
   text: string;
@@ -47,9 +49,10 @@ function getPrepared(text: string, font: string): PreparedTextWithSegments {
   prepared = prepareWithSegments(text, font);
   preparedCache.set(key, prepared);
   // Evict least-recently-used entry
-  if (preparedCache.size > 100) {
+  while (preparedCache.size > 100) {
     const firstKey = preparedCache.keys().next().value;
     if (firstKey) preparedCache.delete(firstKey);
+    else break;
   }
   return prepared;
 }
@@ -77,7 +80,7 @@ export function layoutThoughtStream(
     if (!seg.text.trim()) continue;
 
     const age = now - seg.createdAt;
-    const opacity = Math.max(0, 1 - age / fadeDurationMs) * 0.5;
+    const opacity = Math.max(0, 1 - age / fadeDurationMs) * MAX_THOUGHT_OPACITY;
     if (opacity <= 0.01) continue;
 
     const prepared = getPrepared(seg.text, seg.font);

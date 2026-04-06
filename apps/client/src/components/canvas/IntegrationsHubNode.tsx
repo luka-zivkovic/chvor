@@ -44,7 +44,7 @@ export const IntegrationsHubNode = memo(function IntegrationsHubNode({ data }: N
             className="max-w-[90px] truncate text-center font-mono text-[10px] tracking-wider"
             style={{ color: "var(--node-label)", textShadow: "0 1px 4px oklch(0 0 0 / 0.5)" }}
           >
-            Integrations
+            {d.label}
           </span>
           {d.integrationCount > 0 && (
             <span

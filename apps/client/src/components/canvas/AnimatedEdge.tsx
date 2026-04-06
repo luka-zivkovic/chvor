@@ -18,7 +18,7 @@ function AnimatedEdgeInner({
   const ghost = edgeData?.ghost ?? false;
   const emotionColor = useEmotionStore((s) => s.displayColor);
   const previousColor = useEmotionStore((s) => s.previousSnapshot?.color ?? null);
-  const arousal = useEmotionStore((s) => s.currentSnapshot?.vad.arousal ?? 0);
+  const arousal = useEmotionStore((s) => s.currentSnapshot?.vad?.arousal ?? 0);
   const blendIntensity = useEmotionStore((s) => s.blendIntensity);
 
   const [edgePath] = getBezierPath({

@@ -122,7 +122,7 @@ const SurfaceListItem = memo(function SurfaceListItem({
     >
       <button
         className="flex-1 min-w-0 px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-md"
-        aria-current={active ? "true" : undefined}
+        aria-current={active ? "page" : undefined}
         onClick={() => onSelect(item.id)}
       >
         <p className="text-xs font-medium truncate">{item.title}</p>

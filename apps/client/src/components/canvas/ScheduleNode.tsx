@@ -7,8 +7,16 @@ import { RadiantField } from "./RadiantField";
 
 export const ScheduleNode = memo(function ScheduleNode({ data }: NodeProps) {
   const d = data as unknown as ScheduleNodeData;
+  const status = d.executionStatus;
+  const isRunning = status === "running";
+  const isCompleted = status === "completed";
+  const isFailed = status === "failed";
 
-  const loopColor = d.enabled ? "var(--status-completed)" : "var(--border)";
+  let loopColor: string;
+  if (isRunning) loopColor = "var(--status-running)";
+  else if (isCompleted) loopColor = "var(--status-completed)";
+  else if (isFailed) loopColor = "var(--status-failed)";
+  else loopColor = d.enabled ? "var(--status-completed)" : "var(--border)";
 
   return (
     <>
@@ -17,7 +25,9 @@ export const ScheduleNode = memo(function ScheduleNode({ data }: NodeProps) {
         <div
           className={cn(
             "flex items-center justify-center transition-all duration-300",
-            d.enabled ? "opacity-100" : "opacity-50"
+            d.enabled ? "opacity-100" : "opacity-50",
+            isRunning ? "animate-field-pulse" : "",
+            isCompleted ? "animate-field-intensify" : ""
           )}
           style={{ width: 52, height: 52 }}
         >

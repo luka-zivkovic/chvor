@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback, memo } from "react";
 import { ReactFlow, Background, BackgroundVariant, MiniMap } from "@xyflow/react";
 import type { ReactFlowInstance } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -43,6 +43,10 @@ import { ThoughtStreamCanvas } from "./ThoughtStreamCanvas";
 
 const nodeTypes = { brain: BrainNode, skill: SkillNode, tool: ToolNode, integration: IntegrationNode, "skills-hub": SkillsHubNode, "tools-hub": ToolsHubNode, "connections-hub": ConnectionsHubNode, "integrations-hub": IntegrationsHubNode, "schedule-hub": ScheduleHubNode, schedule: ScheduleNode, "webhooks-hub": WebhooksHubNode, webhook: WebhookNode, trigger: TriggerNode, output: OutputNode, "ghost-hub": GhostHubNode, "a2ui-canvas": A2UICanvasNode };
 const edgeTypes = { animated: AnimatedEdge };
+
+const DEFAULT_WORKSPACE_ID = "default-constellation";
+const CHANNEL_TYPES = new Set(["telegram", "discord", "slack", "whatsapp"]);
+const LLM_TYPES = new Set(["openai", "anthropic", "deepseek", "minimax", "openrouter", "google-ai", "groq", "mistral", "custom-llm", "ollama", "ollama-cloud"]);
 
 // MiniMap needs resolved color strings (CSS vars don't work in SVG fill)
 function minimapNodeColor(node: { type?: string }): string {
@@ -107,7 +111,7 @@ export function BrainCanvas() {
     if (!connected) return;
     let cancelled = false;
     setLayoutLoaded(false); // hold canvas init until fresh layout arrives
-    api.workspaces.get("default-constellation").then((ws) => {
+    api.workspaces.get(DEFAULT_WORKSPACE_ID).then((ws) => {
       if (cancelled) return;
       if (ws && ws.nodes.length > 0) {
         const posMap = new Map<string, { x: number; y: number }>();
@@ -124,16 +128,13 @@ export function BrainCanvas() {
   }, [connected]);
 
   // Split non-LLM credentials into channels vs API integrations
-  const CHANNEL_TYPES = useMemo(() => new Set(["telegram", "discord", "slack", "whatsapp"]), []);
-  const LLM_TYPES = useMemo(() => new Set(["openai", "anthropic", "deepseek", "minimax", "openrouter", "google-ai", "groq", "mistral", "custom-llm", "ollama", "ollama-cloud"]), []);
-
   const channelIntegrations = useMemo(
     () => credentials.filter((c) => CHANNEL_TYPES.has(c.type)),
-    [credentials, CHANNEL_TYPES]
+    [credentials]
   );
   const apiIntegrations = useMemo(
     () => credentials.filter((c) => !LLM_TYPES.has(c.type) && !CHANNEL_TYPES.has(c.type)),
-    [credentials, LLM_TYPES, CHANNEL_TYPES]
+    [credentials]
   );
 
   useEffect(() => {
@@ -163,7 +164,9 @@ export function BrainCanvas() {
       // Restore saved viewport on first init, refit on subsequent
       if (isFirstInit && savedViewportRef.current) {
         setTimeout(() => {
-          rfInstanceRef.current?.setViewport(savedViewportRef.current!, { duration: 300 });
+          if (savedViewportRef.current) {
+            rfInstanceRef.current?.setViewport(savedViewportRef.current, { duration: 300 });
+          }
         }, 50);
       } else if (!isFirstInit) {
         setTimeout(() => {
@@ -178,7 +181,7 @@ export function BrainCanvas() {
     if (!rf) return;
     const { nodes: currentNodes, edges: currentEdges } = useCanvasStore.getState();
     const viewport = rf.getViewport();
-    const workspaceId = "default-constellation";
+    const workspaceId = DEFAULT_WORKSPACE_ID;
     // Map to WorkspaceNode shape (strip runtime-only fields)
     const saveNodes = currentNodes.map((n) => ({
       id: n.id,
@@ -245,7 +248,7 @@ export function BrainCanvas() {
     } else {
       updateBrainProvider("", "No provider");
     }
-  }, [credentials, providers, nodes.length, modelRoles.primary, llmProviderDefs]); // eslint-disable-line react-hooks/exhaustive-deps -- LLM_TYPES is a stable memoized constant
+  }, [credentials, providers, nodes.length, modelRoles.primary, llmProviderDefs]);
 
   // Sync brain label with persona aiName
   useEffect(() => {
@@ -345,11 +348,10 @@ export function BrainCanvas() {
 
   // Auto-save layout when a node is dragged to a new position
   const handleNodeDragStop = useCallback(() => {
-    handleSaveLayout();
+    handleSaveLayout().catch((err) => {
+      console.error("[BrainCanvas] Failed to save layout:", err);
+    });
   }, [handleSaveLayout]);
-
-  const memoizedNodeTypes = useMemo(() => nodeTypes, []);
-  const memoizedEdgeTypes = useMemo(() => edgeTypes, []);
 
   return (
     <div className="relative h-full w-full" tabIndex={-1} style={{ background: "var(--canvas-bg)" }}>
@@ -365,8 +367,8 @@ export function BrainCanvas() {
         onPaneContextMenu={handlePaneContextMenu}
         onNodeDragStop={handleNodeDragStop}
         onInit={(instance) => { rfInstanceRef.current = instance; }}
-        nodeTypes={memoizedNodeTypes}
-        edgeTypes={memoizedEdgeTypes}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         fitViewOptions={{ padding: 0.3 }}
         proOptions={{ hideAttribution: true }}
@@ -467,7 +469,7 @@ function seededPositions(count: number, seed: number) {
   return positions;
 }
 
-function EmotionTintOverlay() {
+const EmotionTintOverlay = memo(function EmotionTintOverlay() {
   // Prefer VAD-based emotion store; fall back to legacy
   const vadColor = useEmotionStore((s) => s.displayColor);
   const vadIntensity = useEmotionStore((s) => s.blendIntensity);
@@ -481,7 +483,7 @@ function EmotionTintOverlay() {
   const intensity = vadIntensity || currentEmotion?.intensity || 0;
   const emotionName = vadLabel || currentEmotion?.emotion || "calm";
   const config = EMOTION_PARTICLES[emotionName] ?? EMOTION_PARTICLES.calm;
-  const positions = seededPositions(config.count, emotionName.length);
+  const positions = useMemo(() => seededPositions(config.count, emotionName.length), [config.count, emotionName]);
 
   // Ambient wash alpha
   const washAlpha = 0.05 + intensity * 0.08;
@@ -525,4 +527,4 @@ function EmotionTintOverlay() {
       ))}
     </div>
   );
-}
+});

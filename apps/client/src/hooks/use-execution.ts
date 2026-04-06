@@ -7,6 +7,7 @@ import { useCredentialStore } from "../stores/credential-store";
 import { usePcStore } from "../stores/pc-store";
 import type { ExecutionEvent } from "@chvor/shared";
 
+const BRAIN_NODE_ID = "brain-0";
 // Minimum time a node stays "running" before transitioning to completed/failed
 const MIN_RUNNING_MS = 500;
 // How long an edge stays active after deactivation is requested
@@ -16,7 +17,7 @@ export function useExecution() {
   const executionEvents = useAppStore((s) => s.executionEvents);
   const { setNodeExecutionStatus, setEdgeActive, resetExecution } =
     useCanvasStore();
-  const processedCount = useRef(0);
+  const prevEventsRef = useRef<typeof executionEvents>([]);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Track when nodes entered "running" state for minimum display enforcement
   const runningTimestamps = useRef(new Map<string, number>());
@@ -67,8 +68,12 @@ export function useExecution() {
   }
 
   useEffect(() => {
-    const newEvents = executionEvents.slice(processedCount.current);
-    processedCount.current = executionEvents.length;
+    const prev = prevEventsRef.current;
+    prevEventsRef.current = executionEvents;
+    // If array was replaced (new execution), process from start
+    const newEvents = executionEvents === prev ? [] :
+      executionEvents.length > prev.length ? executionEvents.slice(prev.length) :
+      executionEvents; // array was reset, process all
 
     function handleEvent(event: ExecutionEvent) {
       switch (event.type) {
@@ -76,23 +81,24 @@ export function useExecution() {
           clearTimeout(resetTimer.current);
           clearAllPending();
           resetExecution();
-          markRunning("brain-0");
+          markRunning(BRAIN_NODE_ID);
           break;
 
         case "brain.thinking":
-          markRunning("brain-0");
+          markRunning(BRAIN_NODE_ID);
           break;
 
         case "brain.decision": {
-          const kind = (event.data as any).capabilityKind;
+          const eventData = event.data as Record<string, unknown>;
+          const kind = eventData.capabilityKind;
           if (kind === "tool") {
-            const toolId = (event.data as any).toolId;
+            const toolId = eventData.toolId as string | undefined;
             if (toolId) {
               setEdgeActive("edge-brain-tools-hub", true);
               setEdgeActive(`edge-tools-hub-${toolId}`, true);
             }
           } else {
-            const skillId = event.data.skillId;
+            const skillId = eventData.skillId as string | undefined;
             if (skillId) {
               setEdgeActive("edge-brain-skills-hub", true);
               setEdgeActive(`edge-skills-hub-${skillId}`, true);
@@ -102,6 +108,7 @@ export function useExecution() {
         }
 
         case "brain.emotion":
+          // Handled by emotion-store via separate WebSocket subscription
           break;
 
         case "skill.invoked": {
@@ -168,13 +175,16 @@ export function useExecution() {
           markNodeFinal(nodeId, "failed");
           if (isApi) {
             const credId = rawNodeId.replace("api-", "");
+            markNodeFinal("connections-hub", "failed");
             deactivateEdge("edge-brain-connections-hub");
             deactivateEdge(`edge-connections-hub-${credId}`);
           } else if (isChannel) {
             const credId = rawNodeId.replace("channel-", "");
+            markNodeFinal("integrations-hub", "failed");
             deactivateEdge("edge-brain-integrations-hub");
             deactivateEdge(`edge-integrations-hub-${credId}`);
           } else {
+            markNodeFinal("skills-hub", "failed");
             deactivateEdge("edge-brain-skills-hub");
             const skillId = nodeId.replace("skill-", "");
             deactivateEdge(`edge-skills-hub-${skillId}`);
@@ -208,6 +218,7 @@ export function useExecution() {
           const rawNodeId = event.data.nodeId;
           const nodeId = rawNodeId.startsWith("tool-") ? rawNodeId : `tool-${rawNodeId}`;
           markNodeFinal(nodeId, "failed");
+          markNodeFinal("tools-hub", "failed");
           deactivateEdge("edge-brain-tools-hub");
           const toolId = nodeId.replace("tool-", "");
           deactivateEdge(`edge-tools-hub-${toolId}`);
@@ -235,7 +246,7 @@ export function useExecution() {
           break;
 
         case "execution.completed":
-          markNodeFinal("brain-0", "completed");
+          markNodeFinal(BRAIN_NODE_ID, "completed");
           useSkillStore.getState().fetchSkills();
           useToolStore.getState().fetchTools();
           useCredentialStore.getState().fetchAll();
@@ -247,7 +258,7 @@ export function useExecution() {
           break;
 
         case "execution.failed":
-          markNodeFinal("brain-0", "failed");
+          markNodeFinal(BRAIN_NODE_ID, "failed");
           clearTimeout(resetTimer.current);
           resetTimer.current = setTimeout(() => {
             clearAllPending();
@@ -260,6 +271,10 @@ export function useExecution() {
     for (const event of newEvents) {
       handleEvent(event);
     }
+
+    return () => {
+      clearTimeout(resetTimer.current);
+    };
   }, [executionEvents, setNodeExecutionStatus, setEdgeActive, resetExecution]);
 
   useEffect(() => {

@@ -1,16 +1,8 @@
 import { memo } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
+import type { GhostHubNodeData } from "../../stores/canvas-store";
 import { withOpacity } from "@/lib/utils";
-
-interface GhostHubNodeData {
-  type: "ghost-hub";
-  label: string;
-  ctaLabel: string;
-  accentColor: string;
-  executionStatus: string;
-  [key: string]: unknown;
-}
 
 export const GhostHubNode = memo(function GhostHubNode({ data }: NodeProps) {
   const d = data as unknown as GhostHubNodeData;

@@ -10,6 +10,9 @@
  * Order (clockwise from top): Skills, Tools, Schedules, Integrations, Connections, Webhooks
  */
 
+// NOTE: Despite the `use-` prefix, this file exports pure layout functions, not React hooks.
+// It's placed in hooks/ for historical reasons; safe to import in non-React contexts.
+
 import type { Skill, Tool, Schedule, WebhookSubscription, CredentialSummary } from "@chvor/shared";
 
 export interface OrbitalPosition {
@@ -46,14 +49,15 @@ function computeFanRadius(itemCount: number): number {
 function computeFanArc(itemCount: number, fanRadius: number): number {
   const maxArc = SLOT_GAP * 0.95;
   // Desired: enough for ~105px gap between node centers (nodes are ~90px wide)
-  const desiredArc = itemCount <= 1 ? 0 : (itemCount - 1) * (105 / fanRadius);
+  const NODE_SPACING_PX = OFFSETS.skill.hw * 2 + 15; // node width + gap
+  const desiredArc = itemCount <= 1 ? 0 : (itemCount - 1) * (NODE_SPACING_PX / fanRadius);
   return Math.min(desiredArc, maxArc);
 }
 
 interface HubConfig {
   id: string;
   type: string;
-  slot: number; // fixed pentagon slot index
+  slot: number; // fixed hexagon slot index (0-5)
   exists: boolean;
 }
 
@@ -118,7 +122,8 @@ export function computeOrbitalPositions(
     items: T[],
     hubId: string,
     getNodeId: (item: T, index: number) => string,
-    offset: { hw: number; hh: number }
+    offset: { hw: number; hh: number },
+    isCenterHub: boolean = false
   ): Map<string, OrbitalPosition> {
     const positions = new Map<string, OrbitalPosition>();
     if (items.length === 0 || !hubPositions.has(hubId)) return positions;
@@ -127,8 +132,7 @@ export function computeOrbitalPositions(
     const hubCenterX = hubPos.x + OFFSETS.hub.hw;
     const hubCenterY = hubPos.y + OFFSETS.hub.hh;
     // For center hub (skills): fan upward (-π/2) since brain occupies slot 0 above
-    const isCenter = Math.abs(hubCenterX) < 5 && Math.abs(hubCenterY) < 5;
-    const hubAngle = isCenter ? Math.PI / 2 : Math.atan2(hubCenterY, hubCenterX);
+    const hubAngle = isCenterHub ? Math.PI / 2 : Math.atan2(hubCenterY, hubCenterX);
 
     const fanRadius = computeFanRadius(items.length);
     const fanSpread = computeFanArc(items.length, fanRadius);
@@ -157,7 +161,8 @@ export function computeOrbitalPositions(
     skills,
     "skills-hub",
     (skill) => `skill-${skill.id}`,
-    OFFSETS.skill
+    OFFSETS.skill,
+    true // center hub
   );
 
   // ── Tools fan from tools-hub ──

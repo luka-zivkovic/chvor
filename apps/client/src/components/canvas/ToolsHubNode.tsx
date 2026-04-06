@@ -41,7 +41,7 @@ export const ToolsHubNode = memo(function ToolsHubNode({ data }: NodeProps) {
             className="max-w-[90px] truncate text-center font-mono text-[10px] tracking-wider"
             style={{ color: "var(--node-label)", textShadow: "0 1px 4px oklch(0 0 0 / 0.5)" }}
           >
-            Tools
+            {d.label}
           </span>
           {d.toolCount > 0 && (
             <span
