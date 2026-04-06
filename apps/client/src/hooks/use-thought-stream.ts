@@ -101,7 +101,7 @@ export function useThoughtStream(): {
       if (!text.trim()) continue;
 
       segmentsRef.current.push({
-        id: `${ev.type}-${i}-${Date.now()}`,
+        id: `${ev.type}-${i}`,
         text,
         font: fontForType(type),
         type,
@@ -137,7 +137,7 @@ export function useThoughtStream(): {
 
   const isActive = executionEvents.some(
     (e) => e.type === "execution.started",
-  ) && !executionEvents.some((e) => e.type === "execution.completed");
+  ) && !executionEvents.some((e) => e.type === "execution.completed" || e.type === "execution.failed");
 
   // Clear pretext caches when execution finishes
   const prevActiveRef = useRef(false);

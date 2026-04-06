@@ -123,9 +123,14 @@ export function buildLineWidthFn(
       bestWidth = lastGapWidth;
     }
 
+    const MIN_READABLE_WIDTH = 120;
+    if (bestWidth < MIN_READABLE_WIDTH) {
+      // All gaps too narrow — use full width (text will render below nodes)
+      return { startX: margin, maxWidth: canvasWidth - margin * 2 };
+    }
     return {
       startX: bestStart,
-      maxWidth: Math.max(bestWidth, 60), // minimum 60px to avoid degenerate lines
+      maxWidth: bestWidth,
     };
   };
 }

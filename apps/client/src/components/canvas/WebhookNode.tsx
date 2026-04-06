@@ -14,8 +14,16 @@ const SOURCE_COLORS: Record<string, string> = {
 
 export const WebhookNode = memo(function WebhookNode({ data }: NodeProps) {
   const d = data as unknown as WebhookNodeData;
+  const status = d.executionStatus;
+  const isRunning = status === "running";
+  const isCompleted = status === "completed";
+  const isFailed = status === "failed";
 
-  const color = d.enabled
+  let color: string;
+  if (isRunning) color = "var(--status-running)";
+  else if (isCompleted) color = "var(--status-completed)";
+  else if (isFailed) color = "var(--status-failed)";
+  else color = d.enabled
     ? SOURCE_COLORS[d.source] ?? "var(--status-running)"
     : "var(--border)";
 
@@ -26,7 +34,9 @@ export const WebhookNode = memo(function WebhookNode({ data }: NodeProps) {
         <div
           className={cn(
             "flex items-center justify-center transition-all duration-300",
-            d.enabled ? "opacity-100" : "opacity-50"
+            d.enabled ? "opacity-100" : "opacity-50",
+            isRunning ? "animate-field-pulse" : "",
+            isCompleted ? "animate-field-intensify" : ""
           )}
           style={{ width: 52, height: 52 }}
         >

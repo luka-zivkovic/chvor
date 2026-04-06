@@ -2,11 +2,12 @@ import { memo, useState } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import type { IntegrationNodeData } from "../../stores/canvas-store";
+import { cn } from "@/lib/utils";
 import { RadiantField } from "./RadiantField";
 
 const INTEGRATION_COLOR = "var(--skill-web)";
 
-/** Extract a likely domain from a credential name, e.g. "Gumroad Access Token" → "gumroad.com" */
+/** Extract a likely domain from a credential name, e.g. "Gumroad Access Token" -> "gumroad.com" */
 function guessDomain(name: string): string | null {
   // Known mappings for services whose domain != first word
   const KNOWN: Record<string, string> = {
@@ -93,7 +94,7 @@ function guessDomain(name: string): string | null {
     if (domainMatch) return domainMatch[0];
   }
 
-  return `${firstWord}.com`;
+  return null; // Unknown service — don't fabricate a domain
 }
 
 function PlugIcon({ color }: { color: string }) {
@@ -118,13 +119,23 @@ function PlugIcon({ color }: { color: string }) {
 
 export const IntegrationNode = memo(function IntegrationNode({ data }: NodeProps) {
   const d = data as unknown as IntegrationNodeData;
-  const color = INTEGRATION_COLOR;
+  const status = d.executionStatus;
+  const isRunning = status === "running";
+  const isCompleted = status === "completed";
+  const isFailed = status === "failed";
+
+  let color: string;
+  if (isRunning) color = "var(--status-running)";
+  else if (isCompleted) color = "var(--status-completed)";
+  else if (isFailed) color = "var(--status-failed)";
+  else color = INTEGRATION_COLOR;
+
   const labelColor = "var(--node-label)";
   const [faviconFailed, setFaviconFailed] = useState(false);
 
   const domain = guessDomain(d.label);
   const faviconUrl = domain
-    ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
+    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`
     : null;
   const showFavicon = faviconUrl && !faviconFailed;
 
@@ -133,7 +144,11 @@ export const IntegrationNode = memo(function IntegrationNode({ data }: NodeProps
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-none !w-1.5 !h-1.5 opacity-0" />
       <div className="group flex flex-col items-center gap-2">
         <div
-          className="flex items-center justify-center transition-all duration-300"
+          className={cn(
+            "flex items-center justify-center transition-all duration-300",
+            isRunning ? "animate-field-pulse" : "",
+            isCompleted ? "animate-field-intensify" : ""
+          )}
           style={{ width: 72, height: 72 }}
         >
           <RadiantField color={color} intensity={0.4}>

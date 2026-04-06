@@ -20,7 +20,6 @@ interface MenuItem {
 interface Actions {
   openPanel: (panel: string) => void;
   openNodeDetail: (panel: string, id: string) => void;
-  openSettings: (section: string) => void;
   fitView: () => void;
   openSearchDialog: (kind: "skill" | "tool" | null) => void;
 }
@@ -115,7 +114,6 @@ export function CanvasContextMenu({ menu, onClose, onOpenSearch }: { menu: Conte
   const items = getMenuItems(menu.nodeType, menu.nodeId, {
     openPanel: (p) => close(() => useUIStore.getState().openPanel(p as any))(),
     openNodeDetail: (p, id) => close(() => useUIStore.getState().openNodeDetail(p as any, id))(),
-    openSettings: (s) => close(() => useUIStore.getState().openSettings(s as any))(),
     fitView: close(() => fitView({ padding: 0.3, duration: 300 })),
     openSearchDialog: (kind) => close(() => onOpenSearch?.(kind))(),
   });
