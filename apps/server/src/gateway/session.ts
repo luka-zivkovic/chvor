@@ -115,9 +115,8 @@ export class SessionManager {
     // Cap in-memory messages to prevent unbounded RAM growth.
     // DB always has the full history; this only trims the working set.
     if (session.messages.length > MAX_SESSION_MESSAGES) {
-      const overflow = session.messages.length - MAX_SESSION_MESSAGES;
-      session.messages = session.messages.slice(overflow);
-      session.persistedCount = Math.max(0, session.persistedCount - overflow);
+      session.messages = session.messages.slice(session.messages.length - MAX_SESSION_MESSAGES);
+      session.persistedCount = session.messages.length;
     }
   }
 

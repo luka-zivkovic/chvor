@@ -66,14 +66,19 @@ function formatTime(iso: string, _tick?: number): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-/** Force re-render every 60s so relative timestamps stay fresh. */
+/** Shared singleton timer — one interval drives all MessageBubble instances. */
+let globalTick = 0;
+const tickListeners = new Set<() => void>();
+setInterval(() => { globalTick++; tickListeners.forEach((fn) => fn()); }, 60_000);
+
 function useTimeTick() {
-  const [tick, setTick] = useState(0);
+  const [, rerender] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 60_000);
-    return () => clearInterval(id);
+    const fn = () => rerender((n) => n + 1);
+    tickListeners.add(fn);
+    return () => { tickListeners.delete(fn); };
   }, []);
-  return tick;
+  return globalTick;
 }
 
 export function MessageBubble({ message }: Props) {

@@ -25,7 +25,8 @@ function isValidClientEvent(event: unknown): event is GatewayClientEvent {
     case "session.init":
       return typeof d.sessionId === "string";
     case "chat.send":
-      return typeof d.text === "string" && typeof d.workspaceId === "string";
+      return typeof d.text === "string" && typeof d.workspaceId === "string"
+        && (!d.messageId || (typeof d.messageId === "string" && UUID_RE.test(d.messageId)));
     case "chat.stop":
       return true;
     case "approval.respond":

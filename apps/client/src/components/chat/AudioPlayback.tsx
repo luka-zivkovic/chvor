@@ -21,9 +21,8 @@ export function AudioPlayback({ audioUrl, autoPlay = false }: Props) {
       setPlaying(false);
     } else {
       el.play()
-        .then(() => setBlocked(false))
-        .catch(() => setBlocked(true));
-      setPlaying(true);
+        .then(() => { setPlaying(true); setBlocked(false); })
+        .catch(() => { setPlaying(false); setBlocked(true); });
     }
   };
 
