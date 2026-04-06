@@ -1,6 +1,7 @@
 import type { ModelDef } from "@chvor/shared";
-import { LLM_PROVIDERS, MODEL_CONTEXT_WINDOWS, MODEL_MAX_TOKENS } from "./provider-registry.ts";
+import { LLM_PROVIDERS } from "./provider-registry.ts";
 import { resolveCredential } from "./llm-router.ts";
+import { setDynamicContextWindow, setDynamicMaxTokens } from "./dynamic-model-meta.ts";
 
 // ── In-memory cache ─────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ export async function fetchModelsForProvider(
   // Check cache first
   const cached = modelCache.get(providerId);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-    return { models: cached.models, source: "api" };
+    return { models: cached.models, source: "api" }; // served from local cache, originally fetched from API
   }
 
   // Dedup: if a fetch is already in flight for this provider, reuse it
@@ -81,11 +82,11 @@ async function _fetchModelsForProvider(
 
     // Register dynamic models for context window / max token lookups
     for (const m of enriched) {
-      if (m.contextWindow && !MODEL_CONTEXT_WINDOWS[m.id]) {
-        MODEL_CONTEXT_WINDOWS[m.id] = m.contextWindow;
+      if (m.contextWindow) {
+        setDynamicContextWindow(m.id, m.contextWindow);
       }
-      if (m.maxTokens && !MODEL_MAX_TOKENS[m.id]) {
-        MODEL_MAX_TOKENS[m.id] = m.maxTokens;
+      if (m.maxTokens) {
+        setDynamicMaxTokens(m.id, m.maxTokens);
       }
     }
 

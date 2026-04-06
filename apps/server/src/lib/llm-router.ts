@@ -14,43 +14,8 @@ import {
   LLM_PROVIDERS,
   IMAGE_GEN_PROVIDERS,
 } from "./provider-registry.ts";
-
-// ── Helpers ──────────────────────────────────────────────────────
-
-function assertLocalUrl(base: string, providerName: string): void {
-  let parsedUrl: URL;
-  try { parsedUrl = new URL(base); } catch { throw new Error(`Invalid ${providerName} baseUrl: ${base}`); }
-  const proto = parsedUrl.protocol;
-  const host = parsedUrl.hostname.toLowerCase();
-  if ((proto !== "http:" && proto !== "https:") ||
-      !(host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".local"))) {
-    throw new Error(`${providerName} baseUrl must be a local http(s) address, got: ${base}`);
-  }
-}
-
-function assertNotPrivateUrl(base: string): void {
-  let parsedUrl: URL;
-  try { parsedUrl = new URL(base); } catch { throw new Error(`Invalid baseUrl: ${base}`); }
-  const proto = parsedUrl.protocol;
-  if (proto !== "http:" && proto !== "https:") {
-    throw new Error("Only http:// and https:// URLs are allowed");
-  }
-  const host = parsedUrl.hostname.toLowerCase();
-  if (
-    host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0" ||
-    host.startsWith("10.") ||
-    host.startsWith("172.16.") || host.startsWith("172.17.") || host.startsWith("172.18.") ||
-    host.startsWith("172.19.") || host.startsWith("172.20.") || host.startsWith("172.21.") ||
-    host.startsWith("172.22.") || host.startsWith("172.23.") || host.startsWith("172.24.") ||
-    host.startsWith("172.25.") || host.startsWith("172.26.") || host.startsWith("172.27.") ||
-    host.startsWith("172.28.") || host.startsWith("172.29.") || host.startsWith("172.30.") ||
-    host.startsWith("172.31.") ||
-    host.startsWith("192.168.") || host.startsWith("169.254.") ||
-    host.endsWith(".local") || host.endsWith(".internal")
-  ) {
-    throw new Error("Custom LLM baseUrl must not point to private/internal networks");
-  }
-}
+import { assertLocalUrl, assertSafeUrl } from "./url-safety.ts";
+import { getDynamicContextWindow, getDynamicMaxTokens } from "./dynamic-model-meta.ts";
 
 // ── Public types ─────────────────────────────────────────────────
 
@@ -66,14 +31,14 @@ export type ResolvedConfig = LLMConfig;
 // ── Context window lookup ────────────────────────────────────────
 
 export function getContextWindow(model: string): number {
-  return MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
+  return MODEL_CONTEXT_WINDOWS[model] ?? getDynamicContextWindow(model) ?? DEFAULT_CONTEXT_WINDOW;
 }
 
 export function getMaxTokens(model: string): number {
-  return MODEL_MAX_TOKENS[model] ?? DEFAULT_MAX_TOKENS;
+  return MODEL_MAX_TOKENS[model] ?? getDynamicMaxTokens(model) ?? DEFAULT_MAX_TOKENS;
 }
 
-// ── Model creation (supports all 5 providers) ────────────────────
+// ── Model creation ──────────────────────────────────────────────
 
 export function createModel(config: LLMConfig): LanguageModelV1 {
   if (!config.model?.trim()) {
@@ -166,7 +131,7 @@ export function createModel(config: LLMConfig): LanguageModelV1 {
     }
     case "custom-llm": {
       if (!config.baseUrl) throw new Error("Custom LLM requires a baseUrl");
-      assertNotPrivateUrl(config.baseUrl);
+      assertSafeUrl(config.baseUrl, "Custom LLM baseUrl");
       const provider = createOpenAI({
         apiKey: config.apiKey || "none",
         baseURL: config.baseUrl,

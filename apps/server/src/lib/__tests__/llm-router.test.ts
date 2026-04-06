@@ -5,8 +5,8 @@ import { getContextWindow, getMaxTokens, isFallbackEligible } from "../llm-route
 
 describe("getContextWindow", () => {
   it("returns known context window for Claude models", () => {
-    const window = getContextWindow("claude-sonnet-4-20250514");
-    expect(window).toBeGreaterThan(0);
+    const window = getContextWindow("claude-sonnet-4-6");
+    expect(window).toBe(200000);
   });
 
   it("returns default for unknown model", () => {
