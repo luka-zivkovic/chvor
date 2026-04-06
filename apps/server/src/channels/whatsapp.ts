@@ -18,6 +18,7 @@ import type { NormalizedMessage, MediaArtifact } from "@chvor/shared";
 import type { ChannelAdapter, MessageHandler, SendResponseOptions } from "./channel.ts";
 import { getChannelPolicy } from "../db/config-store.ts";
 import { storeMediaFromBuffer } from "../lib/media-store.ts";
+import { splitText } from "./text-utils.ts";
 
 const DATA_DIR = join(process.cwd(), "data");
 const AUTH_DIR = join(DATA_DIR, "whatsapp-auth");
@@ -314,7 +315,14 @@ export class WhatsAppChannel implements ChannelAdapter {
 
     if (isGroup) {
       if (policy.group.mode === "disabled") return true;
-      if (policy.group.mode === "allowlist" && !policy.group.allowlist.includes(remoteJid)) return true;
+      if (policy.group.mode === "allowlist") {
+        // Match against both the full JID (123456@g.us) and the numeric prefix
+        const groupId = remoteJid.split("@")[0];
+        const allowed = policy.group.allowlist.some(
+          (entry) => entry === remoteJid || entry === groupId
+        );
+        if (!allowed) return true;
+      }
       if (policy.groupSenderFilter.enabled && !policy.groupSenderFilter.allowlist.includes(senderPhone)) return true;
     } else {
       if (policy.dm.mode === "disabled") return true;
@@ -342,24 +350,16 @@ export class WhatsAppChannel implements ChannelAdapter {
 
 /** Extract text content from a WhatsApp message. */
 function extractText(content: WAMessageContent): string | undefined {
+  // Use proto.Message typed properties — Baileys defines these on WAMessageContent
+  const msg = content as proto.IMessage;
   return (
-    (content as any).conversation ??
-    (content as any).extendedTextMessage?.text ??
-    (content as any).imageMessage?.caption ??
-    (content as any).videoMessage?.caption ??
+    msg.conversation ??
+    msg.extendedTextMessage?.text ??
+    msg.imageMessage?.caption ??
+    msg.videoMessage?.caption ??
+    msg.listResponseMessage?.title ??
+    msg.buttonsResponseMessage?.selectedDisplayText ??
     undefined
   );
 }
 
-function splitText(text: string, maxLen: number): string[] {
-  if (text.length <= maxLen) return [text];
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > 0) {
-    let splitAt = remaining.lastIndexOf("\n", maxLen);
-    if (splitAt <= 0) splitAt = maxLen;
-    chunks.push(remaining.slice(0, splitAt));
-    remaining = remaining.slice(splitAt).trimStart();
-  }
-  return chunks;
-}

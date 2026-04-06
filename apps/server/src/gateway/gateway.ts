@@ -68,7 +68,8 @@ export class Gateway extends EventEmitter {
   }
 
   private async processMessage(rawMessage: NormalizedMessage): Promise<void> {
-    console.log(`[gateway] message from ${rawMessage.channelType}/${rawMessage.senderId}: ${rawMessage.text}`);
+    const safePreview = redactSensitiveData(rawMessage.text).slice(0, 80);
+    console.log(`[gateway] message from ${rawMessage.channelType}/${rawMessage.senderId}: ${safePreview}`);
 
     const targetClient = rawMessage.originClientId;
 

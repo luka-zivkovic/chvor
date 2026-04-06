@@ -4,8 +4,27 @@ import { getChannelPolicy, updateChannelPolicy } from "../db/config-store.ts";
 
 const VALID_DM_MODES: ChannelPolicyDmMode[] = ["open", "allowlist", "disabled"];
 const VALID_GROUP_MODES: ChannelPolicyGroupMode[] = ["open", "allowlist", "disabled"];
-const VALID_CHANNEL_TYPES: string[] = ["whatsapp"];
-const PHONE_RE = /^\d{7,15}$/;
+const VALID_CHANNEL_TYPES: string[] = ["whatsapp", "telegram", "discord", "slack", "matrix"];
+
+// Allowlist entry validation per channel type
+const ALLOWLIST_VALIDATORS: Record<string, { re: RegExp; label: string }> = {
+  whatsapp: { re: /^\d{7,15}$/, label: "phone number" },
+  telegram: { re: /^\d{1,20}$/, label: "Telegram user ID (numeric)" },
+  discord: { re: /^\d{17,20}$/, label: "Discord user ID (snowflake)" },
+  slack: { re: /^[UW][A-Z0-9]{8,}$/i, label: "Slack user ID (U/W-prefixed)" },
+  matrix: { re: /^@.+:.+$/, label: "Matrix user ID (@user:server)" },
+};
+
+function validateAllowlistEntries(channelType: string, entries: string[]): string | null {
+  const validator = ALLOWLIST_VALIDATORS[channelType];
+  if (!validator) return null; // no validation for unknown types
+  for (const entry of entries) {
+    if (!validator.re.test(entry)) {
+      return `Invalid ${validator.label} in allowlist: ${entry}`;
+    }
+  }
+  return null;
+}
 
 const channelPolicy = new Hono();
 
@@ -31,11 +50,26 @@ channelPolicy.patch("/:channelType/policy", async (c) => {
     if (body.group?.mode && !VALID_GROUP_MODES.includes(body.group.mode)) {
       return c.json({ error: `group.mode must be one of: ${VALID_GROUP_MODES.join(", ")}` }, 400);
     }
-    for (const num of body.dm?.allowlist ?? []) {
-      if (!PHONE_RE.test(num)) return c.json({ error: `Invalid phone number in dm.allowlist: ${num}` }, 400);
+
+    // Validate allowlist entries per channel type
+    if (body.dm?.allowlist) {
+      const err = validateAllowlistEntries(channelType, body.dm.allowlist);
+      if (err) return c.json({ error: err }, 400);
     }
-    for (const num of body.groupSenderFilter?.allowlist ?? []) {
-      if (!PHONE_RE.test(num)) return c.json({ error: `Invalid phone number in groupSenderFilter.allowlist: ${num}` }, 400);
+    if (body.groupSenderFilter?.allowlist) {
+      const err = validateAllowlistEntries(channelType, body.groupSenderFilter.allowlist);
+      if (err) return c.json({ error: err }, 400);
+    }
+    // Group allowlist for WhatsApp uses JIDs (e.g. 123456@g.us), not phone numbers
+    if (body.group?.allowlist && channelType === "whatsapp") {
+      for (const entry of body.group.allowlist) {
+        if (!entry.endsWith("@g.us") && !/^\d{7,15}$/.test(entry)) {
+          return c.json({ error: `Invalid WhatsApp group ID in group.allowlist: ${entry} (expected JID ending in @g.us)` }, 400);
+        }
+      }
+    } else if (body.group?.allowlist) {
+      const err = validateAllowlistEntries(channelType, body.group.allowlist);
+      if (err) return c.json({ error: err }, 400);
     }
 
     const updated = updateChannelPolicy(channelType as ChannelType, body);

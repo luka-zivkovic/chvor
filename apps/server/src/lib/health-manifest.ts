@@ -67,7 +67,7 @@ export function writeManifest(): void {
     const stats = getErrorStats();
 
     // Channel status
-    const channelTypes = ["telegram", "discord", "slack"] as const;
+    const channelTypes = ["telegram", "discord", "slack", "whatsapp", "matrix"] as const;
     const channelParts: string[] = ["Web Chat: active"];
     for (const ct of channelTypes) {
       const match = creds.find((c) => c.type === ct);

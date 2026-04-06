@@ -1,18 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { Client, GatewayIntentBits, Events } from "discord.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { Client, GatewayIntentBits, Events, AttachmentBuilder } from "discord.js";
 import type { NormalizedMessage } from "@chvor/shared";
 import type { ChannelAdapter, MessageHandler, SendResponseOptions } from "./channel.ts";
 import {
   listCredentials,
   getCredentialData,
 } from "../db/credential-store.ts";
-import { storeMediaFromBuffer, MAX_ARTIFACT_BYTES } from "../lib/media-store.ts";
+import { storeMediaFromBuffer, MAX_ARTIFACT_BYTES, getMediaDir } from "../lib/media-store.ts";
+import { splitText } from "./text-utils.ts";
+import { getChannelPolicy } from "../db/config-store.ts";
 
 export class DiscordChannel implements ChannelAdapter {
   name = "discord" as const;
   private handler: MessageHandler | null = null;
   private client: Client | null = null;
   private running = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
 
   async start(): Promise<void> {
     const token = this.loadBotToken();
@@ -39,6 +45,11 @@ export class DiscordChannel implements ChannelAdapter {
       if (!message.content && !hasAttachments) return;
 
       const isThread = message.channel.isThread();
+      const chatType = isThread ? "thread" : message.channel.isDMBased() ? "dm" : "group";
+
+      // Access control — check policy before processing
+      if (this.shouldFilter(chatType, message.author.id)) return;
+
       const normalized: NormalizedMessage = {
         id: randomUUID(),
         channelType: "discord",
@@ -48,7 +59,7 @@ export class DiscordChannel implements ChannelAdapter {
         text: message.content ?? "",
         timestamp: message.createdAt.toISOString(),
         threadId: isThread ? message.channel.id : undefined,
-        chatType: isThread ? "thread" : message.channel.isDMBased() ? "dm" : "group",
+        chatType,
       };
 
       // Download attachments and store as media artifacts (cap at 5, 50 MB aggregate)
@@ -100,18 +111,64 @@ export class DiscordChannel implements ChannelAdapter {
       console.error("[discord] client error:", err.message);
     });
 
-    await this.client.login(token);
-    this.running = true;
-    console.log("[discord] bot connected");
+    // Reconnect on unexpected disconnect
+    this.client.on(Events.ShardDisconnect, (_event, _shardId) => {
+      if (this.running) {
+        console.warn("[discord] unexpected disconnect, scheduling reconnect");
+        this.running = false;
+        this.scheduleReconnect();
+      }
+    });
+
+    this.client.on(Events.ShardReconnecting, () => {
+      console.log("[discord] reconnecting...");
+    });
+
+    this.client.on(Events.ShardResume, () => {
+      console.log("[discord] resumed connection");
+      this.reconnectAttempts = 0;
+    });
+
+    try {
+      await this.client.login(token);
+      this.running = true;
+      this.reconnectAttempts = 0;
+      console.log("[discord] bot connected");
+    } catch (err) {
+      console.error("[discord] login failed:", (err as Error).message);
+      this.client = null;
+      this.scheduleReconnect();
+    }
   }
 
   async stop(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
     if (this.client && this.running) {
       await this.client.destroy();
       console.log("[discord] bot disconnected");
     }
     this.client = null;
     this.running = false;
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+    const delay = Math.min(3000 * 2 ** this.reconnectAttempts, 60_000);
+    this.reconnectAttempts++;
+    console.log(`[discord] reconnecting in ${delay / 1000}s (attempt ${this.reconnectAttempts})...`);
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      try {
+        await this.start();
+      } catch (err) {
+        console.error("[discord] reconnect failed:", (err as Error).message);
+        this.scheduleReconnect();
+      }
+    }, delay);
   }
 
   onMessage(handler: MessageHandler): void {
@@ -122,7 +179,7 @@ export class DiscordChannel implements ChannelAdapter {
     channelId: string,
     text: string,
     threadId?: string,
-    _options?: SendResponseOptions
+    options?: SendResponseOptions
   ): Promise<void> {
     if (!this.client) {
       console.error("[discord] cannot send response — client not initialized");
@@ -137,15 +194,71 @@ export class DiscordChannel implements ChannelAdapter {
         return;
       }
 
+      // Send audio as a voice message attachment if provided
+      if (options?.audio && options.audio.data.length > 0) {
+        try {
+          const ext = options.audio.format === "ogg" ? "ogg" : options.audio.format;
+          const attachment = new AttachmentBuilder(Buffer.from(options.audio.data), { name: `voice.${ext}` });
+          await channel.send({ files: [attachment] });
+        } catch (err) {
+          console.warn("[discord] audio send failed, falling back to text:", err);
+        }
+      }
+
+      // Send media attachments if provided
+      if (options?.media && options.media.length > 0) {
+        const files: AttachmentBuilder[] = [];
+        for (const artifact of options.media) {
+          try {
+            // Media URLs are local /api/media/... paths — resolve to disk
+            const filename = artifact.url.split("/").pop();
+            if (filename) {
+              const filePath = join(getMediaDir(), filename);
+              const buffer = readFileSync(filePath);
+              files.push(new AttachmentBuilder(buffer, { name: artifact.filename ?? filename }));
+            }
+          } catch (err) {
+            console.warn("[discord] failed to attach media file:", err);
+          }
+        }
+        if (files.length > 0) {
+          // Send first chunk with files attached
+          const MAX_LEN = 2000;
+          const chunks = splitText(text, MAX_LEN);
+          await channel.send({ content: chunks[0] || undefined, files });
+          // Send remaining text chunks
+          for (let i = 1; i < chunks.length; i++) {
+            await channel.send(chunks[i]);
+          }
+          return;
+        }
+      }
+
+      // Text-only fallback
       const MAX_LEN = 2000;
       const chunks = splitText(text, MAX_LEN);
-
       for (const chunk of chunks) {
         await channel.send(chunk);
       }
     } catch (err) {
       console.error("[discord] sendResponse failed:", err);
     }
+  }
+
+  private shouldFilter(chatType: "dm" | "group" | "thread", senderId: string): boolean {
+    const policy = getChannelPolicy("discord");
+    const isGroup = chatType === "group" || chatType === "thread";
+
+    if (isGroup) {
+      if (policy.group.mode === "disabled") return true;
+      if (policy.group.mode === "allowlist" && !policy.group.allowlist.includes(senderId)) return true;
+      if (policy.groupSenderFilter.enabled && !policy.groupSenderFilter.allowlist.includes(senderId)) return true;
+    } else {
+      if (policy.dm.mode === "disabled") return true;
+      if (policy.dm.mode === "allowlist" && !policy.dm.allowlist.includes(senderId)) return true;
+    }
+
+    return false;
   }
 
   private loadBotToken(): string | null {
@@ -158,15 +271,3 @@ export class DiscordChannel implements ChannelAdapter {
   }
 }
 
-function splitText(text: string, maxLen: number): string[] {
-  if (text.length <= maxLen) return [text];
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > 0) {
-    let splitAt = remaining.lastIndexOf("\n", maxLen);
-    if (splitAt <= 0) splitAt = maxLen;
-    chunks.push(remaining.slice(0, splitAt));
-    remaining = remaining.slice(splitAt).trimStart();
-  }
-  return chunks;
-}
