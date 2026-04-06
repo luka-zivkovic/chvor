@@ -1,4 +1,5 @@
 import { useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   ReactFlow,
   Background,
@@ -150,7 +151,7 @@ export function MemoryGraphButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** Full-screen overlay for the memory graph */
+/** Full-screen overlay for the memory graph — rendered via portal to escape transform containing blocks */
 export function MemoryGraphOverlay({ onClose }: { onClose: () => void }) {
   const { graphLoading } = useMemoryStore();
   const { nodes, edges, totalCount } = useGraphData();
@@ -163,7 +164,7 @@ export function MemoryGraphOverlay({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex">
       {/* Backdrop */}
       <div
@@ -237,6 +238,7 @@ export function MemoryGraphOverlay({ onClose }: { onClose: () => void }) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

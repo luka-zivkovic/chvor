@@ -12,23 +12,25 @@ tags:
   - tweets
   - threads
   - social-media
-requires:
-  credentials:
-    - composio
+needs:
+  - twitter:post
+  - twitter:reply
+  - social:connect
+  - social:list
 ---
 When the user asks to post a tweet, create a thread, or share content on Twitter/X:
 
 ## First steps
 
-1. Check if Twitter is connected via `native__social_list`. If not, initiate `native__social_connect` with platform "twitter".
-2. Discover available actions via `native__social_actions` for platform "twitter" to get exact action names and parameter schemas.
+1. Check if Twitter is connected via {{cap:social:list}}. If not, initiate {{cap:social:connect}} with platform "twitter".
+2. Use the tools listed below to post and interact on Twitter.
 
 ## Single tweet
 
 1. Compose within **280 characters**. Show the character count.
 2. Add 2-3 relevant hashtags if appropriate (don't force them).
 3. Show preview with character count and ask for confirmation.
-4. Post via `native__social_execute` with the discovered tweet creation action.
+4. Post using {{cap:twitter:post}}.
 5. Report success and share the tweet URL if returned.
 
 **Formatting rules:**
@@ -48,9 +50,9 @@ When content exceeds 280 characters or the user explicitly asks for a thread:
 3. **Number the tweets**: Show as "1/N", "2/N", etc. in the preview for clarity (but don't include numbering in the actual tweets unless the user wants it).
 4. **Preview all tweets** at once and get approval before posting any.
 5. **Post sequentially**:
-   - Post tweet 1 via `native__social_execute`
+   - Post tweet 1 using {{cap:twitter:post}}
    - Extract the tweet ID from the response
-   - Post tweet 2 as a reply to tweet 1 (pass the tweet ID as the `in_reply_to` or reply parameter)
+   - Post tweet 2 as a reply to tweet 1 using {{cap:twitter:reply}} (pass the tweet ID as the `in_reply_to` or reply parameter)
    - Continue chaining each subsequent tweet as a reply to the previous one
    - Report progress after each tweet
 6. **Handle failures**: If a tweet in the middle of a thread fails, stop and report which tweets were posted and which weren't. Don't leave orphaned partial threads without telling the user.

@@ -36,14 +36,16 @@ function parseParams(raw: unknown): CapabilityParam[] | undefined {
 function parseMcp(raw: unknown): McpServerConfig | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const m = raw as Record<string, unknown>;
-  if (!m.command) return undefined;
+  // Require either a command (stdio) or a url (sse/http)
+  if (!m.command && !m.url) return undefined;
+  const transport = m.transport === "http" ? "http" : m.transport === "sse" ? "sse" : "stdio";
   return {
-    command: String(m.command),
-    args: Array.isArray(m.args) ? m.args.map(String) : [],
+    command: m.command ? String(m.command) : undefined,
+    args: Array.isArray(m.args) ? m.args.map(String) : undefined,
     env: typeof m.env === "object" && m.env !== null
       ? Object.fromEntries(Object.entries(m.env as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
       : undefined,
-    transport: m.transport === "http" ? "http" : "stdio",
+    transport,
     url: typeof m.url === "string" ? m.url : undefined,
   };
 }
@@ -68,6 +70,15 @@ function parseConfigParams(raw: unknown): SkillConfigParam[] | undefined {
 function parseDependencies(raw: unknown): string[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   return raw.filter((d) => typeof d === "string" && d.length > 0) as string[];
+}
+
+function parseProvides(raw: unknown): Record<string, string> | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const result: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string") result[k] = v;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export function parseCapabilityMd(
@@ -108,6 +119,8 @@ export function parseCapabilityMd(
       outputs: parseParams(fm.outputs),
       config: parseConfigParams(fm.config),
       dependencies: parseDependencies(fm.dependencies),
+      provides: parseProvides(fm.provides),
+      needs: parseDependencies(fm.needs),
     };
 
     const instructions = body.trim();

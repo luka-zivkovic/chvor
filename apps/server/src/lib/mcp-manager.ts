@@ -1,9 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { homedir } from "node:os";
 import type { Tool } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
-import { resolveEnvPlaceholders } from "./credential-resolver.ts";
+import { resolveEnvPlaceholders, resolveUrlPlaceholders } from "./credential-resolver.ts";
 import { loadTools } from "./capability-loader.ts";
 
 interface McpToolInfo {
@@ -14,7 +15,7 @@ interface McpToolInfo {
 
 interface McpConnection {
   client: Client;
-  transport: StdioClientTransport;
+  transport: StdioClientTransport | SSEClientTransport;
   tools: McpToolInfo[];
   toolId: string;
   tool: Tool; // stored for auto-reconnect on failure
@@ -58,32 +59,52 @@ class McpManager {
       throw new Error(`Tool ${tool.id} has no MCP server config`);
     }
 
-    const resolvedEnv = resolveEnvPlaceholders(
-      tool.mcpServer.env,
-      tool.metadata.requires?.credentials
-    );
+    const transportType = tool.mcpServer.transport ?? "stdio";
+    let transport: StdioClientTransport | SSEClientTransport;
 
-    // On Windows, npx needs to be npx.cmd
-    const command =
-      process.platform === "win32" && tool.mcpServer.command === "npx"
-        ? "npx.cmd"
-        : tool.mcpServer.command;
+    if (transportType === "sse" || transportType === "http") {
+      // Remote transport — resolve URL placeholders for API key embedding
+      if (!tool.mcpServer.url) {
+        throw new Error(`Tool ${tool.id} has transport "${transportType}" but no url`);
+      }
+      const resolvedUrl = resolveUrlPlaceholders(
+        tool.mcpServer.url,
+        tool.metadata.requires?.credentials
+      );
+      transport = new SSEClientTransport(new URL(resolvedUrl));
+    } else {
+      // Stdio transport — spawn local process
+      if (!tool.mcpServer.command) {
+        throw new Error(`Tool ${tool.id} has stdio transport but no command`);
+      }
 
-    // Resolve placeholders in args
-    const resolvedArgs = tool.mcpServer.args
-      .map((arg) =>
-        arg
-          .replace(/\{\{homedir\}\}/g, homedir())
-          .replace(/\{\{cwd\}\}/g, process.cwd())
-          .replace(/\{\{tmp\}\}/g, process.platform === "win32" ? (process.env.TEMP ?? process.env.TMP ?? homedir()) : "/tmp")
-      )
-      .filter((arg) => arg.length > 0);
+      const resolvedEnv = resolveEnvPlaceholders(
+        tool.mcpServer.env,
+        tool.metadata.requires?.credentials
+      );
 
-    const transport = new StdioClientTransport({
-      command,
-      args: resolvedArgs,
-      env: { ...process.env, ...resolvedEnv } as Record<string, string>,
-    });
+      // On Windows, npx needs to be npx.cmd
+      const command =
+        process.platform === "win32" && tool.mcpServer.command === "npx"
+          ? "npx.cmd"
+          : tool.mcpServer.command;
+
+      // Resolve placeholders in args
+      const resolvedArgs = (tool.mcpServer.args ?? [])
+        .map((arg) =>
+          arg
+            .replace(/\{\{homedir\}\}/g, homedir())
+            .replace(/\{\{cwd\}\}/g, process.cwd())
+            .replace(/\{\{tmp\}\}/g, process.platform === "win32" ? (process.env.TEMP ?? process.env.TMP ?? homedir()) : "/tmp")
+        )
+        .filter((arg) => arg.length > 0);
+
+      transport = new StdioClientTransport({
+        command,
+        args: resolvedArgs,
+        env: { ...process.env, ...resolvedEnv } as Record<string, string>,
+      });
+    }
 
     const client = new Client({
       name: "chvor",

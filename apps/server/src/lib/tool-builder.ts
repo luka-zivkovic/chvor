@@ -5,6 +5,7 @@ import { logError } from "./error-logger.ts";
 import { mcpManager } from "./mcp-manager.ts";
 import { hasRequiredCredentials } from "./credential-resolver.ts";
 import { getNativeToolDefinitions } from "./native-tools.ts";
+import { buildCapabilityRegistry, invalidateCapabilityRegistry } from "./capability-resolver.ts";
 
 /**
  * Convert a JSON Schema properties object to a Zod schema.
@@ -82,11 +83,13 @@ export async function buildToolDefinitions(
   }
 
   const toolDefs: Record<string, ReturnType<typeof tool>> = {};
+  const discoveredMcpTools = new Map<string, Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>>();
   let hadErrors = false;
 
   for (const t of eligibleTools) {
     try {
       const mcpTools = await mcpManager.discoverTools(t);
+      discoveredMcpTools.set(t.id, mcpTools);
 
       for (const mcpTool of mcpTools) {
         const qualifiedName = `${t.id}__${mcpTool.name}`;
@@ -105,6 +108,9 @@ export async function buildToolDefinitions(
       );
     }
   }
+
+  // Build capability registry from discovered MCP tools + native tools
+  buildCapabilityRegistry(eligibleTools, discoveredMcpTools);
 
   // Log tools that were skipped due to missing credentials
   for (const t of tools) {
@@ -128,4 +134,5 @@ export async function buildToolDefinitions(
 export function invalidateToolCache(): void {
   cachedToolHash = null;
   cachedToolDefs = null;
+  invalidateCapabilityRegistry();
 }

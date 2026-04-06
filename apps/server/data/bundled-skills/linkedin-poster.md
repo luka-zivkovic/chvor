@@ -12,16 +12,17 @@ tags:
   - networking
   - social-media
   - business
-requires:
-  credentials:
-    - composio
+needs:
+  - linkedin:post
+  - social:connect
+  - social:list
 ---
 When the user asks to post to LinkedIn, share professional content, or create a LinkedIn update:
 
 ## First steps
 
-1. Check if LinkedIn is connected via `native__social_list`. If not, initiate `native__social_connect` with platform "linkedin".
-2. Discover available actions via `native__social_actions` for platform "linkedin" to get exact action names and parameter schemas.
+1. Check if LinkedIn is connected via {{cap:social:list}}. If not, initiate {{cap:social:connect}} with platform "linkedin".
+2. Use {{cap:linkedin:post}} to publish content.
 
 ## Post structure
 

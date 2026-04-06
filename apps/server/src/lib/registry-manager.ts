@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
-import { parse as parseYaml } from "yaml";
+import { parseAllDocuments } from "yaml";
 import type { RegistryLock, InstalledRegistryEntry, RegistryEntryKind, RegistryEntry, Skill, Tool, Capability, TemplateManifest } from "@chvor/shared";
 import { fetchRegistryIndex, fetchEntryContent, computeSha256, getDefaultRegistryUrl } from "./registry-client.ts";
 import { reloadAll } from "./capability-loader.ts";
@@ -214,7 +214,9 @@ async function installTemplate(
   }
 
   // Parse and validate manifest with runtime checks
-  const raw = parseYaml(content);
+  const docs = parseAllDocuments(content);
+  if (docs.length === 0) throw new Error(`Empty YAML for template "${entryId}"`);
+  const raw = docs[0].toJS();
   const manifest = validateManifest(entryId, raw);
 
   // Write template YAML to templates directory

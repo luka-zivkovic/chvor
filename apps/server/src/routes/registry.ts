@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { fetchRegistryIndex, readCachedIndex, fetchEntryContent, getDefaultRegistryUrl } from "../lib/registry-client.ts";
-import { parse as parseYaml } from "yaml";
+import { parseAllDocuments } from "yaml";
 import {
   installEntry,
   uninstallEntry,
@@ -132,7 +132,9 @@ registry.get("/entry/:id/manifest", async (c) => {
     const lock = readLock();
     const registryUrl = lock.registryUrl || getDefaultRegistryUrl();
     const content = await fetchEntryContent(registryUrl, "template", id);
-    const raw = parseYaml(content);
+    const docs = parseAllDocuments(content);
+    if (docs.length === 0) throw new Error(`Empty YAML for template "${id}"`);
+    const raw = docs[0].toJS();
     const manifest = validateManifest(id, raw);
 
     return c.json({ data: manifest });

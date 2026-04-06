@@ -14,7 +14,7 @@ import { setGatewayInstance } from "./gateway-instance.ts";
 import { generateSessionTitle } from "../lib/title-generator.ts";
 import { getWSInstance } from "./ws-instance.ts";
 import { listCredentials } from "../db/credential-store.ts";
-import { redactSensitiveData } from "../lib/sensitive-filter.ts";
+import { redactSensitiveData, stripToolAnnotations } from "../lib/sensitive-filter.ts";
 import { getSessionLifecycleConfig, resolveResetPolicy } from "../db/config-store.ts";
 import { resetSession } from "../lib/session-reset.ts";
 
@@ -184,7 +184,7 @@ export class Gateway extends EventEmitter {
       // In multi-tab scenarios, other tabs sharing the same session will only
       // see the final chat.message (which fans out via getClientsBySessionId).
       const onChunk = (text: string) => {
-        this.emitEvent({ type: "chat.chunk", data: { content: redactSensitiveData(text) } }, targetClient);
+        this.emitEvent({ type: "chat.chunk", data: { content: redactSensitiveData(stripToolAnnotations(text)) } }, targetClient);
       };
       const onStreamReset = () => {
         this.emitEvent({ type: "chat.streamReset", data: {} }, targetClient);
@@ -203,7 +203,7 @@ export class Gateway extends EventEmitter {
         extraRounds,
         abortSignal: abortController.signal,
       });
-      responseText = redactSensitiveData(result.text);
+      responseText = redactSensitiveData(stripToolAnnotations(result.text));
       actions = result.actions;
       allMedia = result.media ?? [];
       totalMessages = result.totalMessages;

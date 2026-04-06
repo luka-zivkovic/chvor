@@ -17,6 +17,11 @@ tags:
   - project-management
   - workspace
   - blocks
+provides:
+  notion:create-page: create_page
+  notion:search: search
+  notion:update-page: update_page
+  notion:query-database: query_database
 mcp:
   command: npx
   args: ["-y", "@notionhq/notion-mcp-server"]
