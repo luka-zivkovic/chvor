@@ -1,9 +1,9 @@
-import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { join, dirname, resolve, relative, isAbsolute } from "node:path";
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, renameSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { parseAllDocuments } from "yaml";
 import type { RegistryLock, InstalledRegistryEntry, RegistryEntryKind, RegistryEntry, Skill, Tool, Capability, TemplateManifest } from "@chvor/shared";
-import { fetchRegistryIndex, fetchEntryContent, computeSha256, getDefaultRegistryUrl, fetchDirectoryManifest, fetchDirectoryFile } from "./registry-client.ts";
+import { fetchRegistryIndex, fetchEntryContent, computeSha256, getDefaultRegistryUrl } from "./registry-client.ts";
 import { reloadAll } from "./capability-loader.ts";
 import { getPersona, updatePersona, getInstructionOverride, setInstructionOverride, clearInstructionOverride } from "../db/config-store.ts";
 import { createSchedule, deleteSchedule } from "../db/schedule-store.ts";
@@ -404,46 +404,19 @@ export async function installEntry(
   }
 
   // Download content and verify integrity
-  const isDirectory = entry.format === "directory";
-  let sha256: string;
-
-  const dir = getDirForKind(resolvedKind);
-  mkdirSync(dir, { recursive: true });
-
-  if (isDirectory) {
-    // Directory-based skill: fetch manifest, then download each file
-    const manifest = await fetchDirectoryManifest(registryUrl, resolvedKind, entryId);
-    const skillDir = join(dir, entryId);
-    mkdirSync(skillDir, { recursive: true });
-
-    const allContents: string[] = [];
-    for (const filePath of manifest.files) {
-      // Security: validate manifest paths don't escape skill directory
-      const targetPath = resolve(skillDir, filePath);
-      const rel = relative(skillDir, targetPath);
-      if (rel.startsWith("..") || isAbsolute(rel)) {
-        throw new Error(`Malicious path in registry manifest for "${entryId}": "${filePath}"`);
-      }
-      const fileContent = await fetchDirectoryFile(registryUrl, resolvedKind, entryId, filePath);
-      allContents.push(fileContent);
-      mkdirSync(dirname(targetPath), { recursive: true });
-      writeFileSync(targetPath, fileContent, "utf8");
-    }
-    // Compute SHA256 over concatenated file contents for integrity
-    sha256 = computeSha256(allContents.join(""));
-  } else {
-    // Single-file skill/tool: existing behavior
-    const content = await fetchEntryContent(registryUrl, resolvedKind, entryId);
-    sha256 = computeSha256(content);
-    const filePath = join(dir, `${entryId}.md`);
-    writeFileSync(filePath, content, "utf8");
-  }
-
+  const content = await fetchEntryContent(registryUrl, resolvedKind, entryId);
+  const sha256 = computeSha256(content);
   if (entry.sha256 && sha256 !== entry.sha256) {
     throw new Error(
       `Integrity check failed for "${entryId}": expected sha256 ${entry.sha256}, got ${sha256}`,
     );
   }
+
+  // Write to appropriate dir
+  const dir = getDirForKind(resolvedKind);
+  mkdirSync(dir, { recursive: true });
+  const filePath = join(dir, `${entryId}.md`);
+  writeFileSync(filePath, content, "utf8");
 
   // Update lockfile
   lock.installed[entryId] = {
@@ -568,19 +541,12 @@ export async function uninstallEntry(entryId: string): Promise<void> {
     // The workspace becomes inert once the template is removed.
   }
 
-  // Remove file or directory from the correct location
+  // Remove file from the correct directory
   const dir = getDirForKind(info.kind);
-  const dirSkillPath = join(dir, entryId);
-  if (existsSync(dirSkillPath) && statSync(dirSkillPath).isDirectory()) {
-    // Directory-based skill: remove entire directory
-    rmSync(dirSkillPath, { recursive: true, force: true });
-  } else {
-    // Single-file skill/tool
-    const ext = getExtForKind(info.kind);
-    const filePath = join(dir, `${entryId}.${ext}`);
-    if (existsSync(filePath)) {
-      unlinkSync(filePath);
-    }
+  const ext = getExtForKind(info.kind);
+  const filePath = join(dir, `${entryId}.${ext}`);
+  if (existsSync(filePath)) {
+    unlinkSync(filePath);
   }
 
   // Remove from lockfile

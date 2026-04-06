@@ -4461,125 +4461,6 @@ handlers.set(SOCIAL_DISCONNECT_NAME, handleSocialDisconnect);
 nativeToolMapping.set(SOCIAL_DISCONNECT_NAME, { kind: "tool", id: "composio" });
 
 // ---------------------------------------------------------------------------
-// Skill Agent & Resource Tools (for directory-based skills)
-// ---------------------------------------------------------------------------
-
-const SPAWN_SKILL_AGENT_NAME = "native__spawn_skill_agent";
-const spawnSkillAgentToolDef = tool({
-  description:
-    "[Skill] Spawn a sub-agent defined by a directory-based skill. " +
-    "The agent has its own system prompt and processes the given task independently, " +
-    "returning its response as the tool result.",
-  parameters: z.object({
-    skillId: z.string().describe("The parent skill ID"),
-    agentId: z.string().describe("The agent to spawn (matches an entry in the skill's agents list)"),
-    task: z.string().describe("The task/prompt to send to the sub-agent"),
-    context: z.string().optional().describe("Optional additional context to include"),
-  }),
-});
-
-async function handleSpawnSkillAgent(
-  args: Record<string, unknown>,
-): Promise<NativeToolResult> {
-  try {
-    const { loadSkills } = await import("./capability-loader.ts");
-    const { createModelForRole } = await import("./llm-router.ts");
-
-    const skillId = String(args.skillId).trim();
-    const agentId = String(args.agentId).trim();
-    const task = String(args.task);
-    const context = args.context ? String(args.context) : undefined;
-
-    const skills = loadSkills();
-    const skill = skills.find((s) => s.id === skillId);
-    if (!skill) {
-      return { content: [{ type: "text", text: `Skill "${skillId}" not found.` }] };
-    }
-    if (!skill.agents?.length) {
-      return { content: [{ type: "text", text: `Skill "${skillId}" has no sub-agents defined.` }] };
-    }
-
-    const agent = skill.agents.find((a) => a.id === agentId);
-    if (!agent) {
-      const available = skill.agents.map((a) => a.id).join(", ");
-      return { content: [{ type: "text", text: `Agent "${agentId}" not found in skill "${skillId}". Available: ${available}` }] };
-    }
-
-    // One-shot LLM call with the agent's system prompt (lightweight to control cost)
-    let model;
-    try {
-      model = createModelForRole("lightweight");
-    } catch {
-      return { content: [{ type: "text", text: "Sub-agent unavailable: no LLM configured for lightweight role." }] };
-    }
-    const { generateText } = await import("ai");
-    const userMessage = context ? `${task}\n\nContext:\n${context}` : task;
-    const result = await generateText({
-      model,
-      system: agent.systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-    });
-
-    return { content: [{ type: "text", text: result.text }] };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { content: [{ type: "text", text: `Sub-agent execution failed: ${msg}` }] };
-  }
-}
-
-handlers.set(SPAWN_SKILL_AGENT_NAME, handleSpawnSkillAgent);
-nativeToolMapping.set(SPAWN_SKILL_AGENT_NAME, { kind: "skill", id: "system" });
-
-const READ_SKILL_RESOURCE_NAME = "native__read_skill_resource";
-const readSkillResourceToolDef = tool({
-  description:
-    "[Skill] Read a reference file bundled with a directory-based skill. " +
-    "Use this to access schemas, documentation, or other reference material.",
-  parameters: z.object({
-    skillId: z.string().describe("The skill ID"),
-    resourcePath: z.string().describe("Relative path within the skill directory, e.g. 'references/schemas.md'"),
-  }),
-});
-
-async function handleReadSkillResource(
-  args: Record<string, unknown>,
-): Promise<NativeToolResult> {
-  try {
-    const { loadSkills } = await import("./capability-loader.ts");
-    const { resolve: pathResolve, relative, isAbsolute, sep } = await import("node:path");
-    const { readFileSync } = await import("node:fs");
-
-    const skillId = String(args.skillId).trim();
-    const resourcePath = String(args.resourcePath).trim();
-
-    const skills = loadSkills();
-    const skill = skills.find((s) => s.id === skillId);
-    if (!skill) {
-      return { content: [{ type: "text", text: `Skill "${skillId}" not found.` }] };
-    }
-    if (!skill.basedir) {
-      return { content: [{ type: "text", text: `Skill "${skillId}" is not a directory-based skill.` }] };
-    }
-
-    // Security: prevent path traversal using relative path check
-    const resolved = pathResolve(skill.basedir, resourcePath);
-    const rel = relative(skill.basedir, resolved);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
-      return { content: [{ type: "text", text: `Access denied: path "${resourcePath}" escapes skill directory.` }] };
-    }
-
-    const content = readFileSync(resolved, "utf8");
-    return { content: [{ type: "text", text: content }] };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { content: [{ type: "text", text: `Failed to read resource: ${msg}` }] };
-  }
-}
-
-handlers.set(READ_SKILL_RESOURCE_NAME, handleReadSkillResource);
-nativeToolMapping.set(READ_SKILL_RESOURCE_NAME, { kind: "skill", id: "system" });
-
-// ---------------------------------------------------------------------------
 // Sandbox: Docker code execution
 // ---------------------------------------------------------------------------
 
@@ -4699,8 +4580,6 @@ export function getNativeToolDefinitions(): Record<
     [SOCIAL_CONNECT_NAME]: socialConnectToolDef,
     [SOCIAL_LIST_NAME]: socialListToolDef,
     [SOCIAL_DISCONNECT_NAME]: socialDisconnectToolDef,
-    [SPAWN_SKILL_AGENT_NAME]: spawnSkillAgentToolDef,
-    [READ_SKILL_RESOURCE_NAME]: readSkillResourceToolDef,
     ...(isCapabilityEnabled("tool", "a2ui") ? {
       [A2UI_PUSH_NAME]: a2uiPushToolDef,
       [A2UI_RESET_NAME]: a2uiResetToolDef,

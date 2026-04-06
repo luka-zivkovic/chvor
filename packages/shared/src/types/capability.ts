@@ -41,10 +41,6 @@ export interface CapabilityMetadata {
   outputs?: CapabilityParam[];
   config?: SkillConfigParam[];
   dependencies?: string[];
-  /** Frontmatter-declared sub-agents (for directory-based skills) */
-  agents?: { id: string; name: string; description?: string }[];
-  /** Frontmatter-declared resource directories (for directory-based skills) */
-  resources?: string[];
 }
 
 export interface McpServerConfig {
@@ -55,37 +51,17 @@ export interface McpServerConfig {
   url?: string;
 }
 
-export interface SkillAgentDef {
-  id: string;
-  name: string;
-  description?: string;
-  systemPrompt: string;
-  path: string;
-}
-
-export interface SkillResourceManifest {
-  references?: string[];
-  scripts?: string[];
-  assets?: string[];
-}
-
 interface BaseCapability {
   id: string;
   metadata: CapabilityMetadata;
   instructions: string;
   source: "bundled" | "user" | "registry";
   path: string;
-  /** Absolute path to skill directory (set for directory-based skills, undefined for single-file) */
-  basedir?: string;
 }
 
 export interface Skill extends BaseCapability {
   kind: "skill";
   skillType: SkillType;
-  /** Sub-agent definitions loaded from agents/ directory */
-  agents?: SkillAgentDef[];
-  /** Resource manifest listing bundled files */
-  resources?: SkillResourceManifest;
 }
 
 export interface Tool extends BaseCapability {
@@ -118,8 +94,6 @@ export interface RegistryEntry {
   includes?: string[];
   /** Whether this entry should be highlighted in onboarding / first-run prompts */
   featured?: boolean;
-  /** Whether this entry is a single file or a directory-based skill */
-  format?: "file" | "directory";
 }
 
 /** @deprecated Use RegistryEntry */
