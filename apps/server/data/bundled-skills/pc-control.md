@@ -2,6 +2,7 @@
 name: "PC Control"
 description: "Control a PC through screen, mouse, keyboard, and accessibility tree"
 version: 2.0.0
+author: chvor
 category: developer
 icon: monitor
 type: prompt

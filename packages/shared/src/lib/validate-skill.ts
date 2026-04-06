@@ -1,6 +1,9 @@
 /**
  * Validates a skill markdown file for publishing to the registry.
  * Portable — usable in both CLI and server.
+ *
+ * CANONICAL SOURCE — packages/shared/src/lib/validate-skill.ts
+ * If you need this in CLI, keep packages/cli/src/lib/validate-skill.ts in sync.
  */
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
@@ -9,9 +12,15 @@ const MAX_SIZE_BYTES = 50_000;
 
 // Patterns that suggest secrets or API keys
 const SECRET_PATTERNS = [
-  /sk-[a-zA-Z0-9]{20,}/,
-  /AKIA[0-9A-Z]{16}/,
-  /ghp_[a-zA-Z0-9]{36}/,
+  /sk-[a-zA-Z0-9]{20,}/,               // OpenAI
+  /sk-ant-[a-zA-Z0-9]{20,}/,           // Anthropic
+  /AKIA[0-9A-Z]{16}/,                   // AWS Access Key
+  /ghp_[a-zA-Z0-9]{36}/,               // GitHub PAT
+  /gho_[a-zA-Z0-9]{36}/,               // GitHub OAuth
+  /github_pat_[a-zA-Z0-9_]{20,}/,      // GitHub fine-grained PAT
+  /sk_live_[a-zA-Z0-9]{20,}/,          // Stripe live key
+  /sk_test_[a-zA-Z0-9]{20,}/,          // Stripe test key
+  /xox[bporas]-[a-zA-Z0-9-]{10,}/,     // Slack tokens
   /-----BEGIN (RSA |EC )?PRIVATE KEY-----/,
 ];
 

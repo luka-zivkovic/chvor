@@ -5,6 +5,7 @@ import { useCanvasStore } from "../../stores/canvas-store";
 import { useRegistryStore } from "../../stores/registry-store";
 import { api } from "../../lib/api";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { RegistrySearchBar } from "../registry/RegistrySearchBar";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -19,15 +20,20 @@ export function SkillsPanel() {
 
   useEffect(() => {
     checkUpdates();
-  }, []);
+  }, [checkUpdates]);
 
   const behavioralSkills = skills.filter(
     (s) => s.skillType === "prompt" || s.skillType === "workflow"
   );
 
   const handleToggle = async (skillId: string, currentlyEnabled: boolean) => {
-    await api.skills.toggle(skillId, !currentlyEnabled);
-    fetchSkills();
+    try {
+      await api.skills.toggle(skillId, !currentlyEnabled);
+      fetchSkills();
+    } catch (err) {
+      toast.error("Failed to toggle skill");
+      console.error("[skill] toggle failed:", err);
+    }
   };
 
   const handleRowClick = (skillId: string) => {

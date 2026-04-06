@@ -4,6 +4,7 @@ description: Review code for bugs, security issues, and improvements with priori
 version: 1.2.0
 author: chvor
 type: workflow
+defaultEnabled: false
 category: developer
 icon: code
 tags:

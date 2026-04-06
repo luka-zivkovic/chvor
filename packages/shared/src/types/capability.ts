@@ -53,6 +53,11 @@ export interface CapabilityMetadata {
    * Only meaningful for skills, not tools.
    */
   needs?: string[];
+  /**
+   * Whether this capability is enabled by default when first loaded.
+   * Defaults to true if not specified. Set to false for opt-in skills.
+   */
+  defaultEnabled?: boolean;
 }
 
 export interface McpServerConfig {

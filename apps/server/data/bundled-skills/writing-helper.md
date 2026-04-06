@@ -4,6 +4,7 @@ description: Edit and refine text for clarity, tone, and structure while preserv
 version: 1.2.0
 author: chvor
 type: workflow
+defaultEnabled: false
 category: productivity
 icon: pen
 tags:

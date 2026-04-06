@@ -165,8 +165,8 @@ export const api = {
   },
 
   skills: {
-    list: () => request<(Skill & { enabled: boolean })[]>("/skills"),
-    get: (id: string) => request<Skill & { enabled: boolean }>(`/skills/${id}`),
+    list: () => request<(Skill & { enabled: boolean; hasOverride: boolean })[]>("/skills"),
+    get: (id: string) => request<Skill & { enabled: boolean; hasOverride: boolean }>(`/skills/${id}`),
     reload: () => request<Skill[]>("/skills/reload", { method: "POST" }),
     toggle: (id: string, enabled?: boolean) =>
       request<{ id: string; enabled: boolean }>(`/skills/${id}/toggle`, {

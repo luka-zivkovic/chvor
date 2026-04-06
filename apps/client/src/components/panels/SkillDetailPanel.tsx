@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useCanvasStore } from "../../stores/canvas-store";
 import { useSkillStore } from "../../stores/skill-store";
 import { useRegistryStore } from "../../stores/registry-store";
@@ -6,6 +6,7 @@ import { useUIStore } from "../../stores/ui-store";
 import { api } from "../../lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 import type { SkillNodeData } from "../../stores/canvas-store";
 import type { SkillConfigParam } from "@chvor/shared";
 import { EditInstructionsDialog } from "../capabilities/EditInstructionsDialog";
@@ -14,6 +15,10 @@ const SKILL_TYPE_LABELS: Record<string, string> = {
   prompt: "Prompt",
   workflow: "Workflow",
 };
+
+function isSkillNodeData(data: unknown): data is SkillNodeData {
+  return typeof data === "object" && data !== null && "skillId" in data;
+}
 
 function statusDotClass(status: string): string {
   switch (status) {
@@ -34,11 +39,15 @@ export function SkillDetailPanel() {
   const { skills, fetchSkills } = useSkillStore();
   const [expanded, setExpanded] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const node = nodes.find((n) => n.id === detailNodeId);
   if (!node) return <p className="text-xs text-muted-foreground">Node not found</p>;
 
-  const data = node.data as unknown as SkillNodeData;
+  if (!isSkillNodeData(node.data)) {
+    return <p className="text-xs text-muted-foreground">Invalid skill node data</p>;
+  }
+  const data = node.data;
   const skill = skills.find((s) => s.id === data.skillId);
 
   if (!skill) {
@@ -52,19 +61,27 @@ export function SkillDetailPanel() {
   const isEnabled = skill.enabled !== false;
 
   const handleToggle = async () => {
-    await api.skills.toggle(skill.id, !isEnabled);
-    fetchSkills();
+    try {
+      await api.skills.toggle(skill.id, !isEnabled);
+      fetchSkills();
+    } catch (err) {
+      toast.error("Failed to toggle skill");
+      console.error("[skill] toggle failed:", err);
+    }
   };
 
   const handleDelete = async () => {
     if (skill.source === "bundled") return;
-    if (!confirm(`Delete skill "${skill.metadata.name}"?`)) return;
     try {
       await api.skills.delete(skill.id);
       fetchSkills();
       useUIStore.getState().closePanel();
+      toast.success(`Skill "${skill.metadata.name}" deleted`);
     } catch (err) {
+      toast.error("Failed to delete skill");
       console.error("[skill] delete failed:", err);
+    } finally {
+      setConfirmingDelete(false);
     }
   };
 
@@ -79,6 +96,7 @@ export function SkillDetailPanel() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
+      toast.error("Failed to export skill");
       console.error("[skill] export failed:", err);
     }
   };
@@ -187,7 +205,7 @@ export function SkillDetailPanel() {
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Instructions
           </h3>
-          {"hasOverride" in skill && (skill as { hasOverride?: boolean }).hasOverride && (
+          {skill.hasOverride && (
             <Badge variant="secondary" className="rounded-full text-[9px]">Modified</Badge>
           )}
         </div>
@@ -258,15 +276,36 @@ export function SkillDetailPanel() {
         >
           Export
         </Button>
-        {skill.source !== "bundled" && (
+        {skill.source !== "bundled" && !confirmingDelete && (
           <Button
             variant="destructive"
             size="sm"
             className="h-7 text-xs"
-            onClick={handleDelete}
+            onClick={() => setConfirmingDelete(true)}
           >
             Delete
           </Button>
+        )}
+        {confirmingDelete && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-destructive">Delete?</span>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-6 text-[10px]"
+              onClick={handleDelete}
+            >
+              Confirm
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[10px]"
+              onClick={() => setConfirmingDelete(false)}
+            >
+              Cancel
+            </Button>
+          </div>
         )}
       </section>
     </div>
@@ -308,6 +347,7 @@ function SkillConfigSection({ skillId }: { skillId: string }) {
     setConfigError(null);
     try {
       await api.skills.updateConfig(skillId, values);
+      toast.success("Configuration saved");
     } catch (err) {
       setConfigError("Failed to save configuration");
       console.warn("[skill-config] save failed:", err);
@@ -376,7 +416,7 @@ function RegistryActionsSection({ skillId }: { skillId: string }) {
 
   useEffect(() => {
     checkUpdates();
-  }, []);
+  }, [checkUpdates]);
 
   const update = availableUpdates.find((u) => u.id === skillId);
 
@@ -385,6 +425,10 @@ function RegistryActionsSection({ skillId }: { skillId: string }) {
     try {
       await applyUpdate(skillId);
       fetchSkills();
+      toast.success("Skill updated");
+    } catch (err) {
+      toast.error("Failed to update skill");
+      console.error("[skill] update failed:", err);
     } finally {
       setLoading(false);
     }
@@ -395,6 +439,10 @@ function RegistryActionsSection({ skillId }: { skillId: string }) {
     try {
       await api.registry.uninstall(skillId);
       fetchSkills();
+      toast.success("Skill uninstalled");
+    } catch (err) {
+      toast.error("Failed to uninstall skill");
+      console.error("[skill] uninstall failed:", err);
     } finally {
       setLoading(false);
     }

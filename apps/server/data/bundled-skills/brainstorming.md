@@ -4,6 +4,7 @@ description: Generate and evaluate diverse ideas using structured diverge-then-c
 version: 1.2.0
 author: chvor
 type: workflow
+defaultEnabled: false
 category: productivity
 icon: lightbulb
 tags:
