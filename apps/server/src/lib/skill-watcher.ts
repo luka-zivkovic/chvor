@@ -43,7 +43,7 @@ export function stopSkillWatcher(): void {
     debounceTimer = null;
   }
   for (const w of watchers) {
-    try { w.close(); } catch { /* ignore */ }
+    try { w.close(); } catch (err) { console.warn("[skill-watcher] failed to close watcher:", err); }
   }
   watchers = [];
 }

@@ -121,6 +121,7 @@ export function parseCapabilityMd(
       dependencies: parseDependencies(fm.dependencies),
       provides: parseProvides(fm.provides),
       needs: parseDependencies(fm.needs),
+      defaultEnabled: typeof fm.defaultEnabled === "boolean" ? fm.defaultEnabled : undefined,
     };
 
     const instructions = body.trim();

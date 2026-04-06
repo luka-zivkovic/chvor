@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { SKILL_IMPORT_MAX_BYTES, SKILL_INSTRUCTIONS_MAX_BYTES } from "@chvor/shared";
 import { loadSkills, getSkill, reloadAll } from "../lib/capability-loader.ts";
 import { parseCapabilityMd } from "../lib/capability-parser.ts";
 import { assertSafeEntryId } from "../lib/registry-manager.ts";
@@ -14,7 +15,7 @@ skills.get("/", (c) => {
   try {
     const allSkills = loadSkills().map((s) => ({
       ...s,
-      enabled: isCapabilityEnabled("skill", s.id),
+      enabled: isCapabilityEnabled("skill", s.id, s.metadata.defaultEnabled),
       hasOverride: getInstructionOverride("skill", s.id) !== null,
     }));
     return c.json({ data: allSkills });
@@ -40,7 +41,7 @@ skills.get("/:id", (c) => {
   const id = c.req.param("id");
   const skill = getSkill(id);
   if (!skill) return c.json({ error: "not found" }, 404);
-  return c.json({ data: { ...skill, enabled: isCapabilityEnabled("skill", skill.id) } });
+  return c.json({ data: { ...skill, enabled: isCapabilityEnabled("skill", skill.id, skill.metadata.defaultEnabled) } });
 });
 
 // PATCH /api/skills/:id/toggle — toggle enabled state
@@ -74,7 +75,7 @@ skills.patch("/:id/instructions", async (c) => {
   if (!skill) return c.json({ error: "not found" }, 404);
   const body = await c.req.json() as { instructions?: string };
   if (typeof body.instructions !== "string") return c.json({ error: "instructions must be a string" }, 400);
-  if (body.instructions.length > 500_000) return c.json({ error: "Instructions too large (max 500KB)" }, 400);
+  if (body.instructions.length > SKILL_INSTRUCTIONS_MAX_BYTES) return c.json({ error: `Instructions too large (max ${SKILL_INSTRUCTIONS_MAX_BYTES} bytes)` }, 400);
   setInstructionOverride("skill", id, body.instructions);
   return c.json({ data: { id, hasOverride: true } });
 });
@@ -133,8 +134,8 @@ skills.post("/import", async (c) => {
     if (!body.trim()) {
       return c.json({ error: "Empty skill content" }, 400);
     }
-    if (body.length > 100_000) {
-      return c.json({ error: "Skill content too large (max 100KB)" }, 400);
+    if (body.length > SKILL_IMPORT_MAX_BYTES) {
+      return c.json({ error: `Skill content too large (max ${SKILL_IMPORT_MAX_BYTES} bytes)` }, 400);
     }
 
     const preview = parseCapabilityMd(body, "import.md", "user");

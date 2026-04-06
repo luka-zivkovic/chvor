@@ -61,7 +61,7 @@ export function loadAll(force = false): { skills: Skill[]; tools: Tool[] } {
   for (const legacy of ["getting-started.md", "get-started.md"]) {
     const legacyPath = join(USER_SKILLS_DIR, legacy);
     if (existsSync(legacyPath)) {
-      try { unlinkSync(legacyPath); console.log(`[capability-loader] cleaned up legacy ${legacy}`); } catch { /* ignore */ }
+      try { unlinkSync(legacyPath); console.log(`[capability-loader] cleaned up legacy ${legacy}`); } catch (err) { console.warn(`[capability-loader] failed to clean up legacy ${legacy}:`, err); }
     }
   }
 

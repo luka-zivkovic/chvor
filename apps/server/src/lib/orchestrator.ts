@@ -578,10 +578,10 @@ export async function executeConversation(
   console.log(`[orchestrator] using ${config.providerId}/${config.model}${configChain.length > 1 ? ` (+${configChain.length - 1} fallback${configChain.length > 2 ? "s" : ""})` : ""}`);
 
   const allSkills = loadSkills();
-  const skills = allSkills.filter((s) => isCapabilityEnabled("skill", s.id));
+  const skills = allSkills.filter((s) => isCapabilityEnabled("skill", s.id, s.metadata.defaultEnabled));
 
   const allTools = loadTools();
-  const enabledTools = allTools.filter((t) => isCapabilityEnabled("tool", t.id));
+  const enabledTools = allTools.filter((t) => isCapabilityEnabled("tool", t.id, t.metadata.defaultEnabled));
   const toolDefs = await buildToolDefinitions(enabledTools);
   if (options?.excludeTools) {
     for (const name of options.excludeTools) delete toolDefs[name];

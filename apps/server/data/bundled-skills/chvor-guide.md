@@ -2,6 +2,7 @@
 name: "Chvor Guide"
 description: "Helps new users discover what Chvor can do"
 version: 1.0.0
+author: chvor
 category: ai
 icon: sparkles
 type: prompt

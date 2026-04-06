@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Skill } from "@chvor/shared";
 import { api } from "../lib/api";
 
-export type SkillWithEnabled = Skill & { enabled: boolean };
+export type SkillWithEnabled = Skill & { enabled: boolean; hasOverride: boolean };
 
 interface SkillState {
   skills: SkillWithEnabled[];
