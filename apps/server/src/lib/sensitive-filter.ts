@@ -73,7 +73,7 @@ export function redactSensitiveData(text: string): string {
  * Strip [Tool: xxx → summary] annotations that the LLM may echo from session history.
  * These are injected by sessionToMessages() for LLM context but should never reach users.
  */
-const TOOL_ANNOTATION_RE = /\[Tool:\s*[\w.\-]+\s*(?:→|->)\s*[^\]]{0,2000}\]/gs;
+const TOOL_ANNOTATION_RE = /\[Tool:\s*[\w.-]+\s*(?:→|->)\s*[^\]]{0,2000}\]/gs;
 
 export function stripToolAnnotations(text: string): string {
   return text.replace(TOOL_ANNOTATION_RE, "").replace(/\n{3,}/g, "\n\n").trim();
