@@ -3836,9 +3836,11 @@ async function handleA2UIPush(
           const normalizedChildren = Array.isArray(childList)
             ? { explicitList: childList as string[] }
             : childList;
+          // Capture gap before clearing — raw and comp are the same object reference
+          const gap = raw.gap ?? 8;
           // Clear all existing keys and replace with a proper Column wrapper
           for (const k of Object.keys(comp)) delete comp[k];
-          comp["Column"] = { children: normalizedChildren, gap: raw.gap ?? 8 };
+          comp["Column"] = { children: normalizedChildren, gap };
           console.warn(`[a2ui] Surface "${sid}": auto-wrapped component "${cid}" as Column`);
         } else {
           continue;
