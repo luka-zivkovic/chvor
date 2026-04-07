@@ -3842,9 +3842,9 @@ async function handleA2UIPush(
           for (const k of Object.keys(comp)) delete comp[k];
           comp["Column"] = { children: normalizedChildren, gap };
           console.warn(`[a2ui] Surface "${sid}": auto-wrapped component "${cid}" as Column`);
-        } else {
-          continue;
         }
+        // Children already normalized during wrapping; skip further normalization
+        continue;
       }
 
       // Normalize children format: if children is a plain array instead of {explicitList: [...]}
