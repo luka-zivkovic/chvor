@@ -342,7 +342,7 @@ export const api = {
       }),
     delete: (id: string) =>
       request<null>(`/memories/${id}`, { method: "DELETE" }),
-    deleteAll: () => request<null>("/memories", { method: "DELETE" }),
+    deleteAll: () => request<null>("/memories?confirm=true", { method: "DELETE" }),
     graph: () => request<MemoryGraphExport>("/memories/graph"),
     stats: () => request<MemoryStats>("/memories/stats"),
   },

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Memory, MemoryCategory, MemoryEdge, MemorySpace, MemoryProvenance, EdgeRelation } from "@chvor/shared";
 import { getDb, isVecAvailable } from "./database.ts";
 import { containsSensitiveData } from "../lib/sensitive-filter.ts";
-import { embed, isEmbedderAvailable } from "../lib/embedder.ts";
+import { embed, isEmbedderAvailable, getEmbeddingDim } from "../lib/embedder.ts";
 import { computeTopicHash } from "../lib/memory-preloader.ts";
 
 // ─── Row types ──────────────────────────────────────────────
@@ -86,6 +86,12 @@ export async function embedAndStoreVector(id: string, content: string): Promise<
   try {
     const db = getDb();
     const vector = await embed(content);
+    // Dimension safety: reject vectors that don't match the active table dimension
+    const expectedDim = getEmbeddingDim();
+    if (vector.length !== expectedDim) {
+      console.warn(`[memory] dimension mismatch for ${id}: got ${vector.length}, expected ${expectedDim} — skipping embed`);
+      return;
+    }
     const buf = Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
     const tx = db.transaction(() => {
       db.prepare("UPDATE memory_nodes SET embedding = ? WHERE id = ?").run(buf, id);
@@ -111,6 +117,13 @@ function deleteAllMemoryVectors(): void {
     const db = getDb();
     db.prepare("DELETE FROM memory_node_vec").run();
   } catch { /* vec table may not exist */ }
+}
+
+/** Clear all stored embeddings (used when embedding provider/dimension changes). */
+export function clearAllEmbeddings(): void {
+  const db = getDb();
+  db.prepare("UPDATE memory_nodes SET embedding = NULL").run();
+  deleteAllMemoryVectors();
 }
 
 export function getUnembeddedMemoryIds(): { id: string; content: string }[] {
@@ -496,7 +509,8 @@ export function getAllMemoryContents(
   const results: string[] = [];
   let usedTokens = 0;
   for (const r of rows) {
-    const estimate = Math.ceil(r.abstract.length / 4);
+    // Conservative estimate: chars/3 accounts for code, URLs, non-Latin text
+    const estimate = Math.ceil(r.abstract.length / 3);
     if (usedTokens + estimate > maxTokenBudget) break;
     results.push(r.abstract);
     usedTokens += estimate;
@@ -598,55 +612,6 @@ export async function findTopKSimilarMemories(
   }
 }
 
-/**
- * Legacy sync dedup for backward compatibility (used by old upsertMemory path).
- */
-function findOverlappingMemory(content: string): Memory | null {
-  const db = getDb();
-  const rows = db
-    .prepare("SELECT * FROM memory_nodes ORDER BY created_at DESC LIMIT 500")
-    .all() as MemoryNodeRow[];
-
-  const lower = content.toLowerCase();
-  for (const row of rows) {
-    const existing = row.abstract.toLowerCase();
-    if (existing === lower) return rowToMemory(row);
-    const shorter = Math.min(existing.length, lower.length);
-    if (shorter < 10) continue;
-    if (existing.includes(lower) && lower.length / existing.length >= 0.6) {
-      return rowToMemory(row);
-    }
-    if (lower.includes(existing) && existing.length / lower.length >= 0.6) {
-      return rowToMemory(row);
-    }
-  }
-  return null;
-}
-
-/**
- * Smart upsert: skip duplicates, update if new content is longer, insert if no overlap.
- * Wrapped in a transaction to prevent race conditions between find and insert/update.
- * Returns the memory if stored/updated, null if skipped.
- */
-export function upsertMemory(
-  content: string,
-  sourceChannel: string,
-  sourceSessionId: string,
-): Memory | null {
-  const db = getDb();
-  const doUpsert = db.transaction(() => {
-    const overlap = findOverlappingMemory(content);
-    if (!overlap) {
-      return createMemory(content, sourceChannel, sourceSessionId);
-    }
-    if (content.length > overlap.content.length) {
-      return updateMemory(overlap.id, content);
-    }
-    return null;
-  });
-  return doUpsert();
-}
-
 // ─── Memory strength & access tracking ──────────────────────
 
 /** Record that a memory was accessed (boost strength, slow decay). */
@@ -654,11 +619,12 @@ export function recordMemoryAccess(id: string, sessionId?: string, queryText?: s
   const db = getDb();
   const now = new Date().toISOString();
 
-  // Boost strength and slow decay rate (spaced repetition)
+  // Boost strength with diminishing returns and slow decay rate (spaced repetition)
+  // Uses (1 - strength) factor so strong memories get smaller boosts, preventing immortality
   db.prepare(`
     UPDATE memory_nodes SET
-      strength = MIN(1.0, strength + 0.15),
-      decay_rate = MAX(0.02, decay_rate * 0.8),
+      strength = MIN(1.0, strength + 0.05 * (1.0 - strength)),
+      decay_rate = MAX(0.02, decay_rate * 0.9),
       access_count = access_count + 1,
       last_accessed_at = ?
     WHERE id = ?
@@ -963,14 +929,23 @@ export function getMemoryGraph(limit: number = 500): import("@chvor/shared").Mem
     createdAt: row.created_at,
   }));
 
-  // Only include edges between nodes in the result set — filter in SQL, not JS
-  const nodeIds = nodes.map((n) => n.id);
+  // Only include edges between nodes in the result set
+  // Use chunked queries to stay under SQLite's 999 variable limit
+  const nodeIdSet = new Set(nodes.map((n) => n.id));
   let edgeRows: EdgeRow[] = [];
-  if (nodeIds.length > 0) {
-    const placeholders = nodeIds.map(() => "?").join(",");
-    edgeRows = db.prepare(
-      `SELECT * FROM memory_edges WHERE source_id IN (${placeholders}) AND target_id IN (${placeholders})`
-    ).all(...nodeIds, ...nodeIds) as EdgeRow[];
+  if (nodeIdSet.size > 0) {
+    const EDGE_CHUNK = 400; // 400 * 2 = 800 params, well under 999
+    const nodeIdArr = [...nodeIdSet];
+    for (let i = 0; i < nodeIdArr.length; i += EDGE_CHUNK) {
+      const chunk = nodeIdArr.slice(i, i + EDGE_CHUNK);
+      const placeholders = chunk.map(() => "?").join(",");
+      const rows = db.prepare(
+        `SELECT * FROM memory_edges WHERE source_id IN (${placeholders}) AND target_id IN (${placeholders})`
+      ).all(...chunk, ...chunk) as EdgeRow[];
+      edgeRows.push(...rows);
+    }
+    // Filter: both endpoints must be in the node set (cross-chunk edges)
+    edgeRows = edgeRows.filter((e) => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id));
   }
   const edges = edgeRows.map((row) => ({
     id: row.id,

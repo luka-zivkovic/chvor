@@ -18,6 +18,7 @@ import {
   createEdge,
   getEdgesForMemory,
   reduceMemoryStrength,
+  deleteMemory,
   pruneWeakEdges,
   pruneAccessLog,
 } from "../db/memory-store.ts";
@@ -308,11 +309,15 @@ async function doConsolidation(): Promise<{
   const largeClusters = allClusters.filter((c) => c.memories.length >= 3);
 
   // Pass 1: Fragment merging
-  // Skip memories already consolidated (provenance = "consolidated") to prevent re-merging (H2 fix)
+  // Allow consolidated memories to re-merge if they're old enough (>7 days)
+  // to prevent unbounded accumulation while avoiding immediate re-processing
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const mergeCandidates = largeClusters
     .map((c) => ({
       ...c,
-      memories: c.memories.filter((m) => m.provenance !== "consolidated"),
+      memories: c.memories.filter((m) =>
+        m.provenance !== "consolidated" || m.createdAt < sevenDaysAgo
+      ),
     }))
     .filter((c) => c.memories.length >= 3);
 
@@ -324,7 +329,12 @@ async function doConsolidation(): Promise<{
       // Only reduce originals AFTER confirming merge was persisted
       for (const original of cluster.memories) {
         createEdge(newMemory.id, original.id, "narrative", 0.7);
-        reduceMemoryStrength(original.id, 0.5); // halve strength so originals fade over multiple consolidation cycles
+        if (original.strength < 0.3) {
+          // Weak originals: fully remove to prevent unbounded growth
+          deleteMemory(original.id);
+        } else {
+          reduceMemoryStrength(original.id, 0.5); // halve strength so originals fade
+        }
       }
       merged++;
       console.log(`[consolidation] merged ${cluster.memories.length} fragments: "${mergedOpts.abstract}"`);

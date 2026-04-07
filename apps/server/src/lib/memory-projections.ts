@@ -171,6 +171,10 @@ export function computeCompositeScore(
   // Category relevance
   const categoryRelevance = categoryWeights[memory.category] ?? 1.0;
 
+  // Normalize categoryRelevance to 0-1 range (raw weights can be >1, e.g. 1.4)
+  // Apply as a scaling factor on the final score instead of an additive signal
+  const normalizedCategoryRelevance = Math.min(1.0, categoryRelevance / 1.4);
+
   if (useEmotions) {
     // Emotional resonance: boost memories formed in similar emotional states
     let emotionalResonance = 0.5; // neutral default
@@ -183,22 +187,23 @@ export function computeCompositeScore(
       emotionalResonance = Math.max(0, 1.0 - Math.min(valenceDiff, 2.0) / 2.0);
     }
 
-    return Math.min(1.0,
+    const baseScore =
       vectorSimilarity * 0.35 +
       strength * 0.25 +
       recency * 0.15 +
-      categoryRelevance * 0.15 +
-      emotionalResonance * 0.10
-    );
+      normalizedCategoryRelevance * 0.15 +
+      emotionalResonance * 0.10;
+    // Apply category weight as a multiplier for cross-channel comparability
+    return Math.min(1.0, baseScore * categoryRelevance);
   }
 
   // Emotions disabled — redistribute emotional weight
-  return Math.min(1.0,
+  const baseScore =
     vectorSimilarity * 0.40 +
     strength * 0.30 +
     recency * 0.15 +
-    categoryRelevance * 0.15
-  );
+    normalizedCategoryRelevance * 0.15;
+  return Math.min(1.0, baseScore * categoryRelevance);
 }
 
 // ─── Detailed scoring (for observability) ───────────────────
@@ -230,6 +235,7 @@ export function computeCompositeScoreDetailed(
   const recency = Math.exp(-0.05 * Math.max(0, daysSince));
   const categoryRelevance = categoryWeights[memory.category] ?? 1.0;
 
+  const normalizedCategoryRelevance = Math.min(1.0, categoryRelevance / 1.4);
   let emotionalResonance: number | null = null;
   let composite: number;
 
@@ -239,18 +245,20 @@ export function computeCompositeScoreDetailed(
       const valenceDiff = Math.abs(memory.emotionalValence - context.currentEmotionalValence);
       emotionalResonance = Math.max(0, 1.0 - Math.min(valenceDiff, 2.0) / 2.0);
     }
-    composite = Math.min(1.0,
+    const baseScore =
       vectorSimilarity * 0.35 +
       strength * 0.25 +
       recency * 0.15 +
-      categoryRelevance * 0.15 +
-      emotionalResonance * 0.10);
+      normalizedCategoryRelevance * 0.15 +
+      emotionalResonance * 0.10;
+    composite = Math.min(1.0, baseScore * categoryRelevance);
   } else {
-    composite = Math.min(1.0,
+    const baseScore =
       vectorSimilarity * 0.40 +
       strength * 0.30 +
       recency * 0.15 +
-      categoryRelevance * 0.15);
+      normalizedCategoryRelevance * 0.15;
+    composite = Math.min(1.0, baseScore * categoryRelevance);
   }
 
   return { vector: vectorSimilarity, strength, recency, categoryRelevance, emotionalResonance, composite };

@@ -2,7 +2,7 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { mkdirSync, existsSync, readFileSync, writeFileSync, statSync } from "node:fs";
-import { getEmbeddingPreference } from "../db/config-store.ts";
+import { getEmbeddingPreference, getConfig, setConfig } from "../db/config-store.ts";
 import { listCredentials, getCredentialData } from "../db/credential-store.ts";
 
 const _require = createRequire(import.meta.url);
@@ -490,8 +490,38 @@ export async function initEmbedder(): Promise<void> {
 export async function reinitEmbedder(): Promise<void> {
   // Wait for any in-flight init to finish before starting a new one
   if (initPromise) await initPromise;
+
+  // Null out current provider so concurrent embed() calls fail fast
+  // instead of producing wrong-dimension vectors during the switch
+  const oldProvider = currentProvider;
+  currentProvider = null;
   initPromise = null;
+
+  const newConfig = getEmbeddingPreference();
+  const oldDim = parseInt(getConfig("embedding.activeDimensions") ?? "384", 10);
+  const newDim = newConfig.dimensions;
+
   await initEmbedder();
+
+  // Re-read currentProvider after initEmbedder (TS can't track cross-function mutation)
+  const provider = currentProvider as EmbeddingProvider | null;
+
+  // If dimensions changed, the vec table and stored embeddings are invalid
+  if (provider?.isAvailable() && newDim !== oldDim) {
+    console.log(`[embedder] dimension change detected (${oldDim} → ${newDim}), rebuilding vector index`);
+    try {
+      const { rebuildVecTable } = await import("../db/database.ts");
+      const { clearAllEmbeddings } = await import("../db/memory-store.ts");
+      rebuildVecTable(newDim);
+      clearAllEmbeddings();
+      setConfig("embedding.activeDimensions", String(newDim));
+      console.log("[embedder] vector index rebuilt, backfill needed");
+    } catch (err) {
+      console.error("[embedder] failed to rebuild vector index:", (err as Error).message);
+    }
+  } else if (provider?.isAvailable()) {
+    setConfig("embedding.activeDimensions", String(newDim));
+  }
 }
 
 export function getEmbeddingDim(): number {
