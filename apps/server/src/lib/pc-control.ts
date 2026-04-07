@@ -105,8 +105,8 @@ function stopHelloTimeout(agentId: string): void {
 function safeSend(ws: WSContext, msg: PcServerMessage): void {
   try {
     ws.send(JSON.stringify(msg));
-  } catch {
-    // Connection may have dropped
+  } catch (err) {
+    console.warn(`[pc-control] failed to send ${msg.type} message:`, (err as Error).message);
   }
 }
 
@@ -361,7 +361,9 @@ export async function queryRemoteA11yTree(agentId: string, opts?: { maxDepth?: n
 
 /** Get the configured safety level for PC control */
 export function getPcSafetyLevel(): PcSafetyLevel {
-  return (getConfig("pc_safety_level") as PcSafetyLevel) ?? "semi-autonomous";
+  const raw = getConfig("pc_safety_level") as string | undefined;
+  const valid: PcSafetyLevel[] = ["supervised", "semi-autonomous", "autonomous"];
+  return raw && valid.includes(raw as PcSafetyLevel) ? (raw as PcSafetyLevel) : "supervised";
 }
 
 /** Shutdown all agents — called on server shutdown */

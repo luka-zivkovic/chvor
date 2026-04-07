@@ -152,7 +152,7 @@ export function PcConnectionPanel() {
             <div className="text-[11px] text-white/40 space-y-1.5">
               <p>Run on the target PC:</p>
               <code className="block bg-white/5 px-2 py-1.5 rounded text-emerald-400/80 font-mono text-[10px] break-all">
-                {`npx @chvor/pc-agent --server ws://${window.location.host}/ws/pc-agent`}
+                {`npx @chvor/pc-agent --server ${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/pc-agent`}
               </code>
             </div>
           </div>

@@ -733,8 +733,12 @@ export function isTrustedCommand(command: string, isPc: boolean): boolean {
   const trusted = getTrustedCommands();
   if (isPc) {
     const cleaned = command.replace(/^PC (Task|shell):\s*/i, "");
-    const firstWord = cleaned.split(/\s+/)[0]?.toLowerCase() ?? "";
-    return trusted.pc.some((p) => p.toLowerCase() === firstWord);
+    const parts = cleaned.trim().split(/\s+/);
+    for (let len = Math.min(parts.length, 3); len >= 1; len--) {
+      const candidate = parts.slice(0, len).join(" ").toLowerCase();
+      if (trusted.pc.some((p) => p.toLowerCase() === candidate)) return true;
+    }
+    return false;
   }
   // Shell: match "binary subcommand arg" pattern (up to 3 tokens, case-insensitive)
   // Falls back to shorter matches for backward compat with existing 1-2 token patterns

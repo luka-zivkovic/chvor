@@ -115,7 +115,7 @@ export async function executeAction(input: ActionInput): Promise<void> {
       } else {
         // Press modifiers, then the final key, then release in reverse
         for (const k of keys) await keyboard.pressKey(k);
-        for (const k of keys.reverse()) await keyboard.releaseKey(k);
+        for (const k of [...keys].reverse()) await keyboard.releaseKey(k);
       }
       break;
     }
@@ -123,8 +123,18 @@ export async function executeAction(input: ActionInput): Promise<void> {
     case "scroll": {
       const amount = Math.max(1, Math.min(20, input.amount ?? 3));
       const dir = input.direction ?? "down";
-      const scrollAmount = (dir === "up" || dir === "left") ? -amount : amount;
-      await mouse.scrollDown(scrollAmount);
+      if (dir === "left" || dir === "right") {
+        // nut-js scrollRight may not exist in all versions — fall back safely
+        const hAmount = dir === "left" ? -amount : amount;
+        if (typeof mouse.scrollRight === "function") {
+          await mouse.scrollRight(hAmount);
+        } else {
+          throw new Error("Horizontal scroll not supported on this platform");
+        }
+      } else {
+        const vAmount = dir === "up" ? -amount : amount;
+        await mouse.scrollDown(vAmount);
+      }
       break;
     }
 
