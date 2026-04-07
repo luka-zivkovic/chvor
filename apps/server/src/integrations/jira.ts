@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { listCredentials, getCredentialData } from "../db/credential-store.ts";
+import { assertSafeUrl } from "../lib/url-safety.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,6 +56,7 @@ async function jiraFetch(
   options: RequestInit = {}
 ): Promise<Response> {
   const url = `${creds.domain}${path}`;
+  assertSafeUrl(url, "Jira API URL");
   return fetch(url, {
     ...options,
     headers: {
@@ -381,31 +383,37 @@ export function getJiraTools(): ToolDef[] {
               creds,
               `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`
             );
-            if (transResp.ok) {
-              const transData = (await transResp.json()) as Record<string, unknown>;
-              const transitions = (transData.transitions ?? []) as Array<Record<string, unknown>>;
-              const target = transitions.find(
-                (t) =>
-                  (t.name as string).toLowerCase() === String(args.status).toLowerCase() ||
-                  ((t.to as Record<string, unknown>)?.name as string)?.toLowerCase() === String(args.status).toLowerCase()
+            if (!transResp.ok) {
+              const transBody = await transResp.text();
+              return errorResult(`Failed to fetch transitions for ${issueKey}: Jira API ${transResp.status}: ${transBody}`);
+            }
+            const transData = (await transResp.json()) as Record<string, unknown>;
+            const transitions = (transData.transitions ?? []) as Array<Record<string, unknown>>;
+            const target = transitions.find(
+              (t) =>
+                (t.name as string).toLowerCase() === String(args.status).toLowerCase() ||
+                ((t.to as Record<string, unknown>)?.name as string)?.toLowerCase() === String(args.status).toLowerCase()
+            );
+            if (target) {
+              const doTransResp = await jiraFetch(
+                creds,
+                `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`,
+                {
+                  method: "POST",
+                  body: JSON.stringify({ transition: { id: target.id } }),
+                }
               );
-              if (target) {
-                await jiraFetch(
-                  creds,
-                  `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`,
-                  {
-                    method: "POST",
-                    body: JSON.stringify({ transition: { id: target.id } }),
-                  }
-                );
-              } else {
-                const available = transitions
-                  .map((t) => `"${(t.to as Record<string, unknown>)?.name ?? t.name}"`)
-                  .join(", ");
-                return errorResult(
-                  `Cannot transition to "${args.status}". Available transitions: ${available}`
-                );
+              if (!doTransResp.ok) {
+                const doTransBody = await doTransResp.text();
+                return errorResult(`Failed to transition ${issueKey} to "${args.status}": Jira API ${doTransResp.status}: ${doTransBody}`);
               }
+            } else {
+              const available = transitions
+                .map((t) => `"${(t.to as Record<string, unknown>)?.name ?? t.name}"`)
+                .join(", ");
+              return errorResult(
+                `Cannot transition to "${args.status}". Available transitions: ${available}`
+              );
             }
           }
 

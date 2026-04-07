@@ -22,6 +22,8 @@ export class SlackChannel implements ChannelAdapter {
   private cachedTokens: { botToken: string; appToken: string } | null = null;
 
   async start(): Promise<void> {
+    if (this.app || this.running) return; // idempotency guard
+
     const tokens = this.loadTokens();
     if (!tokens) {
       console.log("[slack] no credentials found, skipping start");

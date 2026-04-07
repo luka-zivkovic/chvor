@@ -14,6 +14,14 @@ const WEBHOOK_EXCLUDED_TOOLS = [
   "native__create_schedule",
   "native__delete_schedule",
   "native__list_schedules",
+  "native__shell_execute",
+  "native__pc_do",
+  "native__pc_observe",
+  "native__pc_shell",
+  "native__claude_code",
+  "native__add_credential",
+  "native__update_credential",
+  "native__delete_credential",
 ];
 
 let wsManager: WSManager | null = null;

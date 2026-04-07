@@ -47,7 +47,8 @@ function textResult(text: string): ToolResult {
 function assertWithinVault(vaultPath: string, targetPath: string): string {
   const root = resolve(vaultPath);
   const full = resolve(root, normalize(targetPath));
-  if (!full.startsWith(root)) {
+  const rootWithSep = root.endsWith("/") || root.endsWith("\\") ? root : root + "/";
+  if (full !== root && !full.startsWith(rootWithSep)) {
     throw new Error("Path is outside the vault directory");
   }
   return full;

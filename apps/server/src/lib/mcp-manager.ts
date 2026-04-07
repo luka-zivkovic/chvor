@@ -139,7 +139,13 @@ class McpManager {
       version: APP_VERSION,
     });
 
-    await withTimeout(client.connect(transport), SPAWN_TIMEOUT_MS, `MCP spawn for ${tool.id}`);
+    try {
+      await withTimeout(client.connect(transport), SPAWN_TIMEOUT_MS, `MCP spawn for ${tool.id}`);
+    } catch (err) {
+      // If spawn times out, the child process is already running — close the transport to kill it
+      try { await transport.close(); } catch { /* ignore cleanup errors */ }
+      throw err;
+    }
 
     // Discover tools from the MCP server
     const toolsResult = await withTimeout(client.listTools(), DISCOVERY_TIMEOUT_MS, `MCP listTools for ${tool.id}`);
@@ -263,10 +269,13 @@ class McpManager {
     if (!conn) return false;
     try {
       await conn.client.close();
-      console.log(`[mcp] closed connection for repair: ${toolId}`);
     } catch (err) {
-      console.error(`[mcp] error closing ${toolId}:`, err);
+      console.error(`[mcp] error closing client ${toolId}:`, err);
     }
+    try {
+      await conn.transport.close();
+    } catch { /* ignore transport cleanup errors */ }
+    console.log(`[mcp] closed connection for repair: ${toolId}`);
     this.connections.delete(toolId);
     return true;
   }

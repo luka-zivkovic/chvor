@@ -135,7 +135,7 @@ export async function getBrowser(sessionId: string): Promise<Stagehand> {
   }
 
   // Capacity check BEFORE starting init — count both active AND initializing sessions.
-  // The current request isn't in either map yet, so use >= to reserve a slot for it.
+  // Reserve our slot synchronously before any await to prevent TOCTOU race.
   if (sessions.size + initializing.size >= MAX_CONCURRENT) {
     // Try to evict the oldest active (fully initialized) session
     let oldestId: string | null = null;
@@ -148,6 +148,9 @@ export async function getBrowser(sessionId: string): Promise<Stagehand> {
     }
     if (oldestId) {
       console.log(`[browser-manager] evicting oldest session: ${oldestId}`);
+      // Reserve our slot BEFORE the async eviction to prevent another caller sneaking in
+      const placeholder = Promise.resolve(null as unknown as BrowserSession);
+      initializing.set(sessionId, placeholder);
       await closeBrowser(oldestId);
     } else {
       // All slots are occupied by in-flight initializations — nothing to evict

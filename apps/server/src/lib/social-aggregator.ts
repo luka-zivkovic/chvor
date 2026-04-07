@@ -45,8 +45,12 @@ export async function listAllSocialConnections(
         id: account.id,
       });
     }
-  } catch {
-    // Composio not configured — skip silently
+  } catch (err) {
+    // Only silence "no API key" — log real errors
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("API key") && !msg.includes("not configured")) {
+      console.warn("[social-aggregator] Composio error:", msg);
+    }
   }
 
   // 2. Custom MCP tool connections (non-Composio providers)

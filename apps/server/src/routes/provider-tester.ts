@@ -210,6 +210,7 @@ async function testOpenAI(apiKey: string): Promise<TestCredentialResponse> {
 
   const res = await fetch("https://api.openai.com/v1/models", {
     headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!res.ok) {
@@ -381,10 +382,9 @@ async function testGitHub(token: string): Promise<TestCredentialResponse> {
 }
 
 function testWhatsApp(): TestCredentialResponse {
-  // WhatsApp uses QR code pairing, not API keys. The test just checks
-  // if the channel is registered. Actual connectivity is verified by
-  // the connection.update events in the adapter.
-  return { success: true };
+  // WhatsApp uses QR code pairing, not API keys. Actual connectivity is verified
+  // by the connection.update events in the adapter — cannot be tested via API key check.
+  return { success: false, error: "WhatsApp connection is verified when the bot connects via QR scan. This test cannot validate connectivity." };
 }
 
 async function testNotion(token: string): Promise<TestCredentialResponse> {

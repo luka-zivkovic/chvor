@@ -14,6 +14,7 @@ export function IntegrationsPanel() {
     fetchAll,
     fetchOAuthState,
     loading,
+    error,
   } = useCredentialStore();
   const [showAdd, setShowAdd] = useState(false);
   const [addCredType, setAddCredType] = useState<string | undefined>(undefined);
@@ -47,13 +48,16 @@ export function IntegrationsPanel() {
     setShowAdd(true);
   };
 
-  const handleSetupRequired = (credType: string) => {
-    setAddCredType(credType);
-    setShowAdd(true);
-  };
-
   if (loading) {
     return <p className="text-xs text-muted-foreground">Loading...</p>;
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-md bg-destructive/10 px-3 py-2 text-[10px] text-destructive">
+        Failed to load integrations: {error}
+      </div>
+    );
   }
 
   return (
@@ -61,7 +65,7 @@ export function IntegrationsPanel() {
       {/* Header with add button */}
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground">
-          {integrationCredentials.length + oauthConnections.filter((c) => c.status === "active").length} service{integrationCredentials.length !== 1 ? "s" : ""} connected
+          {(() => { const total = integrationCredentials.length + oauthConnections.filter((c) => c.status === "active").length; return `${total} service${total !== 1 ? "s" : ""} connected`; })()}
         </span>
         <button
           onClick={() => { setAddCredType(undefined); setShowAdd(true); }}
@@ -175,7 +179,7 @@ export function IntegrationsPanel() {
                   provider={p}
                   compact
                   onConnected={fetchOAuthState}
-                  onSetupRequired={handleSetupRequired}
+                  onSetupRequired={handleAddWithProvider}
                 />
               </div>
             ))}

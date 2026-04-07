@@ -34,10 +34,10 @@ function rowToSubscription(row: WebhookSubscriptionRow): WebhookSubscription {
     workspaceId: row.workspace_id,
     enabled: row.enabled === 1,
     deliverTo: row.deliver_to
-      ? (() => { try { return JSON.parse(row.deliver_to!) as DeliveryTarget[]; } catch { return null; } })()
+      ? (() => { try { return JSON.parse(row.deliver_to!) as DeliveryTarget[]; } catch (e) { console.warn(`[webhook-store] corrupt deliverTo JSON for sub ${row.id}:`, e); return null; } })()
       : null,
     filters: row.filters
-      ? (() => { try { return JSON.parse(row.filters!) as WebhookFilter; } catch { return null; } })()
+      ? (() => { try { return JSON.parse(row.filters!) as WebhookFilter; } catch (e) { console.warn(`[webhook-store] corrupt filters JSON for sub ${row.id}:`, e); return null; } })()
       : null,
     lastReceivedAt: row.last_received_at,
     createdAt: row.created_at,

@@ -50,6 +50,7 @@ export function IntegrationDetailPanel() {
 
   const node = nodes.find((n) => n.id === detailNodeId);
   if (!node) return <p className="text-xs text-muted-foreground">Node not found</p>;
+  if (node.type !== "integration") return <p className="text-xs text-muted-foreground">Not an integration node</p>;
 
   const data = node.data as unknown as IntegrationNodeData;
   const credential = credentials.find((c) => c.id === data.credentialId);
@@ -141,8 +142,9 @@ export function IntegrationDetailPanel() {
       await api.credentials.delete(credential.id);
       removeCredential(credential.id);
       closePanel();
-    } catch {
+    } catch (err) {
       setConfirmRemove(false);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setRemoving(false);
     }

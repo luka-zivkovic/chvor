@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as sdk from "matrix-js-sdk";
-import { RoomEvent, MsgType } from "matrix-js-sdk";
+import { RoomEvent, MsgType, ClientEvent } from "matrix-js-sdk";
 import type { NormalizedMessage } from "@chvor/shared";
 import type {
   ChannelAdapter,
@@ -26,8 +26,12 @@ export class MatrixChannel implements ChannelAdapter {
   private client: sdk.MatrixClient | null = null;
   private running = false;
   private userId: string | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
 
   async start(): Promise<void> {
+    if (this.client || this.running) return; // idempotency guard
+
     const creds = this.loadCredentials();
     if (!creds) {
       console.log("[matrix] no credentials found, skipping start");
@@ -63,8 +67,8 @@ export class MatrixChannel implements ChannelAdapter {
       // Access control — check policy before processing
       if (this.shouldFilter(chatType, sender || "")) return;
 
-      // Handle text messages
-      if (content.msgtype === MsgType.Text || content.msgtype === "m.notice") {
+      // Handle text messages (skip m.notice to avoid bot loops)
+      if (content.msgtype === MsgType.Text) {
         const normalized: NormalizedMessage = {
           id: randomUUID(),
           channelType: "matrix",
@@ -101,18 +105,51 @@ export class MatrixChannel implements ChannelAdapter {
       }
     });
 
+    // Handle sync errors and reconnect
+    this.client.on(ClientEvent.Sync, (state: string) => {
+      if (state === "ERROR" || state === "STOPPED") {
+        console.warn(`[matrix] sync state: ${state}, scheduling reconnect`);
+        this.running = false;
+        try { this.client?.stopClient(); } catch { /* ignore */ }
+        this.client = null;
+        this.scheduleReconnect();
+      }
+    });
+
     await this.client.startClient({ initialSyncLimit: 0 });
     this.running = true;
+    this.reconnectAttempts = 0;
     console.log("[matrix] client started");
   }
 
   async stop(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
     if (this.client && this.running) {
       this.client.stopClient();
       console.log("[matrix] client stopped");
     }
     this.client = null;
     this.running = false;
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+    const delay = Math.min(3000 * 2 ** this.reconnectAttempts, 60_000);
+    this.reconnectAttempts++;
+    console.log(`[matrix] reconnecting in ${delay / 1000}s (attempt ${this.reconnectAttempts})...`);
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      try {
+        await this.start();
+      } catch (err) {
+        console.error("[matrix] reconnect failed:", (err as Error).message);
+        this.scheduleReconnect();
+      }
+    }, delay);
   }
 
   onMessage(handler: MessageHandler): void {

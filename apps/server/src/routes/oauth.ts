@@ -385,7 +385,7 @@ function callbackHtml(success: boolean, message: string): string {
   <script>
     // Notify the opener window that OAuth is complete
     if (window.opener) {
-      window.opener.postMessage({ type: "chvor-oauth-callback", success: ${success} }, window.location.origin);
+      window.opener.postMessage({ type: "chvor-oauth-callback", success: ${success} }, "*");
     }
   </script>
 </body>
