@@ -75,7 +75,9 @@ export function createWebhookSubscription(req: CreateWebhookRequest): WebhookSub
      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
   ).run(id, req.name, req.source, secret, req.promptTemplate, workspaceId, deliverTo, filters, now, now);
 
-  return getWebhookSubscription(id)!;
+  const created = getWebhookSubscription(id);
+  if (!created) throw new Error(`Failed to create webhook subscription "${req.name}" — insert succeeded but read-back returned null`);
+  return created;
 }
 
 export function updateWebhookSubscription(
@@ -115,14 +117,21 @@ export function updateWebhookSubscription(
   db.prepare(`UPDATE webhook_subscriptions SET ${fields.join(", ")} WHERE id = ?`).run(
     ...values
   );
-  return getWebhookSubscription(id)!;
+  const updated = getWebhookSubscription(id);
+  if (!updated) throw new Error(`Failed to update webhook subscription "${id}" — update succeeded but read-back returned null`);
+  return updated;
 }
 
 export function deleteWebhookSubscription(id: string): boolean {
   const db = getDb();
-  db.prepare("DELETE FROM webhook_events WHERE subscription_id = ?").run(id);
-  const result = db.prepare("DELETE FROM webhook_subscriptions WHERE id = ?").run(id);
-  return result.changes > 0;
+  let deleted = false;
+  const deleteTx = db.transaction(() => {
+    db.prepare("DELETE FROM webhook_events WHERE subscription_id = ?").run(id);
+    const result = db.prepare("DELETE FROM webhook_subscriptions WHERE id = ?").run(id);
+    deleted = result.changes > 0;
+  });
+  deleteTx();
+  return deleted;
 }
 
 export function recordWebhookEvent(
