@@ -117,6 +117,12 @@ export function saveWorkspace(id: string, data: SaveWorkspaceData): Workspace {
   return ws;
 }
 
+export function deleteWorkspace(id: string): boolean {
+  const db = getDb();
+  const result = db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
 export function listWorkspaces(): Workspace[] {
   const db = getDb();
   const rows = db

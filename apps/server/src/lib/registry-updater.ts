@@ -1,4 +1,4 @@
-import { checkForUpdates } from "./registry-manager.ts";
+import { checkForUpdates, withLockMutex } from "./registry-manager.ts";
 
 const DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
@@ -32,7 +32,7 @@ export function startAutoUpdate(
 
 async function runCheck(broadcast: BroadcastFn): Promise<void> {
   try {
-    const updates = await checkForUpdates();
+    const updates = await withLockMutex(() => checkForUpdates());
     if (updates.length > 0) {
       console.log(`[registry-updater] ${updates.length} update(s) available`);
       broadcast({

@@ -7,13 +7,34 @@ import { fetchRegistryIndex, fetchEntryContent, computeSha256, getDefaultRegistr
 import { reloadAll } from "./capability-loader.ts";
 import { getPersona, updatePersona, getInstructionOverride, setInstructionOverride, clearInstructionOverride } from "../db/config-store.ts";
 import { createSchedule, deleteSchedule } from "../db/schedule-store.ts";
-import { getOrCreateDefault, saveWorkspace } from "../db/workspace-store.ts";
+import { getOrCreateDefault, saveWorkspace, deleteWorkspace } from "../db/workspace-store.ts";
 
 const USER_SKILLS_DIR = process.env.CHVOR_SKILLS_DIR || join(homedir(), ".chvor", "skills");
 const USER_TOOLS_DIR = process.env.CHVOR_TOOLS_DIR || join(homedir(), ".chvor", "tools");
 const USER_TEMPLATES_DIR = process.env.CHVOR_TEMPLATES_DIR || join(homedir(), ".chvor", "templates");
 
 const SAFE_ENTRY_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
+
+/**
+ * In-process mutex for lockfile read-modify-write operations.
+ * Prevents concurrent operations (auto-updater, user install/uninstall)
+ * from clobbering each other's lockfile writes.
+ */
+let lockMutex: Promise<void> = Promise.resolve();
+
+export function withLockMutex<T>(fn: () => Promise<T>): Promise<T> {
+  let release: () => void;
+  const next = new Promise<void>((resolve) => { release = resolve; });
+  const prev = lockMutex;
+  lockMutex = next;
+  return prev.then(async () => {
+    try {
+      return await fn();
+    } finally {
+      release!();
+    }
+  });
+}
 
 function getDirForKind(kind: RegistryEntryKind): string {
   switch (kind) {
@@ -120,6 +141,28 @@ export function validateManifest(entryId: string, raw: unknown): TemplateManifes
     for (const field of ["profile", "directives", "aiName", "tone", "boundaries"] as const) {
       if (persona[field] !== undefined && typeof persona[field] !== "string") {
         throw new Error(`Invalid template manifest for "${entryId}": "persona.${field}" must be a string`);
+      }
+    }
+    // Validate communicationStyle if present
+    const VALID_COMM_STYLES = ["concise", "balanced", "detailed"];
+    if (persona.communicationStyle !== undefined) {
+      if (typeof persona.communicationStyle !== "string" || !VALID_COMM_STYLES.includes(persona.communicationStyle)) {
+        throw new Error(`Invalid template manifest for "${entryId}": "persona.communicationStyle" must be one of: ${VALID_COMM_STYLES.join(", ")}`);
+      }
+    }
+    // Validate exampleResponses if present
+    if (persona.exampleResponses !== undefined) {
+      if (!Array.isArray(persona.exampleResponses)) {
+        throw new Error(`Invalid template manifest for "${entryId}": "persona.exampleResponses" must be an array`);
+      }
+      for (let i = 0; i < persona.exampleResponses.length; i++) {
+        const ex = persona.exampleResponses[i] as Record<string, unknown>;
+        if (!ex || typeof ex !== "object") {
+          throw new Error(`Invalid template manifest for "${entryId}": exampleResponses[${i}] must be an object`);
+        }
+        if (typeof ex.user !== "string" || typeof ex.assistant !== "string") {
+          throw new Error(`Invalid template manifest for "${entryId}": exampleResponses[${i}] must have "user" and "assistant" strings`);
+        }
       }
     }
   }
@@ -412,36 +455,8 @@ export async function installEntry(
     );
   }
 
-  // Write to appropriate dir
-  const dir = getDirForKind(resolvedKind);
-  mkdirSync(dir, { recursive: true });
-  const filePath = join(dir, `${entryId}.md`);
-  writeFileSync(filePath, content, "utf8");
-
-  // Update lockfile
-  lock.installed[entryId] = {
-    kind: resolvedKind,
-    version: entry.version,
-    installedAt: new Date().toISOString(),
-    sha256,
-    source: "registry",
-    userModified: false,
-    ...(isShadowingBundled ? { shadowsBundled: true } : {}),
-  };
-  lock.lastChecked = new Date().toISOString();
-  writeLock(lock);
-
-  // Reload capabilities
-  const { skills, tools } = reloadAll();
-  const installed: Capability | undefined =
-    resolvedKind === "skill"
-      ? skills.find((s) => s.id === entryId)
-      : tools.find((t) => t.id === entryId);
-  if (!installed) {
-    throw new Error(`Entry "${entryId}" installed but not found after reload`);
-  }
-
-  // Install dependencies
+  // Install dependencies BEFORE writing the parent to disk/lockfile
+  // so the parent never appears "installed" with missing dependencies
   const deps = entry.dependencies ?? [];
   const failedDependencies: string[] = [];
   for (const dep of deps) {
@@ -453,6 +468,36 @@ export async function installEntry(
         failedDependencies.push(dep);
       }
     }
+  }
+
+  // Write to appropriate dir
+  const dir = getDirForKind(resolvedKind);
+  mkdirSync(dir, { recursive: true });
+  const filePath = join(dir, `${entryId}.md`);
+  writeFileSync(filePath, content, "utf8");
+
+  // Re-read lock after dependency installs may have mutated it
+  const freshLock = readLock();
+  freshLock.installed[entryId] = {
+    kind: resolvedKind,
+    version: entry.version,
+    installedAt: new Date().toISOString(),
+    sha256,
+    source: "registry",
+    userModified: false,
+    ...(isShadowingBundled ? { shadowsBundled: true } : {}),
+  };
+  freshLock.lastChecked = new Date().toISOString();
+  writeLock(freshLock);
+
+  // Reload capabilities
+  const { skills, tools } = reloadAll();
+  const installed: Capability | undefined =
+    resolvedKind === "skill"
+      ? skills.find((s) => s.id === entryId)
+      : tools.find((t) => t.id === entryId);
+  if (!installed) {
+    throw new Error(`Entry "${entryId}" installed but not found after reload`);
   }
 
   return { installed, dependencies: deps, failedDependencies };
@@ -537,8 +582,14 @@ export async function uninstallEntry(entryId: string): Promise<void> {
       }
     }
 
-    // Note: pipeline workspace is not deleted because no deleteWorkspace exists.
-    // The workspace becomes inert once the template is removed.
+    // Clean up provisioned pipeline workspace
+    if (info.provisionedPipelineId) {
+      try {
+        deleteWorkspace(info.provisionedPipelineId);
+      } catch (err) {
+        console.warn(`[registry-manager] failed to delete pipeline workspace "${info.provisionedPipelineId}":`, err);
+      }
+    }
   }
 
   // Remove file from the correct directory
@@ -666,14 +717,42 @@ export async function updateEntry(
     throw new Error(`"${entryId}" is not installed from registry`);
   }
 
-  // For templates, uninstall then reinstall to properly re-provision resources
+  // For templates: pre-fetch and validate BEFORE uninstalling to avoid data loss
   if (info.kind === "template") {
+    const registryUrl = lock.registryUrl || getDefaultRegistryUrl();
+    const index = await fetchRegistryIndex(registryUrl);
+    const entry = index.entries.find((e) => e.id === entryId);
+    if (!entry) {
+      throw new Error(`Entry "${entryId}" not found in registry — cannot update`);
+    }
+
+    // Download and verify integrity before touching anything
+    const content = await fetchEntryContent(registryUrl, "template", entryId);
+    const sha256 = computeSha256(content);
+    if (entry.sha256 && sha256 !== entry.sha256) {
+      throw new Error(
+        `Integrity check failed for "${entryId}": expected sha256 ${entry.sha256}, got ${sha256}`,
+      );
+    }
+
+    // Validate manifest before uninstalling
+    const docs = parseAllDocuments(content);
+    if (docs.length === 0) throw new Error(`Empty YAML for template "${entryId}"`);
+    validateManifest(entryId, docs[0].toJS());
+
+    // Pre-flight passed — safe to uninstall and reinstall
     await uninstallEntry(entryId);
     try {
       await installEntry(entryId, "template");
       return { updated: true, conflict: false };
     } catch (err) {
-      // Reinstall failed — entry is now uninstalled
+      // Reinstall failed after uninstall — attempt to write the validated content
+      // directly so the template file at least exists on disk
+      try {
+        const dir = getDirForKind("template");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, `${entryId}.yaml`), content, "utf8");
+      } catch { /* best-effort recovery */ }
       throw new Error(`Template update failed for "${entryId}": ${err instanceof Error ? err.message : String(err)}`);
     }
   }

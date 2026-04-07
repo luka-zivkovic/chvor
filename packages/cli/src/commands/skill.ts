@@ -140,7 +140,7 @@ export async function toolPublish(filePath: string): Promise<void> {
 }
 
 function getRegistryUrl(): string {
-  return process.env.CHVOR_REGISTRY_URL || "https://registry.chvor.ai";
+  return process.env.CHVOR_REGISTRY_URL || "https://registry.chvor.ai/v1";
 }
 
 function assertValidRegistryUrl(url: string): void {
