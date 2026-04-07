@@ -6,6 +6,7 @@
 import { listCredentials, getCredentialData, updateCredential } from "../db/credential-store.ts";
 import { getDirectOAuthProvider } from "./oauth-providers.ts";
 import { refreshAccessToken } from "./oauth-engine.ts";
+import { getClientSecretForProvider } from "../routes/oauth.ts";
 
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 const EXPIRY_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes before expiry
@@ -34,11 +35,12 @@ async function refreshExpiringTokens(): Promise<void> {
 
       console.log(`[oauth-refresh] refreshing token for ${d.provider} (expires ${d.expiresAt})`);
 
+      const clientSecret = getClientSecretForProvider(d.provider);
       const tokens = await refreshAccessToken(
         providerConfig,
         d.refreshToken,
         d.clientId,
-        d.clientSecret,
+        clientSecret,
       );
 
       const updated: Record<string, string> = {
@@ -60,10 +62,10 @@ export function startOAuthTokenRefresh(): void {
   if (intervalId) return;
   // Run once on startup after a short delay
   setTimeout(() => {
-    refreshExpiringTokens().catch(() => {});
+    refreshExpiringTokens().catch((err) => console.warn("[oauth-refresh] startup refresh failed:", err));
   }, 5000);
   intervalId = setInterval(() => {
-    refreshExpiringTokens().catch(() => {});
+    refreshExpiringTokens().catch((err) => console.warn("[oauth-refresh] periodic refresh failed:", err));
   }, REFRESH_INTERVAL_MS);
   console.log("[oauth-refresh] token refresh scheduler started (every 30m)");
 }

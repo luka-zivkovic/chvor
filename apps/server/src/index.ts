@@ -75,6 +75,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { timingSafeEqual } from "node:crypto";
 import { resolveApproval } from "./lib/native-tools.ts";
 import { rotateOldLogs } from "./lib/error-logger.ts";
 import { initManifest, shutdownManifest } from "./lib/health-manifest.ts";
@@ -189,6 +190,19 @@ app.use("/*", cors({
     : "http://localhost:5173",
   credentials: true,
 }));
+
+// Global security headers
+app.use("/*", async (c, next) => {
+  await next();
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("X-Frame-Options", "DENY");
+  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  // HSTS only when behind HTTPS
+  const proto = c.req.header("x-forwarded-proto");
+  if (c.req.url.startsWith("https") || proto === "https") {
+    c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+});
 
 // Serve media artifacts BEFORE auth — <img> tags can't send Authorization headers
 app.get("/api/media/:filename", async (c) => {
@@ -309,19 +323,50 @@ app.get("/audio/:filename", (c) => {
 const pcAgentToken: string | null = (() => {
   if (process.env.CHVOR_TOKEN) return process.env.CHVOR_TOKEN;
   if (process.env.CHVOR_PC_NO_AUTH === "true") {
-    console.warn("[pc-control] WARNING: CHVOR_PC_NO_AUTH=true — PC agent endpoint is unauthenticated");
+    console.warn("[pc-control] WARNING: CHVOR_PC_NO_AUTH=true — PC agent endpoint is unauthenticated (localhost only)");
     return null;
   }
   const generated = crypto.randomUUID();
-  console.log(`[pc-control] No CHVOR_TOKEN set — generated session token: ${generated}`);
-  console.log(`[pc-control] Use: npx @chvor/pc-agent --server ws://localhost:${process.env.PORT ?? 9147}/ws/pc-agent --token ${generated}`);
+  console.log(`[pc-control] No CHVOR_TOKEN set — generated session token: ${generated.slice(0, 8)}…`);
+  console.log(`[pc-control] Full token written to stdout once. Use: npx @chvor/pc-agent --server ws://localhost:${process.env.PORT ?? 9147}/ws/pc-agent --token ${generated}`);
   return generated;
 })();
+
+/** Timing-safe token comparison to prevent side-channel attacks. */
+function verifyPcToken(provided: string | null, expected: string): boolean {
+  if (!provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  // Pad to equal length so timingSafeEqual doesn't need an early-exit length check
+  const len = Math.max(a.length, b.length);
+  const aPad = Buffer.concat([a, Buffer.alloc(len - a.length)]);
+  const bPad = Buffer.concat([b, Buffer.alloc(len - b.length)]);
+  // Both content AND original length must match
+  return timingSafeEqual(aPad, bPad) && a.length === b.length;
+}
+
+/** Check if a request originates from localhost using the actual TCP socket address. */
+function isLocalhostRequest(c: { env?: { incoming?: { socket?: { remoteAddress?: string } } }; req: { header: (name: string) => string | undefined } }): boolean {
+  // Use the real socket address — never trust x-forwarded-for/x-real-ip for security gates
+  const ip = c.env?.incoming?.socket?.remoteAddress ?? "";
+  return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ip);
+}
+
 app.get(
   "/ws/pc-agent",
   upgradeWebSocket((c) => {
+    // When CHVOR_PC_NO_AUTH is set, restrict to localhost connections only
+    if (!pcAgentToken) {
+      const authorized = isLocalhostRequest(c);
+      if (!authorized) {
+        return {
+          onOpen(_, ws) { ws.close(4001, "Unauthenticated PC agent restricted to localhost"); },
+          onMessage() {},
+        };
+      }
+    }
     const wsToken = new URL(c.req.url).searchParams.get("token");
-    const authorized = !pcAgentToken || wsToken === pcAgentToken;
+    const authorized = !pcAgentToken || verifyPcToken(wsToken, pcAgentToken);
 
     let agentId: string;
     return {

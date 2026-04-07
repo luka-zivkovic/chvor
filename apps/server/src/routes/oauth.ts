@@ -33,6 +33,18 @@ const CALLBACK_URL = process.env.OAUTH_CALLBACK_URL ?? `http://localhost:${PORT}
 
 // ── Helpers ─────────────────────────────────────────────────────
 
+/** Look up clientSecret from the provider's setup credential (not from the token credential). */
+export function getClientSecretForProvider(providerId: string): string | undefined {
+  const providerDef = OAUTH_PROVIDERS.find((p) => p.id === providerId);
+  if (!providerDef?.setupCredentialType) return undefined;
+  const creds = listCredentials();
+  const cred = creds.find((c) => c.type === providerDef.setupCredentialType);
+  if (!cred) return undefined;
+  const data = getCredentialData(cred.id);
+  if (!data) return undefined;
+  return (data.data as Record<string, string>).clientSecret;
+}
+
 function hasComposioKey(): boolean {
   const creds = listCredentials();
   return creds.some((c) => c.type === "composio");
@@ -92,8 +104,8 @@ oauth.get("/providers", async (c) => {
         status: a.status === "active" ? "active" : "pending",
         connectedAt: a.connectedAt,
       }));
-    } catch {
-      // Composio unavailable — just show empty
+    } catch (err) {
+      console.warn("[oauth] Composio unavailable:", err instanceof Error ? err.message : err);
     }
   }
 
@@ -223,7 +235,7 @@ oauth.get("/callback", async (c) => {
     if (tokens.refreshToken) credData.refreshToken = tokens.refreshToken;
     if (tokens.expiresAt) credData.expiresAt = tokens.expiresAt;
     if (tokens.scope) credData.scope = tokens.scope;
-    if (flow.clientSecret) credData.clientSecret = flow.clientSecret;
+    // clientSecret is NOT stored here — it lives in the setup credential only
 
     if (existing) {
       updateCredential(existing.id, existing.name, credData);
@@ -260,8 +272,8 @@ oauth.get("/connections", async (c) => {
         status: a.status === "active" ? "active" : "pending",
         connectedAt: a.connectedAt,
       }));
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn("[oauth] Composio list failed:", err instanceof Error ? err.message : err);
     }
   }
 
@@ -312,11 +324,12 @@ oauth.post("/refresh/:credentialId", async (c) => {
   }
 
   try {
+    const clientSecret = getClientSecretForProvider(d.provider);
     const tokens = await refreshAccessToken(
       providerConfig,
       d.refreshToken,
       d.clientId,
-      d.clientSecret,
+      clientSecret,
     );
 
     const updated: Record<string, string> = {

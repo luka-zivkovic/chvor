@@ -58,8 +58,8 @@ auth.get("/status", (c) => {
 });
 
 auth.post("/setup", async (c) => {
-  if (isAuthSetupComplete() && isAuthEnabled()) {
-    return c.json({ error: "Auth already configured. Disable first to reconfigure." }, 400);
+  if (isAuthSetupComplete()) {
+    return c.json({ error: "Auth already configured. Use recovery flow to reconfigure." }, 400);
   }
 
   const body = await c.req.json<{
@@ -101,8 +101,8 @@ auth.post("/setup", async (c) => {
     if (!body.pin) {
       return c.json({ error: "PIN required" }, 400);
     }
-    if (body.pin.length < 4) {
-      return c.json({ error: "PIN must be at least 4 characters" }, 400);
+    if (body.pin.length < 6) {
+      return c.json({ error: "PIN must be at least 6 characters" }, 400);
     }
     if (body.pin.length > MAX_PIN_LENGTH) {
       return c.json({ error: `PIN must be at most ${MAX_PIN_LENGTH} characters` }, 400);
@@ -193,8 +193,8 @@ auth.post("/recover", async (c) => {
   if (body.method === "password" && credential.length < 6) {
     return c.json({ error: "Password must be at least 6 characters" }, 400);
   }
-  if (body.method === "pin" && credential.length < 4) {
-    return c.json({ error: "PIN must be at least 4 characters" }, 400);
+  if (body.method === "pin" && credential.length < 6) {
+    return c.json({ error: "PIN must be at least 6 characters" }, 400);
   }
   const maxLen = body.method === "password" ? MAX_PASSWORD_LENGTH : MAX_PIN_LENGTH;
   if (credential.length > maxLen) {
@@ -236,7 +236,26 @@ auth.post("/logout-all", (c) => {
   return c.json({ data: null });
 });
 
-auth.post("/disable", (c) => {
+auth.post("/disable", async (c) => {
+  // Only session-based auth can disable — API keys must not disable the auth system
+  const authType = c.get("authType" as never) as string | undefined;
+  if (authType === "apikey") {
+    return c.json({ error: "API keys cannot disable authentication. Use a browser session." }, 403);
+  }
+
+  // Require current credential for re-authentication
+  const body = await c.req.json<{ password?: string; pin?: string; username?: string }>().catch(() => ({} as { password?: string; pin?: string; username?: string }));
+  const method = getAuthMethod();
+  const credential = method === "password" ? body.password : body.pin;
+  if (!credential) {
+    return c.json({ error: `Current ${method === "password" ? "password" : "PIN"} required to disable auth` }, 400);
+  }
+
+  const result = await verifyCredential(credential, body.username);
+  if (!result.valid) {
+    return c.json({ error: "Invalid credentials" }, 401);
+  }
+
   disableAuth();
   deleteCookie(c, "chvor_session", { path: "/" });
   return c.json({ data: null });

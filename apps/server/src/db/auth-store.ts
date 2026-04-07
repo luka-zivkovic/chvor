@@ -125,10 +125,34 @@ export async function setupPin(
 
 // ── Login ────────────────────────────────────────────────────────
 
+// Escalating lockout durations (in minutes) for consecutive lockout cycles.
+// After 5 failed attempts → 5 min, next 5 → 15 min, next 5 → 60 min, then 24h forever.
+const LOCKOUT_ESCALATION_MINUTES = [5, 15, 60, 1440];
+
+/** Return the lockout duration in ms for the given cycle (0-indexed). */
+function getLockoutDuration(cycle: number): number {
+  const idx = Math.min(cycle, LOCKOUT_ESCALATION_MINUTES.length - 1);
+  return LOCKOUT_ESCALATION_MINUTES[idx] * 60 * 1000;
+}
+
 export type VerifyResult =
   | { valid: true }
   | { valid: false; reason: "locked_out"; retryAfter: number }
   | { valid: false; reason: "invalid" };
+
+/** Track a failed attempt with escalating lockout. */
+function recordFailedAttempt(): void {
+  const attempts = parseInt(getAuthConfig("auth.failed_attempts") ?? "0", 10) + 1;
+  setAuthConfig("auth.failed_attempts", String(attempts));
+  if (attempts >= 5) {
+    // Determine which lockout cycle we're in (attempts accumulate across lockouts)
+    const lockoutCycle = Math.floor(attempts / 5) - 1;
+    const duration = getLockoutDuration(lockoutCycle);
+    const lockout = new Date(Date.now() + duration).toISOString();
+    setAuthConfig("auth.lockout_until", lockout);
+    // Do NOT reset failed_attempts — they accumulate so lockout escalates
+  }
+}
 
 export async function verifyCredential(
   credential: string,
@@ -146,13 +170,7 @@ export async function verifyCredential(
   if (method === "password" && username !== undefined) {
     const storedUsername = getAuthConfig("auth.username");
     if (storedUsername && username !== storedUsername) {
-      const attempts = parseInt(getAuthConfig("auth.failed_attempts") ?? "0", 10) + 1;
-      setAuthConfig("auth.failed_attempts", String(attempts));
-      if (attempts >= 5) {
-        const lockout = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-        setAuthConfig("auth.lockout_until", lockout);
-        setAuthConfig("auth.failed_attempts", "0");
-      }
+      recordFailedAttempt();
       return { valid: false, reason: "invalid" };
     }
   }
@@ -164,18 +182,11 @@ export async function verifyCredential(
   const valid = await argon2.verify(storedHash, credential);
 
   if (!valid) {
-    const attempts = parseInt(getAuthConfig("auth.failed_attempts") ?? "0", 10) + 1;
-    setAuthConfig("auth.failed_attempts", String(attempts));
-    if (attempts >= 5) {
-      const lockout = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-      setAuthConfig("auth.lockout_until", lockout);
-      setAuthConfig("auth.failed_attempts", "0");
-    }
+    recordFailedAttempt();
     return { valid: false, reason: "invalid" };
   }
 
-  // Reset on success
-  setAuthConfig("auth.failed_attempts", "0");
+  // Clear lockout on success, but keep failed_attempts so escalation persists
   setAuthConfig("auth.lockout_until", "");
   return { valid: true };
 }

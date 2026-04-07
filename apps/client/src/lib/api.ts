@@ -644,7 +644,11 @@ export const api = {
       }),
     logout: () => request<null>("/auth/logout", { method: "POST" }),
     logoutAll: () => request<null>("/auth/logout-all", { method: "POST" }),
-    disable: () => request<null>("/auth/disable", { method: "POST" }),
+    disable: (body: { password?: string; pin?: string; username?: string }) =>
+      request<null>("/auth/disable", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     recover: (body: AuthRecoverRequest) =>
       request<AuthRecoverResponse>("/auth/recover", {
         method: "POST",

@@ -58,14 +58,23 @@ function toSummary(cred: Credential, data: CredentialData): CredentialSummary {
 export function listCredentials(): CredentialSummary[] {
   const db = getDb();
   const rows = db.prepare("SELECT * FROM credentials ORDER BY created_at DESC").all() as CredentialRow[];
-  return rows.flatMap((row) => {
+  return rows.map((row) => {
     try {
       const cred = rowToCredential(row);
       const data = JSON.parse(decrypt(cred.encryptedData)) as CredentialData;
-      return [toSummary(cred, data)];
+      return toSummary(cred, data);
     } catch (err) {
       console.error(`[credential-store] failed to decrypt credential ${row.id}:`, err);
-      return [];
+      // Return a degraded summary so the credential is still visible in the UI
+      return {
+        id: row.id,
+        name: row.name,
+        type: row.type,
+        testStatus: "failed" as const,
+        createdAt: row.created_at,
+        redactedFields: { _error: "Decryption failed — re-enter this credential" },
+        usageContext: row.usage_context ?? undefined,
+      };
     }
   });
 }
