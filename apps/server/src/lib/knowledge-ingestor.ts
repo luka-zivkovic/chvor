@@ -145,7 +145,8 @@ async function doIngestionInner(resourceId: string): Promise<void> {
     return;
   }
 
-  // Store extracted text for re-processing (redact secrets to prevent DB leaks)
+  // Store redacted text for re-processing; chunking below uses unredacted `text`
+  // so the LLM sees full context for fact extraction, while DB never stores raw secrets.
   updateResourceContentText(resourceId, redactSensitiveData(text));
 
   // Step 2: Chunk
