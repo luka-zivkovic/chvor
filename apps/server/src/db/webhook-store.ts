@@ -195,3 +195,13 @@ export function listWebhookEvents(subscriptionId: string, limit = 50): WebhookEv
     receivedAt: r.received_at,
   }));
 }
+
+/** Count webhook events for a subscription within the last `windowMs` milliseconds. */
+export function countRecentWebhookEvents(subscriptionId: string, windowMs: number): number {
+  const db = getDb();
+  const cutoff = new Date(Date.now() - windowMs).toISOString();
+  const row = db
+    .prepare("SELECT COUNT(*) as count FROM webhook_events WHERE subscription_id = ? AND received_at > ?")
+    .get(subscriptionId, cutoff) as { count: number };
+  return row.count;
+}

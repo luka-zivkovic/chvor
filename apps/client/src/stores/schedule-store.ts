@@ -65,7 +65,8 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
     try {
       const runs = await api.schedules.runs(scheduleId);
       set({ runs, runsLoading: false });
-    } catch {
+    } catch (err) {
+      console.error("[schedule-store] failed to fetch runs:", err);
       set({ runsLoading: false });
     }
   },

@@ -11,6 +11,7 @@ export interface DaemonTask {
   priority: number; // 0=low, 1=normal, 2=high, 3=critical
   status: DaemonTaskStatus;
   progress: string | null;
+  retryCount: number;
   result: string | null;
   error: string | null;
   createdAt: string;

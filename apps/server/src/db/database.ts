@@ -694,6 +694,12 @@ export function getDb(): Database.Database {
     console.log("[db] migration v16 applied: memory indexes for graph & stats queries");
   }
 
+  if (currentVersion < 17) {
+    db.exec(`ALTER TABLE daemon_tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`);
+    db.pragma("user_version = 17");
+    console.log("[db] migration v17 applied: daemon_tasks retry_count column");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }
