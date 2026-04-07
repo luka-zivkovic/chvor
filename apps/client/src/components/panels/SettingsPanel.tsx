@@ -115,7 +115,7 @@ export function CredentialsContent() {
 }
 
 export function SecurityContent() {
-  const { authEnabled, checkStatus, apiKeys, fetchApiKeys } = useAuthStore();
+  const { authEnabled, authMethod, checkStatus, apiKeys, fetchApiKeys } = useAuthStore();
   const [loading, setLoading] = useState(true);
 
   // Auth setup state
@@ -131,6 +131,8 @@ export function SecurityContent() {
   const [newKeyName, setNewKeyName] = useState("");
   const [createdKey, setCreatedKey] = useState("");
   const [disableConfirm, setDisableConfirm] = useState(false);
+  const [disableCredential, setDisableCredential] = useState("");
+  const [disableError, setDisableError] = useState("");
 
   useEffect(() => {
     setLoading(false);
@@ -154,9 +156,18 @@ export function SecurityContent() {
   };
 
   const handleDisable = async () => {
-    await api.auth.disable();
-    setDisableConfirm(false);
-    await checkStatus();
+    setDisableError("");
+    try {
+      const body = authMethod === "password"
+        ? { password: disableCredential, username: setupUsername || undefined }
+        : { pin: disableCredential };
+      await api.auth.disable(body);
+      setDisableConfirm(false);
+      setDisableCredential("");
+      await checkStatus();
+    } catch (err) {
+      setDisableError(err instanceof Error ? err.message : "Invalid credentials");
+    }
   };
 
   const handleCreateKey = async () => {
@@ -273,10 +284,22 @@ export function SecurityContent() {
               Disable Authentication
             </Button>
           ) : (
-            <div className="flex items-center gap-2">
-              <p className="text-xs text-destructive">Are you sure?</p>
-              <Button size="sm" variant="destructive" onClick={handleDisable}>Yes, disable</Button>
-              <Button size="sm" variant="ghost" onClick={() => setDisableConfirm(false)}>Cancel</Button>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-destructive">Enter your {authMethod === "password" ? "password" : "PIN"} to confirm:</p>
+              <input
+                type={authMethod === "password" ? "password" : "text"}
+                className="w-full bg-background border border-border rounded px-2 py-1 text-xs"
+                placeholder={authMethod === "password" ? "Password" : "PIN"}
+                value={disableCredential}
+                onChange={(e) => setDisableCredential(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleDisable()}
+                autoFocus
+              />
+              {disableError && <p className="text-[10px] text-destructive">{disableError}</p>}
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="destructive" onClick={handleDisable} disabled={!disableCredential}>Yes, disable</Button>
+                <Button size="sm" variant="ghost" onClick={() => { setDisableConfirm(false); setDisableCredential(""); setDisableError(""); }}>Cancel</Button>
+              </div>
             </div>
           )}
 

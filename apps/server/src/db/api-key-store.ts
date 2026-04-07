@@ -5,6 +5,11 @@ function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
+/**
+ * Generate a new API key. All keys currently have full access ('*' scope).
+ * The scopes column exists in the schema but is not enforced — do not
+ * expose it in the UI as if granular permissions are available.
+ */
 export function generateApiKey(
   name: string,
   expiresInDays?: number
