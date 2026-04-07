@@ -135,7 +135,7 @@ export async function getBrowser(sessionId: string): Promise<Stagehand> {
   }
 
   // Capacity check BEFORE starting init — count both active AND initializing sessions.
-  // The current request isn't in either map yet, so use >= to reserve a slot for it.
+  // Reserve our slot synchronously before any await to prevent TOCTOU race.
   if (sessions.size + initializing.size >= MAX_CONCURRENT) {
     // Try to evict the oldest active (fully initialized) session
     let oldestId: string | null = null;
@@ -148,7 +148,18 @@ export async function getBrowser(sessionId: string): Promise<Stagehand> {
     }
     if (oldestId) {
       console.log(`[browser-manager] evicting oldest session: ${oldestId}`);
-      await closeBrowser(oldestId);
+      // Combine eviction + init into one promise and reserve the slot synchronously
+      // BEFORE any await. This prevents another caller from sneaking into the freed
+      // slot during the async eviction window (TOCTOU race). Concurrent callers for
+      // the same sessionId will dedup via the inflight check above.
+      const promise = closeBrowser(oldestId).then(() => initBrowser(sessionId));
+      initializing.set(sessionId, promise);
+      try {
+        const session = await promise;
+        return session.stagehand;
+      } finally {
+        initializing.delete(sessionId);
+      }
     } else {
       // All slots are occupied by in-flight initializations — nothing to evict
       throw new Error(

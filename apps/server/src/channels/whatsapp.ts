@@ -17,8 +17,9 @@ import * as QRCode from "qrcode";
 import type { NormalizedMessage, MediaArtifact } from "@chvor/shared";
 import type { ChannelAdapter, MessageHandler, SendResponseOptions } from "./channel.ts";
 import { getChannelPolicy } from "../db/config-store.ts";
-import { storeMediaFromBuffer } from "../lib/media-store.ts";
+import { storeMediaFromBuffer, getMediaDir } from "../lib/media-store.ts";
 import { splitText } from "./text-utils.ts";
+import { readFileSync } from "node:fs";
 
 const DATA_DIR = join(process.cwd(), "data");
 const AUTH_DIR = join(DATA_DIR, "whatsapp-auth");
@@ -80,8 +81,8 @@ export class WhatsAppChannel implements ChannelAdapter {
 
   /** Initiate a new connection (creates auth dir if needed). */
   async connect(): Promise<void> {
-    if (this.sock) {
-      // Already connected or connecting
+    if (this.sock || this.reconnectTimer) {
+      // Already connected, connecting, or reconnect scheduled
       return;
     }
 
@@ -139,11 +140,15 @@ export class WhatsAppChannel implements ChannelAdapter {
           this.phoneNumber = undefined;
           this.emitStatus("disconnected");
         } else {
+          if (this.reconnectTimer) return; // reconnect already scheduled
           const delay = Math.min(3000 * Math.pow(2, this.reconnectAttempts), 60000);
           this.reconnectAttempts++;
           console.log(`[whatsapp] connection closed (code: ${statusCode}), reconnecting in ${delay / 1000}s...`);
           this.sock = null;
-          this.reconnectTimer = setTimeout(() => this.connect(), delay);
+          this.reconnectTimer = setTimeout(async () => {
+            this.reconnectTimer = null;
+            await this.connect();
+          }, delay);
         }
       }
 
@@ -204,8 +209,12 @@ export class WhatsAppChannel implements ChannelAdapter {
       for (const artifact of options.media) {
         try {
           if (artifact.mediaType === "image") {
+            // Read image from disk — artifact.url is a local API path, not a network URL
+            const filename = artifact.url.split("/").pop();
+            const filePath = join(getMediaDir(), filename ?? "");
+            const imageBuffer = readFileSync(filePath);
             await this.sock.sendMessage(jid, {
-              image: { url: artifact.url },
+              image: imageBuffer,
               caption: text,
             });
             return; // Caption included with first image
@@ -275,7 +284,7 @@ export class WhatsAppChannel implements ChannelAdapter {
       senderId: senderPhone, // Strip @s.whatsapp.net
       senderName: msg.pushName ?? undefined,
       text: text ?? "",
-      timestamp: new Date((msg.messageTimestamp as number) * 1000).toISOString(),
+      timestamp: new Date(Number(msg.messageTimestamp ?? 0) * 1000).toISOString(),
       threadId: isGroup ? remoteJid : undefined,
       chatType: isGroup ? "group" : "dm",
       inputModality: isVoice ? "voice" : "text",

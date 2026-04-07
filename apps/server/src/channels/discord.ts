@@ -21,6 +21,8 @@ export class DiscordChannel implements ChannelAdapter {
   private reconnectAttempts = 0;
 
   async start(): Promise<void> {
+    if (this.client || this.running) return; // idempotency guard
+
     const token = this.loadBotToken();
     if (!token) {
       console.log("[discord] no bot token found in credentials, skipping start");
@@ -126,6 +128,7 @@ export class DiscordChannel implements ChannelAdapter {
 
     this.client.on(Events.ShardResume, () => {
       console.log("[discord] resumed connection");
+      this.running = true;
       this.reconnectAttempts = 0;
     });
 

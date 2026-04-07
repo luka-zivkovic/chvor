@@ -166,6 +166,7 @@ export async function exchangeCode(
     method: "POST",
     headers,
     body: new URLSearchParams(body).toString(),
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!res.ok) {
@@ -219,6 +220,7 @@ export async function refreshAccessToken(
     method: "POST",
     headers,
     body: new URLSearchParams(body).toString(),
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!res.ok) {

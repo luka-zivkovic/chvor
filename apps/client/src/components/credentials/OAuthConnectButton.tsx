@@ -25,7 +25,7 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
   // Listen for postMessage from the OAuth callback popup
   useEffect(() => {
     const handler = (e: MessageEvent) => {
-      if (e.data?.type === "chvor-oauth-callback") {
+      if (e.data?.type === "chvor-oauth-callback" && (e.origin === window.location.origin || e.origin === "null")) {
         if (e.data.success) {
           setStatus("success");
           useCredentialStore.getState().fetchOAuthState();
@@ -46,6 +46,10 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
   }, [onConnected]);
 
   const handleConnect = useCallback(async () => {
+    // Clear any stale timers from a previous attempt
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = undefined; }
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = undefined; }
+
     setStatus("loading");
     setErrorMsg(null);
 
@@ -99,8 +103,9 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
       await api.oauth.disconnect(conn.id);
       setStatus("idle");
       useCredentialStore.getState().fetchOAuthState();
-    } catch {
-      // ignore
+    } catch (err) {
+      setStatus("error");
+      setErrorMsg(err instanceof Error ? err.message : "Disconnect failed");
     }
   }, [provider.id]);
 

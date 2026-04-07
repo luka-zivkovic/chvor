@@ -383,9 +383,12 @@ function callbackHtml(success: boolean, message: string): string {
     <p>${success ? "You can close this tab and return to Chvor." : "Please try again in Chvor."}</p>
   </div>
   <script>
-    // Notify the opener window that OAuth is complete
+    // Notify the opener window that OAuth is complete.
+    // Use "*" because this callback page may be served from a different origin
+    // than the opener (e.g. provider redirect, or file:// in desktop app).
+    // The client-side handler in OAuthConnectButton validates the inbound origin.
     if (window.opener) {
-      window.opener.postMessage({ type: "chvor-oauth-callback", success: ${success} }, window.location.origin);
+      window.opener.postMessage({ type: "chvor-oauth-callback", success: ${success} }, "*");
     }
   </script>
 </body>

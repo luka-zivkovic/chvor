@@ -29,6 +29,8 @@ export class TelegramChannel implements ChannelAdapter {
   }
 
   async start(): Promise<void> {
+    if (this.bot || this.running) return; // idempotency guard
+
     const token = this.loadBotToken();
     if (!token) {
       console.log(
@@ -91,7 +93,12 @@ export class TelegramChannel implements ChannelAdapter {
           await ctx.reply("Voice message is too large to process.");
           return;
         }
-        const audioData = new Uint8Array(await this.downloadFile(file.file_path!));
+        if (!file.file_path) {
+          console.warn("[telegram] voice file has no file_path (file may be too large)");
+          await ctx.reply("Voice message is too large for Telegram to provide a download link.");
+          return;
+        }
+        const audioData = new Uint8Array(await this.downloadFile(file.file_path));
         const normalized: NormalizedMessage = {
           id: randomUUID(),
           channelType: "telegram",
@@ -119,6 +126,10 @@ export class TelegramChannel implements ChannelAdapter {
       const msg = ctx.message;
       if (!msg.from || msg.from.is_bot) return;
 
+      const isPhotoGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
+      const photoChatType = msg.message_thread_id ? "thread" : isPhotoGroup ? "group" : "dm";
+      if (this.shouldFilter(photoChatType as "dm" | "group" | "thread", String(msg.from.id))) return;
+
       try {
         // Telegram provides multiple sizes; pick the largest
         const photo = msg.photo[msg.photo.length - 1];
@@ -128,7 +139,11 @@ export class TelegramChannel implements ChannelAdapter {
           console.warn(`[telegram] skipping oversized photo: ${file.file_size} bytes`);
           return;
         }
-        const buffer = await this.downloadFile(file.file_path!);
+        if (!file.file_path) {
+          console.warn("[telegram] photo file has no file_path (file may be too large)");
+          return;
+        }
+        const buffer = await this.downloadFile(file.file_path);
         const artifact = storeMediaFromBuffer(buffer, "image/jpeg");
 
         const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
@@ -159,6 +174,10 @@ export class TelegramChannel implements ChannelAdapter {
       const doc = msg.document;
       if (!doc) return;
 
+      const isDocGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
+      const docChatType = msg.message_thread_id ? "thread" : isDocGroup ? "group" : "dm";
+      if (this.shouldFilter(docChatType as "dm" | "group" | "thread", String(msg.from.id))) return;
+
       try {
         const file = await ctx.api.getFile(doc.file_id);
         // Reject oversized files before downloading
@@ -166,7 +185,11 @@ export class TelegramChannel implements ChannelAdapter {
           console.warn(`[telegram] skipping oversized document: ${file.file_size} bytes`);
           return;
         }
-        const buffer = await this.downloadFile(file.file_path!);
+        if (!file.file_path) {
+          console.warn("[telegram] document file has no file_path (file may be too large)");
+          return;
+        }
+        const buffer = await this.downloadFile(file.file_path);
         const mimeType = doc.mime_type ?? "application/octet-stream";
         const artifact = storeMediaFromBuffer(buffer, mimeType, doc.file_name ?? undefined);
 
@@ -196,6 +219,13 @@ export class TelegramChannel implements ChannelAdapter {
       const match = data.match(/^(approve|deny):(.+)$/);
       if (!match) {
         await ctx.answerCallbackQuery();
+        return;
+      }
+
+      // Verify the clicking user is authorized via the same policy as messages
+      const clickerId = String(ctx.callbackQuery.from.id);
+      if (this.shouldFilter("dm", clickerId)) {
+        await ctx.answerCallbackQuery({ text: "You are not authorized to approve commands" });
         return;
       }
 

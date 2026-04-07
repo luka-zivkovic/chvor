@@ -34,7 +34,13 @@ function rowToCredential(row: CredentialRow): Credential {
   };
 }
 
-function redactValue(value: string): string {
+const NON_SECRET_FIELDS = new Set([
+  "host", "port", "baseUrl", "domain", "homeserverUrl", "instanceUrl",
+  "userId", "email", "vaultPath", "username",
+]);
+
+function redactValue(value: string, key?: string): string {
+  if (key && NON_SECRET_FIELDS.has(key)) return value;
   if (value.length <= 4) return "••••••••";
   return value.slice(0, 4) + "••••••••";
 }
@@ -42,7 +48,7 @@ function redactValue(value: string): string {
 function toSummary(cred: Credential, data: CredentialData): CredentialSummary {
   const redactedFields: Record<string, string> = {};
   for (const [k, v] of Object.entries(data)) {
-    redactedFields[k] = redactValue(v);
+    redactedFields[k] = redactValue(v, k);
   }
   return {
     id: cred.id,

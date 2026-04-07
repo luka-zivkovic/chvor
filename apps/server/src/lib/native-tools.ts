@@ -844,13 +844,15 @@ async function handleCreateWebhook(
     filters,
   });
 
-  getWSInstance()?.broadcast({ type: "webhook.created", data: sub });
+  // Strip secret before broadcasting — it should never reach the client via WebSocket
+  const { secret: _secret, ...safeSub } = sub;
+  getWSInstance()?.broadcast({ type: "webhook.created", data: safeSub });
 
   return {
     content: [
       {
         type: "text",
-        text: `Webhook subscription created!\n\n**Name:** ${sub.name}\n**Source:** ${sub.source}\n**ID:** ${sub.id}\n\n**Webhook URL:** \`/api/webhooks/${sub.id}/receive\`\n**Secret:** \`${sub.secret}\`\n\nConfigure the external service to send webhooks to the URL above. ${source === "github" ? "In GitHub, paste the secret into the webhook settings for HMAC-SHA256 signature verification." : source === "generic" ? "Sign the request body with HMAC-SHA256 using the secret and send it in the X-Webhook-Signature-256 header as `sha256=<hex>`." : ""}`,
+        text: `Webhook subscription created!\n\n**Name:** ${sub.name}\n**Source:** ${sub.source}\n**ID:** ${sub.id}\n\n**Webhook URL:** \`/api/webhooks/${sub.id}/receive\`\n\nThe signing secret can be viewed in **Settings → Webhooks**. ${source === "github" ? "In GitHub, paste the secret into the webhook settings for HMAC-SHA256 signature verification." : source === "generic" ? "Sign the request body with HMAC-SHA256 using the secret and send it in the X-Webhook-Signature-256 header as `sha256=<hex>`." : ""}`,
       },
     ],
   };

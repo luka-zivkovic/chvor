@@ -123,8 +123,8 @@ function readCacheFile(): IndexCache | null {
 function writeCacheFile(cache: IndexCache): void {
   try {
     atomicWriteFileSync(getCachePath(), JSON.stringify(cache));
-  } catch {
-    // Non-critical
+  } catch (err) {
+    console.warn("[registry-client] cache write failed:", err instanceof Error ? err.message : err);
   }
 }
 

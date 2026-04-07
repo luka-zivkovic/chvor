@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { listCredentials, getCredentialData } from "../db/credential-store.ts";
+import { assertSafeUrl } from "../lib/url-safety.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,6 +51,7 @@ async function haFetch(
   options: RequestInit = {}
 ): Promise<Response> {
   const url = `${creds.instanceUrl}${path}`;
+  assertSafeUrl(url, "Home Assistant API URL");
   return fetch(url, {
     ...options,
     headers: {
