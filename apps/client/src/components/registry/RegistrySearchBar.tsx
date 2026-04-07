@@ -38,7 +38,7 @@ export function RegistrySearchBar({ kind, onInstalled }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.registry.search({ q: q || undefined, kind });
+      const data = await api.registry.search({ q: q || undefined, kind, signal: controller.signal });
       if (controller.signal.aborted) return;
       setResults(data.filter((e) => e.kind !== "template"));
     } catch (err) {

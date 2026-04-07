@@ -37,6 +37,7 @@ function validateRegistryIndex(data: unknown): RegistryIndex {
   if (!Array.isArray(obj.entries)) {
     throw new Error("Invalid registry index: missing or invalid 'entries' array");
   }
+  const VALID_KINDS = ["skill", "tool", "template"];
   for (const entry of obj.entries) {
     if (!entry || typeof entry !== "object") {
       throw new Error("Invalid registry entry: expected object");
@@ -46,6 +47,9 @@ function validateRegistryIndex(data: unknown): RegistryIndex {
       if (typeof e[field] !== "string" || !(e[field] as string).length) {
         throw new Error(`Invalid registry entry: missing or empty '${field}' in entry "${e.id ?? "unknown"}"`);
       }
+    }
+    if (typeof e.kind !== "string" || !VALID_KINDS.includes(e.kind)) {
+      throw new Error(`Invalid registry entry: 'kind' must be one of ${VALID_KINDS.join(", ")} in entry "${e.id ?? "unknown"}"`);
     }
   }
   return data as RegistryIndex;
@@ -132,9 +136,9 @@ export async function fetchRegistryIndex(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  try {
-    const cached = readCacheFile();
+  const cached = readCacheFile();
 
+  try {
     const headers: Record<string, string> = {
       "Accept-Encoding": "gzip",
     };
@@ -163,8 +167,7 @@ export async function fetchRegistryIndex(
 
     return index;
   } catch (err) {
-    // Try cached copy on network failure
-    const cached = readCacheFile();
+    // Try cached copy on network failure (reuse already-read cache from above)
     if (cached) {
       console.warn("[registry-client] network failed, using cached index");
       return cached.index;

@@ -205,7 +205,7 @@ export const api = {
   },
 
   registry: {
-    search: (params?: { q?: string; category?: string; tags?: string[]; kind?: string }) => {
+    search: (params?: { q?: string; category?: string; tags?: string[]; kind?: string; signal?: AbortSignal }) => {
       const qs = new URLSearchParams();
       if (params?.q) qs.set("q", params.q);
       if (params?.category) qs.set("category", params.category);
@@ -213,6 +213,7 @@ export const api = {
       if (params?.kind) qs.set("kind", params.kind);
       return request<(RegistryEntry & { installed: boolean; installedVersion: string | null })[]>(
         `/registry/search?${qs.toString()}`,
+        params?.signal ? { signal: params.signal } : undefined,
       );
     },
     getEntry: (id: string) =>

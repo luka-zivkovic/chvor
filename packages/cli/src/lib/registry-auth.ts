@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFile } from "node:child_process";
 import { getChvorHome } from "./paths.js";
@@ -19,6 +19,8 @@ function readAuth(): StoredAuth | null {
   if (!existsSync(authPath)) return null;
   try {
     const data = JSON.parse(readFileSync(authPath, "utf8")) as StoredAuth;
+    // Reject incomplete auth objects (e.g. "{}" left by failed logout)
+    if (!data.token || !data.registryUrl) return null;
     // Check expiry
     if (new Date(data.expiresAt) < new Date()) return null;
     return data;
@@ -53,7 +55,12 @@ export function getUsername(registryUrl: string): string | null {
 export function logout(): void {
   const authPath = getAuthPath();
   if (existsSync(authPath)) {
-    writeFileSync(authPath, "{}", "utf8");
+    try {
+      unlinkSync(authPath);
+    } catch {
+      // Fallback: overwrite with empty object if delete fails
+      writeFileSync(authPath, "{}", { encoding: "utf8", mode: 0o600 });
+    }
   }
 }
 

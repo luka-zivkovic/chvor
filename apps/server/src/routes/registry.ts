@@ -10,6 +10,7 @@ import {
   readLock,
   assertSafeEntryId,
   validateManifest,
+  withLockMutex,
 } from "../lib/registry-manager.ts";
 import { getBundledCapabilities } from "../lib/capability-loader.ts";
 import type { RegistryEntry, RegistryEntryKind } from "@chvor/shared";
@@ -22,7 +23,12 @@ registry.get("/search", async (c) => {
     const q = c.req.query("q")?.toLowerCase() ?? "";
     const category = c.req.query("category") ?? "";
     const tags = c.req.query("tags")?.split(",").filter(Boolean) ?? [];
-    const kind = c.req.query("kind") as RegistryEntryKind | undefined;
+    const kindRaw = c.req.query("kind");
+    const VALID_KINDS: RegistryEntryKind[] = ["skill", "tool", "template"];
+    if (kindRaw && !VALID_KINDS.includes(kindRaw as RegistryEntryKind)) {
+      return c.json({ error: `Invalid kind "${kindRaw}" — must be one of: ${VALID_KINDS.join(", ")}` }, 400);
+    }
+    const kind = kindRaw as RegistryEntryKind | undefined;
 
     // Try cached first, fallback to fetch
     let index = readCachedIndex();
@@ -148,6 +154,7 @@ registry.get("/entry/:id/manifest", async (c) => {
 registry.get("/skill/:id", async (c) => {
   try {
     const id = c.req.param("id");
+    assertSafeEntryId(id);
 
     let index = readCachedIndex();
     if (!index) {
@@ -184,7 +191,7 @@ registry.post("/install", async (c) => {
     }
     assertSafeEntryId(entryId);
 
-    const result = await installEntry(entryId, body.kind);
+    const result = await withLockMutex(() => installEntry(entryId, body.kind));
     return c.json({
       data: {
         entry: result.installed,
@@ -205,10 +212,13 @@ registry.delete("/entry/:id", async (c) => {
   try {
     const id = c.req.param("id");
     assertSafeEntryId(id);
-    const lock = readLock();
-    const wasShadowingBundled = lock.installed[id]?.shadowsBundled ?? false;
-    await uninstallEntry(id);
-    return c.json({ data: { id, uninstalled: true, restoredBundled: wasShadowingBundled } });
+    const result = await withLockMutex(async () => {
+      const lock = readLock();
+      const wasShadowingBundled = lock.installed[id]?.shadowsBundled ?? false;
+      await uninstallEntry(id);
+      return { wasShadowingBundled };
+    });
+    return c.json({ data: { id, uninstalled: true, restoredBundled: result.wasShadowingBundled } });
   } catch (err) {
     console.error("[api] DELETE /registry/entry error:", err);
     return c.json({ error: String(err) }, 500);
@@ -220,7 +230,7 @@ registry.delete("/skill/:id", async (c) => {
   try {
     const id = c.req.param("id");
     assertSafeEntryId(id);
-    await uninstallEntry(id);
+    await withLockMutex(() => uninstallEntry(id));
     return c.json({ data: { id, uninstalled: true } });
   } catch (err) {
     console.error("[api] DELETE /registry/skill error:", err);
@@ -231,7 +241,7 @@ registry.delete("/skill/:id", async (c) => {
 // GET /api/registry/updates — check for available updates
 registry.get("/updates", async (c) => {
   try {
-    const updates = await checkForUpdates();
+    const updates = await withLockMutex(() => checkForUpdates());
     return c.json({ data: updates });
   } catch (err) {
     console.error("[api] GET /registry/updates error:", err);
@@ -250,7 +260,7 @@ registry.post("/update", async (c) => {
     };
 
     if (body.all) {
-      const results = await updateAll(body.force);
+      const results = await withLockMutex(() => updateAll(body.force));
       return c.json({ data: results });
     }
 
@@ -260,7 +270,7 @@ registry.post("/update", async (c) => {
     }
     assertSafeEntryId(entryId);
 
-    const result = await updateEntry(entryId, body.force);
+    const result = await withLockMutex(() => updateEntry(entryId, body.force));
     return c.json({ data: { id: entryId, ...result } });
   } catch (err) {
     console.error("[api] POST /registry/update error:", err);
@@ -273,7 +283,7 @@ registry.post("/refresh", async (c) => {
   try {
     const lock = readLock();
     const index = await fetchRegistryIndex(lock.registryUrl);
-    return c.json({ data: { entryCount: index.entries.length, skillCount: index.entries.length, updatedAt: index.updatedAt } });
+    return c.json({ data: { entryCount: index.entries.length, skillCount: index.entries.filter((e) => e.kind === "skill").length, updatedAt: index.updatedAt } });
   } catch (err) {
     console.error("[api] POST /registry/refresh error:", err);
     return c.json({ error: String(err) }, 500);
