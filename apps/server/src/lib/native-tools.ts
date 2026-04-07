@@ -844,7 +844,9 @@ async function handleCreateWebhook(
     filters,
   });
 
-  getWSInstance()?.broadcast({ type: "webhook.created", data: sub });
+  // Strip secret before broadcasting — it should never reach the client via WebSocket
+  const { secret: _secret, ...safeSub } = sub;
+  getWSInstance()?.broadcast({ type: "webhook.created", data: safeSub });
 
   return {
     content: [

@@ -148,10 +148,18 @@ export async function getBrowser(sessionId: string): Promise<Stagehand> {
     }
     if (oldestId) {
       console.log(`[browser-manager] evicting oldest session: ${oldestId}`);
-      // Reserve our slot BEFORE the async eviction to prevent another caller sneaking in
-      const placeholder = Promise.resolve(null as unknown as BrowserSession);
-      initializing.set(sessionId, placeholder);
-      await closeBrowser(oldestId);
+      // Combine eviction + init into one promise and reserve the slot synchronously
+      // BEFORE any await. This prevents another caller from sneaking into the freed
+      // slot during the async eviction window (TOCTOU race). Concurrent callers for
+      // the same sessionId will dedup via the inflight check above.
+      const promise = closeBrowser(oldestId).then(() => initBrowser(sessionId));
+      initializing.set(sessionId, promise);
+      try {
+        const session = await promise;
+        return session.stagehand;
+      } finally {
+        initializing.delete(sessionId);
+      }
     } else {
       // All slots are occupied by in-flight initializations — nothing to evict
       throw new Error(

@@ -73,8 +73,8 @@ export type GatewayServerEvent =
   | { type: "error"; data: { message: string } }
   | { type: "session.titleUpdate"; data: { sessionId: string; title: string } }
   | { type: "activity.new"; data: ActivityEntry }
-  | { type: "webhook.created"; data: import("./webhook.js").WebhookSubscription }
-  | { type: "webhook.updated"; data: import("./webhook.js").WebhookSubscription }
+  | { type: "webhook.created"; data: Omit<import("./webhook.js").WebhookSubscription, "secret"> }
+  | { type: "webhook.updated"; data: Omit<import("./webhook.js").WebhookSubscription, "secret"> }
   | { type: "webhook.deleted"; data: { id: string } }
   | { type: "webhook.received"; data: { id: string; eventType: string } }
   | { type: "whatsapp.qr"; data: { qrDataUrl: string } }

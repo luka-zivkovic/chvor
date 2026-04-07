@@ -71,8 +71,9 @@ webhooks.patch("/:id", async (c) => {
     const body = (await c.req.json()) as UpdateWebhookRequest;
     const updated = updateWebhookSubscription(id, body);
     if (!updated) return c.json({ error: "not found" }, 404);
-    getWSInstance()?.broadcast({ type: "webhook.updated", data: updated });
-    return c.json({ data: updated });
+    const { secret: _secret, ...safeUpdated } = updated;
+    getWSInstance()?.broadcast({ type: "webhook.updated", data: safeUpdated });
+    return c.json({ data: safeUpdated });
   } catch (err) {
     return c.json({ error: String(err) }, 500);
   }
