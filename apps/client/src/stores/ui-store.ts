@@ -32,8 +32,12 @@ interface UIState {
   exitCanvas: () => void;
   /** Floating A2UI preview modal */
   previewModalOpen: boolean;
+  /** Set when user explicitly dismisses modal — prevents auto-open until new session or manual re-open */
+  previewModalDismissed: boolean;
   openPreviewModal: (surfaceId?: string) => void;
   closePreviewModal: () => void;
+  /** Re-open the preview modal (clears dismissed flag) */
+  reopenPreviewModal: () => void;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
 }
@@ -83,7 +87,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   },
   exitCanvas: () => set({ layoutMode: "default" }),
   previewModalOpen: false,
+  previewModalDismissed: false,
   openPreviewModal: (surfaceId?: string) => {
+    if (get().previewModalDismissed) return;
     set({ previewModalOpen: true });
     if (surfaceId) {
       import("./a2ui-store").then(({ useA2UIStore }) => {
@@ -93,7 +99,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       });
     }
   },
-  closePreviewModal: () => set({ previewModalOpen: false }),
+  closePreviewModal: () => set({ previewModalOpen: false, previewModalDismissed: true }),
+  reopenPreviewModal: () => set({ previewModalOpen: true, previewModalDismissed: false }),
   openSettings: (section?: SettingsSection) =>
     set({ settingsOpen: true, activePanel: null, settingsSection: section ?? get().settingsSection }),
   closeSettings: () => set({ settingsOpen: false }),

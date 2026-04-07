@@ -451,6 +451,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       case "a2ui.delete":
         useA2UIStore.getState().handleDelete(event.data);
         break;
+      case "a2ui.deleteAll":
+        useA2UIStore.getState().handleDeleteAll();
+        break;
       case "a2ui.toast":
         // Auto-open the preview modal so the user sees the dashboard immediately
         useUIStore.getState().openPreviewModal(event.data.surfaceId);

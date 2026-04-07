@@ -237,7 +237,10 @@ export function A2UIRenderer({ surfaceId, surface }: { surfaceId: string; surfac
 
 /** Wrapper that detects empty render output and shows diagnostics */
 function SurfaceContent({ surfaceId, surface }: { surfaceId: string; surface: A2UISurface }) {
-  const rendered = renderNode(surface.root!, surface, new Set(), 0);
+  if (!surface.root) {
+    return <SurfaceDiagnostics surfaceId={surfaceId} surface={surface} />;
+  }
+  const rendered = renderNode(surface.root, surface, new Set(), 0);
 
   if (!rendered) {
     return <SurfaceDiagnostics surfaceId={surfaceId} surface={surface} />;

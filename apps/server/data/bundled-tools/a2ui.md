@@ -51,7 +51,7 @@ Send an array of **messages** in a single call. Each message is one of:
 | **Button** | Interactive button | `label`, `action`, `variant` (primary/secondary/ghost) |
 | **Form** | Form container | `children.explicitList`, `submitAction`, `submitLabel` |
 | **Input** | Text input field | `placeholder`, `bindTo`, `inputType` |
-| **Chart** | Bar/line charts | `chartType` (bar/line), `data` (array of {label,value}), `title` |
+| **Chart** | Bar/line/pie charts | `chartType` (bar/line/pie), `data` (binding or inline array of {label,value}), `title` |
 
 ### Data binding
 

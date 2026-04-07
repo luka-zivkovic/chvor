@@ -7,7 +7,7 @@ import { lookup } from "node:dns/promises";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import type { ExecutionEvent, GatewayServerEvent, A2UIComponentEntry } from "@chvor/shared";
-import { surfaceExists, upsertSurface, updateBindings as updateSurfaceBindings, deleteSurface as deleteSurfaceFromDb, deleteAllSurfaces } from "../db/a2ui-store.ts";
+import { upsertSurface, updateBindings as updateSurfaceBindings, deleteSurface as deleteSurfaceFromDb, deleteAllSurfaces, surfaceExists } from "../db/a2ui-store.ts";
 import { logError, formatUptime } from "./error-logger.ts";
 import type { ErrorCategory } from "./error-logger.ts";
 import { getSelfHealingEnabled, getPcControlEnabled, setConfig, getShellConfig as getShellApprovalConfig, isCapabilityEnabled, isTrustedCommand, addTrustedCommand } from "../db/config-store.ts";
@@ -3711,6 +3711,7 @@ const a2uiPushToolDef = tool({
           z.object({
             surfaceUpdate: z.object({
               surfaceId: z.string().describe("Unique surface identifier"),
+              title: z.string().optional().describe("Human-readable title for the surface"),
               components: z.array(
                 z.object({
                   id: z.string().describe("Unique component id"),
@@ -3765,15 +3766,15 @@ async function handleA2UIPush(
     componentMap: Record<string, A2UIComponentEntry>;
     root: string | null;
     bindings: Record<string, unknown> | null;
+    title: string | null;
   }>();
 
-  const newSurfaceIds = new Set<string>();
   const surfaceIds = new Set<string>();
 
   const getOrCreate = (sid: string) => {
     let entry = surfaceData.get(sid);
     if (!entry) {
-      entry = { components: [], componentMap: {}, root: null, bindings: null };
+      entry = { components: [], componentMap: {}, root: null, bindings: null, title: null };
       surfaceData.set(sid, entry);
     }
     return entry;
@@ -3784,15 +3785,15 @@ async function handleA2UIPush(
     const m = msg as Record<string, unknown>;
 
     if ("surfaceUpdate" in m && typeof m.surfaceUpdate === "object" && m.surfaceUpdate != null) {
-      const su = m.surfaceUpdate as { surfaceId: string; components: Array<{ id: string; component: Record<string, unknown> }> };
+      const su = m.surfaceUpdate as { surfaceId: string; title?: string; components: Array<{ id: string; component: Record<string, unknown> }> };
       if (typeof su.surfaceId !== "string") continue;
 
-      if (!surfaceIds.has(su.surfaceId) && !surfaceExists(su.surfaceId)) {
-        newSurfaceIds.add(su.surfaceId);
-      }
       surfaceIds.add(su.surfaceId);
 
       const entry = getOrCreate(su.surfaceId);
+      if (typeof su.title === "string" && su.title.trim()) {
+        entry.title = su.title.trim();
+      }
       if (Array.isArray(su.components)) {
         for (const c of su.components) {
           entry.componentMap[c.id] = c as unknown as A2UIComponentEntry;
@@ -3835,9 +3836,14 @@ async function handleA2UIPush(
           const normalizedChildren = Array.isArray(childList)
             ? { explicitList: childList as string[] }
             : childList;
-          (ce.component as unknown as Record<string, unknown>)["Column"] = { children: normalizedChildren, gap: raw.gap ?? 8 };
+          // Capture gap before clearing — raw and comp are the same object reference
+          const gap = raw.gap ?? 8;
+          // Clear all existing keys and replace with a proper Column wrapper
+          for (const k of Object.keys(comp)) delete comp[k];
+          comp["Column"] = { children: normalizedChildren, gap };
           console.warn(`[a2ui] Surface "${sid}": auto-wrapped component "${cid}" as Column`);
         }
+        // Children already normalized during wrapping; skip further normalization
         continue;
       }
 
@@ -3917,15 +3923,21 @@ async function handleA2UIPush(
   }
 
   // ── Phase 3: Persist to DB and emit consolidated events ──
+  const newSurfaceIds = new Set<string>();
+
   for (const [sid, entry] of surfaceData) {
     const hasComponents = Object.keys(entry.componentMap).length > 0;
 
-    // Persist components + root + rendering in a single upsert
-    upsertSurface({
+    // Always upsert so the row exists before binding updates.
+    // upsertSurface returns true if it inserted a new row (atomic newness check).
+    const isNew = upsertSurface({
       surfaceId: sid,
+      ...(entry.title ? { title: entry.title } : {}),
       ...(hasComponents ? { components: entry.componentMap } : {}),
       ...(entry.root ? { root: entry.root, rendering: true } : {}),
     });
+
+    if (isNew) newSurfaceIds.add(sid);
 
     // Send one consolidated surface event with both components AND root
     if (hasComponents || entry.root) {
@@ -3939,7 +3951,7 @@ async function handleA2UIPush(
       });
     }
 
-    // Send data bindings
+    // Send data bindings (row is guaranteed to exist now)
     if (entry.bindings) {
       updateSurfaceBindings(sid, entry.bindings);
       send({
@@ -3996,12 +4008,15 @@ async function handleA2UIReset(
   };
 
   if (surfaceId) {
-    deleteSurfaceFromDb(surfaceId);
+    const existed = deleteSurfaceFromDb(surfaceId);
+    if (!existed) {
+      return { content: [{ type: "text", text: `A2UI surface "${surfaceId}" not found.` }] };
+    }
     send({ type: "a2ui.delete" as const, data: { surfaceId } });
     return { content: [{ type: "text", text: `A2UI surface "${surfaceId}" cleared.` }] };
   } else {
     deleteAllSurfaces();
-    send({ type: "a2ui.delete" as const, data: { surfaceId: "__all__" } });
+    send({ type: "a2ui.deleteAll" as const, data: {} });
     return { content: [{ type: "text", text: "All A2UI surfaces cleared." }] };
   }
 }

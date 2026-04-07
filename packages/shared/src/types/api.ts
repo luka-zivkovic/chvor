@@ -84,6 +84,7 @@ export type GatewayServerEvent =
   | { type: "a2ui.surface"; data: A2UISurfaceUpdate & { root?: string } }
   | { type: "a2ui.data"; data: A2UIDataModelUpdate }
   | { type: "a2ui.delete"; data: A2UIDeleteSurface }
+  | { type: "a2ui.deleteAll"; data: Record<string, never> }
   | { type: "a2ui.toast"; data: { surfaceId: string; title: string } }
   | { type: "pc.connected"; data: import("./pc-control.js").PcAgentInfo }
   | { type: "pc.disconnected"; data: { id: string } }

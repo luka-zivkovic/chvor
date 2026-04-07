@@ -110,6 +110,7 @@ export interface A2UIComponentEntry {
 
 export interface A2UISurfaceUpdate {
   surfaceId: string;
+  title?: string;
   components: A2UIComponentEntry[];
 }
 
@@ -141,6 +142,7 @@ export interface A2UISurface {
   root: string | null;
   components: Record<string, A2UIComponentEntry>;
   bindings: Record<string, unknown>;
+  /** true once beginRendering has been received; only reset to false on deleteSurface */
   rendering: boolean;
 }
 
