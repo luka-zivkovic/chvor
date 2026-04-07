@@ -16,12 +16,24 @@ const MAX_SCHEMA_DEPTH = 5;
 function jsonSchemaPropertyToZod(prop: Record<string, unknown>, depth: number): z.ZodType {
   if (depth > MAX_SCHEMA_DEPTH) return z.unknown();
 
+  // Handle union types: {"type": ["string", "null"]} → z.union([z.string(), z.null()])
+  if (Array.isArray(prop.type)) {
+    const members = (prop.type as string[]).map((t) =>
+      jsonSchemaPropertyToZod({ ...prop, type: t }, depth)
+    );
+    if (members.length === 1) return members[0];
+    if (members.length >= 2) return z.union(members as [z.ZodType, z.ZodType, ...z.ZodType[]]);
+    return z.unknown();
+  }
+
   switch (prop.type) {
     case "number":
     case "integer":
       return z.number();
     case "boolean":
       return z.boolean();
+    case "null":
+      return z.null();
     case "array": {
       const items = prop.items as Record<string, unknown> | undefined;
       if (items && typeof items === "object") {
@@ -85,8 +97,8 @@ function jsonSchemaObjectToZod(schema: Record<string, unknown>, depth = 0): z.Zo
 // This helps prompt caching by keeping tool JSON stable across turns.
 let cachedToolHash: string | null = null;
 let cachedToolDefs: Record<string, ReturnType<typeof tool>> | null = null;
-// Dedup: return in-flight build promise to concurrent callers
-let inflightBuild: Promise<Record<string, ReturnType<typeof tool>>> | null = null;
+// Dedup: return in-flight build promise to concurrent callers (only when hash matches)
+let inflightBuild: { hash: string; promise: Promise<Record<string, ReturnType<typeof tool>>> } | null = null;
 
 /**
  * Build Vercel AI SDK tool definitions from loaded tools.
@@ -107,11 +119,11 @@ export async function buildToolDefinitions(
     return cachedToolDefs;
   }
 
-  // Dedup concurrent calls
-  if (inflightBuild) return inflightBuild;
+  // Dedup concurrent calls — only reuse if building for the same tool set
+  if (inflightBuild && inflightBuild.hash === hash) return inflightBuild.promise;
 
   const buildPromise = doBuild(eligibleTools, tools, hash);
-  inflightBuild = buildPromise;
+  inflightBuild = { hash, promise: buildPromise };
   try {
     return await buildPromise;
   } finally {

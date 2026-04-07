@@ -240,7 +240,9 @@ class McpManager {
    */
   async getConnectionStatus(): Promise<Array<{ toolId: string; connected: boolean; toolCount: number }>> {
     const result: Array<{ toolId: string; connected: boolean; toolCount: number }> = [];
-    for (const [id, conn] of this.connections) {
+    // Snapshot entries to avoid issues if connections mutate during async probes
+    const entries = [...this.connections.entries()];
+    for (const [id, conn] of entries) {
       let connected = false;
       try {
         await withTimeout(conn.client.listTools(), HEALTH_CHECK_TIMEOUT_MS, `health check ${id}`);

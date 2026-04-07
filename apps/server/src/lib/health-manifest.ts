@@ -79,7 +79,7 @@ export async function writeManifest(): Promise<void> {
 
     // MCP status string
     const totalTools = tools.filter((t) => t.mcpServer).length;
-    const mcpRunning = mcpStatus.length;
+    const mcpRunning = mcpStatus.filter((s) => s.connected).length;
     const mcpStr = `${mcpRunning}/${totalTools}`;
 
     // Notes for this snapshot
@@ -138,7 +138,7 @@ export async function writeManifest(): Promise<void> {
       "|-----------|--------|--------|",
       `| Skills | ${skills.length} loaded | ${skills.filter((s) => s.source === "bundled").length} bundled, ${skills.filter((s) => s.source === "user").length} user |`,
       `| Tools | ${tools.length} loaded | ${tools.filter((t) => t.builtIn).length} bundled, ${tools.filter((t) => !t.builtIn).length} user |`,
-      `| MCP servers | ${mcpStr} running | ${mcpStatus.map((s) => s.toolId).join(", ") || "none active"} |`,
+      `| MCP servers | ${mcpStr} running | ${mcpStatus.filter((s) => s.connected).map((s) => s.toolId).join(", ") || "none active"} |`,
       `| Browser | ${browserCount} session(s) | ${browserCount > 0 ? "active" : "idle"} |`,
       `| Scheduler | ${activeSchedules.length} active | ${schedules.length} total |`,
       `| Channels | ${activeChannels}/${totalChannels} active | ${channelParts.join(", ")} |`,

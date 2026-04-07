@@ -156,11 +156,22 @@ tools.post("/import", async (c) => {
       return c.json({ error: "Invalid tool name — cannot derive a safe file name" }, 400);
     }
 
-    // Validate mcp.command if present — reject path traversal and suspicious binaries
+    // Validate mcp.command and args if present — reject path traversal and code execution
     if (preview.kind === "tool" && preview.mcpServer?.command) {
       const cmd = preview.mcpServer.command;
       if (cmd.includes("..") || cmd.includes("/") || cmd.includes("\\")) {
         return c.json({ error: `Invalid mcp.command "${cmd}" — must be a bare command name, not a path` }, 400);
+      }
+      // Validate args — block path traversal and inline code execution flags
+      const dangerousArgPatterns = ["--eval", "-e", "--exec", "--import", "-c"];
+      for (const arg of preview.mcpServer.args ?? []) {
+        if (typeof arg !== "string") continue;
+        if (arg.includes("..") || /^[/\\]/.test(arg)) {
+          return c.json({ error: `Invalid mcp.args entry "${arg}" — must not contain path traversal or absolute paths` }, 400);
+        }
+        if (dangerousArgPatterns.includes(arg.toLowerCase())) {
+          return c.json({ error: `Invalid mcp.args entry "${arg}" — code execution flags are not allowed` }, 400);
+        }
       }
     }
 

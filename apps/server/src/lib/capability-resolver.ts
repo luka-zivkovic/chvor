@@ -74,13 +74,13 @@ export function buildCapabilityRegistry(
   tools: Tool[],
   discoveredMcpTools: Map<string, McpToolInfo[]>,
 ): void {
-  // Only clear capabilities for tools that were actually re-discovered.
-  // Preserve existing entries for tools that failed discovery (transient errors)
-  // so skills don't lose capability resolution during temporary MCP failures.
+  // Clear native providers (re-registered below) and providers for tools that
+  // were successfully re-discovered. Preserve entries for tools that failed
+  // discovery (transient errors) so skills keep working during MCP outages.
   const discoveredToolIds = new Set(discoveredMcpTools.keys());
   for (const [capId, providers] of registry) {
     const remaining = providers.filter(
-      (p) => p.toolId === "native" || !discoveredToolIds.has(p.toolId)
+      (p) => p.toolId !== "native" && !discoveredToolIds.has(p.toolId)
     );
     if (remaining.length > 0) {
       registry.set(capId, remaining);
