@@ -63,9 +63,12 @@ export const useActivityStore = create<ActivityState>((set) => ({
   },
 
   handleActivityEvent: (entry: ActivityEntry) => {
-    set((s) => ({
-      activities: [entry, ...s.activities].slice(0, 200),
-      unreadCount: s.unreadCount + 1,
-    }));
+    set((s) => {
+      if (s.activities.some((a) => a.id === entry.id)) return s;
+      return {
+        activities: [entry, ...s.activities].slice(0, 200),
+        unreadCount: s.unreadCount + 1,
+      };
+    });
   },
 }));
