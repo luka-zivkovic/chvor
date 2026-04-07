@@ -124,7 +124,6 @@ async function daemonTick(): Promise<void> {
         // because executeConversation does not accept an AbortSignal.
         // The running guard (currentTask) prevents claiming new tasks until
         // the finally block clears it.
-        let ghostExecution = false;
         const execPromise = executeConversation(
           [{
             id: randomUUID(),
@@ -140,7 +139,6 @@ async function daemonTick(): Promise<void> {
         });
 
         const result = await Promise.race([execPromise, timeoutPromise]);
-        if (result === null) ghostExecution = true;
 
         if (result === null) {
           throw new Error(`Task timed out after ${TASK_TIMEOUT_MS / 1000}s`);

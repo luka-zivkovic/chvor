@@ -695,7 +695,11 @@ export function getDb(): Database.Database {
   }
 
   if (currentVersion < 17) {
-    db.exec(`ALTER TABLE daemon_tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`);
+    try {
+      db.exec(`ALTER TABLE daemon_tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`);
+    } catch {
+      // Column may already exist if a previous run partially applied this migration
+    }
     db.pragma("user_version = 17");
     console.log("[db] migration v17 applied: daemon_tasks retry_count column");
   }
