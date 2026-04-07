@@ -92,7 +92,7 @@ export function PowerUpPhase({ direction, onBack, onNext }: Props) {
 
             {/* Categorized list */}
             {CATEGORY_ORDER.map((cat) => {
-              const skills = configurableSkills.filter((s) => s.category === cat);
+              const skills = configurableSkills.filter((s) => s.category === cat && !s.featured);
               if (skills.length === 0) return null;
               return (
                 <div key={cat}>

@@ -5,7 +5,7 @@ import { loadSkills, loadTools } from "../lib/capability-loader.ts";
 import { isCapabilityEnabled } from "../db/config-store.ts";
 import { listCredentials } from "../db/credential-store.ts";
 import { listSchedules } from "../db/schedule-store.ts";
-import { getOrCreateDefault } from "../db/workspace-store.ts";
+import { listWorkspaces } from "../db/workspace-store.ts";
 import type { TemplateManifest, TemplateSkillOverride, TemplateCredentialDef, TemplateScheduleDef } from "@chvor/shared";
 
 const templates = new Hono();
@@ -15,7 +15,7 @@ const templates = new Hono();
  * Includes: persona, enabled skills/tools, instruction overrides, credential types (no secrets),
  * schedules, and pipeline.
  */
-templates.get("/export", (c) => {
+templates.get("/export", async (c) => {
   try {
     const persona = getPersona();
 
@@ -54,18 +54,34 @@ templates.get("/export", (c) => {
         })),
       }));
 
-    // Schedules
+    // Schedules — only include user-created schedules, not template-provisioned ones
     const allSchedules = listSchedules();
-    const schedules: TemplateScheduleDef[] = allSchedules.map((s) => ({
-      name: s.name,
-      cronExpression: s.cronExpression,
-      prompt: s.prompt,
-      ...(s.oneShot ? { oneShot: true } : {}),
-    }));
+    const templateScheduleIds = new Set<string>();
+    try {
+      const { readLock } = await import("../lib/registry-manager.ts");
+      const lock = readLock();
+      for (const info of Object.values(lock.installed)) {
+        if (info.provisionedScheduleIds) {
+          for (const sid of info.provisionedScheduleIds) templateScheduleIds.add(sid);
+        }
+      }
+    } catch { /* lock may not exist */ }
+    const schedules: TemplateScheduleDef[] = allSchedules
+      .filter((s) => !templateScheduleIds.has(s.id))
+      .map((s) => ({
+        name: s.name,
+        cronExpression: s.cronExpression,
+        prompt: s.prompt,
+        ...(s.oneShot ? { oneShot: true } : {}),
+      }));
 
-    // Pipeline
-    const workspace = getOrCreateDefault("constellation");
-    const hasPipeline = workspace.nodes.length > 0;
+    // Pipeline — only export template-provisioned pipeline workspaces, not the default constellation
+    // Template pipelines use IDs like "template-{id}-pipeline"
+    const pipelineWorkspaces = listWorkspaces().filter(
+      (ws) => ws.id.startsWith("template-") && ws.nodes.length > 0,
+    );
+    const hasPipeline = pipelineWorkspaces.length > 0;
+    const pipelineWorkspace = pipelineWorkspaces[0];
 
     const manifest: TemplateManifest & { includes?: string[] } = {
       name: persona.aiName || "My Assistant",
@@ -90,8 +106,8 @@ templates.get("/export", (c) => {
       ...(skillOverrides.length > 0 ? { skillOverrides } : {}),
       ...(credentials.length > 0 ? { credentials } : {}),
       ...(schedules.length > 0 ? { schedules } : {}),
-      ...(hasPipeline
-        ? { pipeline: { nodes: workspace.nodes, edges: workspace.edges } }
+      ...(hasPipeline && pipelineWorkspace
+        ? { pipeline: { nodes: pipelineWorkspace.nodes, edges: pipelineWorkspace.edges } }
         : {}),
     };
 

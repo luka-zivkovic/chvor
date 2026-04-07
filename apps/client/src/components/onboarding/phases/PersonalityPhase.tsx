@@ -123,6 +123,7 @@ export function PersonalityPhase({
               value={customProfile}
               onChange={(e) => onSetCustomProfile(e.target.value)}
               rows={4}
+              maxLength={2000}
               className="bg-input/50 backdrop-blur-sm"
               autoFocus
               placeholder="Describe how you want your AI to communicate..."
@@ -146,6 +147,7 @@ export function PersonalityPhase({
               value={aiName}
               onChange={(e) => onSetAiName(e.target.value)}
               placeholder="Chvor"
+              maxLength={50}
               className="bg-input/50 backdrop-blur-sm"
             />
           </div>
@@ -157,6 +159,7 @@ export function PersonalityPhase({
               value={userNickname}
               onChange={(e) => onSetUserNickname(e.target.value)}
               placeholder={name || "Boss, Chief, your name..."}
+              maxLength={50}
               className="bg-input/50 backdrop-blur-sm"
             />
           </div>

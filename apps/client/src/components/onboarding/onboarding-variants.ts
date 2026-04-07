@@ -132,6 +132,19 @@ export const ORB_EVOLUTIONS = [
     animation: "animate-glass-pulse",
     ripples: 2,
   },
+  // Phase 7: Supernova (launch)
+  {
+    size: 220,
+    color: "oklch(0.68 0.16 250)",
+    glowAlpha: 0.38,
+    glowBlur: 38,
+    glowSpread: "-50%",
+    bodyOpacity: 0.42,
+    borderOpacity: 0.48,
+    specularOpacity: 0.22,
+    animation: "animate-glass-pulse",
+    ripples: 3,
+  },
 ] as const;
 
 /** Personality tag → orb color */

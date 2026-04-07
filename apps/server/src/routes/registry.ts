@@ -184,14 +184,15 @@ registry.get("/skill/:id", async (c) => {
 // POST /api/registry/install — install an entry from registry
 registry.post("/install", async (c) => {
   try {
-    const body = (await c.req.json()) as { id?: string; kind?: RegistryEntryKind; skillId?: string };
+    const body = (await c.req.json()) as { id?: string; kind?: RegistryEntryKind; skillId?: string; skipPersona?: boolean };
     const entryId = body.id ?? body.skillId;
     if (!entryId) {
       return c.json({ error: "id (or skillId) is required" }, 400);
     }
     assertSafeEntryId(entryId);
 
-    const result = await withLockMutex(() => installEntry(entryId, body.kind));
+    const options = body.skipPersona ? { skipPersona: true } : undefined;
+    const result = await withLockMutex(() => installEntry(entryId, body.kind, new Set(), options));
     return c.json({
       data: {
         entry: result.installed,

@@ -48,6 +48,22 @@ export function OnboardingExperience({ onComplete }: Props) {
 
   // Phase 2: Template selection
   const [selectedTemplate, setSelectedTemplate] = useState<{ id: string; manifest: TemplateManifest } | null>(null);
+  const [templateEntries, setTemplateEntries] = useState<Awaited<ReturnType<typeof api.registry.search>> | null>(null);
+  const [templateEntriesError, setTemplateEntriesError] = useState<string | null>(null);
+
+  // Pre-fetch templates once so TemplatePhase doesn't re-fetch on every mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const entries = await api.registry.search({ kind: "template" });
+        if (!cancelled) setTemplateEntries(entries);
+      } catch (err) {
+        if (!cancelled) setTemplateEntriesError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Phase 4: Personality
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
@@ -117,10 +133,10 @@ export function OnboardingExperience({ onComplete }: Props) {
   const handleLaunch = useCallback(async () => {
     setLaunching(true);
     try {
-      // If a template was selected, install it first
+      // If a template was selected, install it first (skipPersona: onboarding applies merged persona below)
       if (selectedTemplate) {
         try {
-          await api.registry.install(selectedTemplate.id, "template");
+          await api.registry.install(selectedTemplate.id, "template", { skipPersona: true });
         } catch {
           toast.error("Template installation failed — launching without it");
         }
@@ -228,8 +244,10 @@ export function OnboardingExperience({ onComplete }: Props) {
           {currentPhase === "template" && (
             <TemplatePhase
               direction={direction}
+              prefetchedTemplates={templateEntries}
+              prefetchedError={templateEntriesError}
               onBack={goBack}
-              onSkip={goNext}
+              onSkip={() => { setSelectedTemplate(null); goNext(); }}
               onSelectTemplate={(id, manifest) => {
                 setSelectedTemplate({ id, manifest });
                 // If template has an AI name, use it
@@ -286,6 +304,7 @@ export function OnboardingExperience({ onComplete }: Props) {
               direction={direction}
               aiName={selectedTemplate?.manifest.persona?.aiName ?? aiName}
               userName={name}
+              launching={launching}
               onBack={goBack}
               onLaunch={handleLaunch}
             />

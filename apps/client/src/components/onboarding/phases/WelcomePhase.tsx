@@ -60,6 +60,7 @@ export function WelcomePhase({
             value={name}
             onChange={(e) => onChangeName(e.target.value)}
             placeholder="Your name"
+            maxLength={100}
             className="bg-input/50 backdrop-blur-sm"
             autoFocus
           />
