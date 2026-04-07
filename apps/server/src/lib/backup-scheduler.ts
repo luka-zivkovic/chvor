@@ -13,13 +13,16 @@ export function startBackupScheduler(): void {
     intervalMs,
     run: async () => {
       console.log("[backup] scheduled backup starting...");
-      const info = await createBackup("scheduled");
-      console.log(`[backup] scheduled backup complete: ${info.filename} (${info.sizeBytes} bytes)`);
       try {
+        const info = await createBackup("scheduled");
+        console.log(`[backup] scheduled backup complete: ${info.filename} (${info.sizeBytes} bytes)`);
         setConfig("backup.lastRunAt", new Date().toISOString());
         setConfig("backup.lastError", "");
       } catch (err) {
-        console.error("[backup] failed to update backup config:", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[backup] scheduled backup failed:", msg);
+        try { setConfig("backup.lastError", msg); } catch { /* best-effort */ }
+        throw err; // re-throw so job-runner marks the job as failed
       }
     },
   });

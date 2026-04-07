@@ -60,15 +60,6 @@ export function updateJobRun(
     .run(...values);
 }
 
-export function getOverdueJobs(): SystemJob[] {
-  const rows = getDb()
-    .prepare(
-      "SELECT * FROM system_jobs WHERE next_run_at <= datetime('now') AND status != 'running'"
-    )
-    .all() as Record<string, unknown>[];
-  return rows.map(mapRow);
-}
-
 export function resetStuckJobs(): number {
   const result = getDb()
     .prepare("UPDATE system_jobs SET status = 'idle' WHERE status = 'running'")

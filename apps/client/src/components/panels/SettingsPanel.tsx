@@ -597,21 +597,40 @@ export function BackupContent() {
     backups, config, creating, restoring, error,
     fetchBackups, fetchConfig, updateConfig, createBackup, deleteBackup, restoreBackup,
   } = useBackupStore();
-  const [restoreConfirm, setRestoreConfirm] = useState(false);
+  const [pendingRestoreFile, setPendingRestoreFile] = useState<File | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [localMaxCount, setLocalMaxCount] = useState<string>("");
 
   useEffect(() => {
     fetchBackups();
     fetchConfig();
   }, [fetchBackups, fetchConfig]);
 
-  const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  useEffect(() => {
+    if (config) setLocalMaxCount(String(config.maxCount));
+  }, [config?.maxCount]);
+
+  const handleRestoreSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setPendingRestoreFile(file);
+    e.target.value = "";
+  };
+
+  const handleRestoreConfirm = async () => {
+    if (!pendingRestoreFile) return;
+    const file = pendingRestoreFile;
+    setPendingRestoreFile(null);
     const success = await restoreBackup(file);
     if (success) {
       toast.success("Restore complete. The server is restarting — please refresh in a few seconds.");
     }
-    e.target.value = "";
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteConfirmId) return;
+    await deleteBackup(deleteConfirmId);
+    setDeleteConfirmId(null);
   };
 
   const formatSize = (bytes: number) => {
@@ -664,7 +683,7 @@ export function BackupContent() {
           <span className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted">
             {restoring ? "Restoring..." : "Restore from File"}
           </span>
-          <input type="file" accept=".chvor-backup" className="hidden" onChange={handleRestore} disabled={restoring} />
+          <input type="file" accept=".chvor-backup" className="hidden" onChange={handleRestoreSelect} disabled={restoring} />
         </label>
       </div>
 
@@ -692,7 +711,7 @@ export function BackupContent() {
                 >
                   Download
                 </a>
-                <Button size="sm" variant="ghost" className="text-destructive text-[10px]" onClick={() => deleteBackup(b.id)}>
+                <Button size="sm" variant="ghost" className="text-destructive text-[10px]" onClick={() => setDeleteConfirmId(b.id)}>
                   Delete
                 </Button>
               </div>
@@ -739,8 +758,13 @@ export function BackupContent() {
                   type="number"
                   min={1}
                   className="w-20 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-                  value={config.maxCount}
-                  onChange={(e) => updateConfig({ maxCount: Math.max(1, Number(e.target.value)) })}
+                  value={localMaxCount}
+                  onChange={(e) => setLocalMaxCount(e.target.value)}
+                  onBlur={() => {
+                    const n = Math.max(1, parseInt(localMaxCount, 10) || 1);
+                    setLocalMaxCount(String(n));
+                    if (n !== config.maxCount) updateConfig({ maxCount: n });
+                  }}
                 />
               </div>
 
@@ -769,6 +793,40 @@ export function BackupContent() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Restore confirmation */}
+      {pendingRestoreFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="rounded-lg border border-border bg-background p-5 shadow-lg max-w-sm">
+            <p className="text-sm font-medium text-foreground mb-2">Confirm Restore</p>
+            <p className="text-xs text-muted-foreground mb-4">
+              This will replace your current database, skills, and tools with the backup contents. A safety backup will be created first. The server will restart.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => setPendingRestoreFile(null)}>Cancel</Button>
+              <Button size="sm" variant="destructive" onClick={handleRestoreConfirm} disabled={restoring}>
+                {restoring ? "Restoring..." : "Restore"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="rounded-lg border border-border bg-background p-5 shadow-lg max-w-sm">
+            <p className="text-sm font-medium text-foreground mb-2">Delete Backup</p>
+            <p className="text-xs text-muted-foreground mb-4">
+              This backup will be permanently deleted. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => setDeleteConfirmId(null)}>Cancel</Button>
+              <Button size="sm" variant="destructive" onClick={handleDeleteConfirm}>Delete</Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
