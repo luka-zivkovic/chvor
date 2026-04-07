@@ -204,7 +204,18 @@ export function parseWebhookPayload(
   headers: Headers,
   body: unknown
 ): ParsedWebhookEvent {
-  const obj = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+  // Typed sources require an object body — if body is a string or primitive, return a parse-error event
+  if (source !== "generic" && (typeof body !== "object" || body === null)) {
+    const bodyStr = typeof body === "string" ? body : String(body);
+    return {
+      eventType: "parse_error",
+      summary: `Expected JSON object body for ${source} webhook, got ${typeof body}`,
+      details: { raw: bodyStr.slice(0, 500) },
+      rawPayload: body,
+    };
+  }
+
+  const obj = body as Record<string, unknown>;
   switch (source) {
     case "github":
       return parseGitHubPayload(headers, obj);

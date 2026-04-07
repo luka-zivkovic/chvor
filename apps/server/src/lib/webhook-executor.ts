@@ -76,8 +76,8 @@ function checkRateLimit(subscriptionId: string): boolean {
   try {
     const dbCount = countRecentWebhookEvents(subscriptionId, RATE_LIMIT_WINDOW_MS);
     if (dbCount >= RATE_LIMIT_MAX) return false;
-  } catch {
-    // If DB check fails, rely on in-memory only
+  } catch (err) {
+    console.warn(`[webhooks] DB rate-limit check failed for ${subscriptionId}, using in-memory only:`, err);
   }
 
   recent.push(now);
@@ -124,29 +124,50 @@ export async function executeWebhook(
   let result: string | null = null;
   let error: string | null = null;
 
-  try {
-    const convResult = await executeConversation(messages, emit, undefined, undefined, {
-      excludeTools: WEBHOOK_EXCLUDED_TOOLS,
-      channelType: "webhook",
-      sessionId: `webhook-${subscription.id}`,
-    });
-    result = convResult.text;
-    emit({ type: "execution.completed", data: { output: result } });
-  } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
-    console.error(`[webhooks] "${subscription.name}" failed:`, error);
-    logError("webhook_error", err, { webhookId: subscription.id, webhookName: subscription.name });
-    emit({ type: "execution.failed", data: { error } });
+  const MAX_RETRIES = 1;
+  const RETRY_DELAY_MS = 3_000;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const convResult = await executeConversation(messages, emit, undefined, undefined, {
+        excludeTools: WEBHOOK_EXCLUDED_TOOLS,
+        channelType: "webhook",
+        sessionId: `webhook-${subscription.id}`,
+      });
+      result = convResult.text;
+      error = null;
+      emit({ type: "execution.completed", data: { output: result } });
+      break;
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+      if (attempt < MAX_RETRIES) {
+        console.warn(`[webhooks] "${subscription.name}" attempt ${attempt + 1} failed, retrying in ${RETRY_DELAY_MS}ms:`, error);
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      } else {
+        console.error(`[webhooks] "${subscription.name}" failed after ${attempt + 1} attempt(s):`, error);
+        logError("webhook_error", err, { webhookId: subscription.id, webhookName: subscription.name });
+        emit({ type: "execution.failed", data: { error } });
+      }
+    }
   }
 
-  recordWebhookEvent(subscription.id, parsed.eventType, parsed.summary, result, error);
+  // Record event and deliver — wrapped so a DB/delivery failure doesn't lose the execution result
+  try {
+    recordWebhookEvent(subscription.id, parsed.eventType, parsed.summary, result, error);
+  } catch (recordErr) {
+    console.error(`[webhooks] failed to record event for "${subscription.name}":`, recordErr);
+  }
 
-  const activityEntry = insertActivity({
-    source: "webhook",
-    title: `Webhook: ${subscription.name}`,
-    content: result || error || null,
-  });
-  wsManager?.broadcast({ type: "activity.new", data: activityEntry });
+  try {
+    const activityEntry = insertActivity({
+      source: "webhook",
+      title: `Webhook: ${subscription.name}`,
+      content: result || error || null,
+    });
+    wsManager?.broadcast({ type: "activity.new", data: activityEntry });
+  } catch (activityErr) {
+    console.error(`[webhooks] failed to record activity for "${subscription.name}":`, activityErr);
+  }
 
   // Deliver to external channels if configured
   if (result && subscription.deliverTo && subscription.deliverTo.length > 0 && channelSender) {

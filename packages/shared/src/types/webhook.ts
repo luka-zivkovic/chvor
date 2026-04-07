@@ -20,7 +20,6 @@ export interface WebhookSubscription {
 export interface WebhookFilter {
   eventTypes?: string[];
   branches?: string[];
-  custom?: Record<string, string>;
 }
 
 export interface CreateWebhookRequest {

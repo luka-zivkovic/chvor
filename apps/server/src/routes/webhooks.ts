@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import type { CreateWebhookRequest, UpdateWebhookRequest } from "@chvor/shared";
 import {
@@ -93,6 +94,37 @@ webhooks.delete("/:id", (c) => {
 
 const MAX_WEBHOOK_BODY_BYTES = 1_048_576; // 1MB
 
+// ── Deduplication cache (TTL-based, prevents duplicate LLM executions) ──
+const DEDUP_TTL_MS = 5 * 60_000; // 5 minutes
+const recentDeliveries = new Map<string, number>();
+
+function getDeliveryKey(subscriptionId: string, headers: Record<string, string>, rawBody: string): string {
+  // Use provider-specific delivery IDs when available
+  const ghDelivery = headers["x-github-delivery"];
+  if (ghDelivery) return `${subscriptionId}:gh:${ghDelivery}`;
+
+  // Fallback: hash of subscription + body
+  const hash = createHash("sha256").update(rawBody).digest("hex").slice(0, 16);
+  return `${subscriptionId}:hash:${hash}`;
+}
+
+function isDuplicate(key: string): boolean {
+  const now = Date.now();
+  const existing = recentDeliveries.get(key);
+  if (existing && now - existing < DEDUP_TTL_MS) return true;
+
+  recentDeliveries.set(key, now);
+
+  // Prune stale entries periodically (every 100 inserts, cheap enough)
+  if (recentDeliveries.size > 500) {
+    for (const [k, ts] of recentDeliveries) {
+      if (now - ts >= DEDUP_TTL_MS) recentDeliveries.delete(k);
+    }
+  }
+
+  return false;
+}
+
 webhooks.post("/:id/receive", async (c) => {
   const sub = getWebhookSubscription(c.req.param("id"));
   if (!sub) return c.json({ error: "not found" }, 404);
@@ -106,7 +138,7 @@ webhooks.post("/:id/receive", async (c) => {
 
   // Get raw body for signature verification
   const rawBody = await c.req.text();
-  if (rawBody.length > MAX_WEBHOOK_BODY_BYTES) {
+  if (Buffer.byteLength(rawBody, "utf-8") > MAX_WEBHOOK_BODY_BYTES) {
     return c.json({ error: "payload too large" }, 413);
   }
   let body: unknown;
@@ -116,12 +148,14 @@ webhooks.post("/:id/receive", async (c) => {
     body = rawBody;
   }
 
-  // Reject requests when no secret is configured (except Notion verification challenges)
+  // Notion verification challenges must pass through before signature checks —
+  // Notion sends these during initial setup and may not sign them.
+  if (sub.source === "notion" && typeof body === "object" && body !== null && (body as Record<string, unknown>).type === "url_verification") {
+    return c.json({ challenge: (body as Record<string, unknown>).challenge });
+  }
+
+  // Reject requests when no secret is configured
   if (!sub.secret) {
-    // Allow Notion verification challenges through without a secret (initial handshake)
-    if (sub.source === "notion" && typeof body === "object" && body !== null && (body as Record<string, unknown>).type === "url_verification") {
-      return c.json({ challenge: (body as Record<string, unknown>).challenge });
-    }
     console.warn(`[webhooks] rejecting unsigned request for "${sub.name}" — no secret configured`);
     return c.json({ error: "webhook secret not configured — unsigned requests are rejected for security" }, 403);
   }
@@ -155,6 +189,12 @@ webhooks.post("/:id/receive", async (c) => {
       }
       break;
     }
+  }
+
+  // Deduplicate — providers often retry delivery
+  const dedupKey = getDeliveryKey(sub.id, c.req.header() as Record<string, string>, rawBody);
+  if (isDuplicate(dedupKey)) {
+    return c.json({ status: "duplicate, already processing" }, 200);
   }
 
   // Parse payload
