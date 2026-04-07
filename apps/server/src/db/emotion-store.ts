@@ -130,25 +130,31 @@ export function getEmotionPatterns(days = 30): {
   const db = getDb();
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  const rows = db.prepare(
-    "SELECT primary_emotion, valence, arousal, dominance FROM emotion_snapshots WHERE created_at > ?"
-  ).all(cutoff) as { primary_emotion: string; valence: number; arousal: number; dominance: number }[];
+  // Frequency counts per emotion (SQL aggregation instead of loading all rows)
+  const freqRows = db.prepare(
+    "SELECT primary_emotion, COUNT(*) as cnt FROM emotion_snapshots WHERE created_at > ? GROUP BY primary_emotion"
+  ).all(cutoff) as { primary_emotion: string; cnt: number }[];
 
   const frequencies: Record<string, number> = {};
-  let sumV = 0, sumA = 0, sumD = 0;
-
-  for (const row of rows) {
-    frequencies[row.primary_emotion] = (frequencies[row.primary_emotion] || 0) + 1;
-    sumV += row.valence;
-    sumA += row.arousal;
-    sumD += row.dominance;
+  let totalSnapshots = 0;
+  for (const row of freqRows) {
+    frequencies[row.primary_emotion] = row.cnt;
+    totalSnapshots += row.cnt;
   }
 
-  const n = rows.length || 1;
+  // Average VAD across all snapshots in the window
+  const avgRow = db.prepare(
+    "SELECT AVG(valence) as avg_v, AVG(arousal) as avg_a, AVG(dominance) as avg_d FROM emotion_snapshots WHERE created_at > ?"
+  ).get(cutoff) as { avg_v: number | null; avg_a: number | null; avg_d: number | null } | undefined;
+
   return {
     frequencies,
-    avgVAD: { valence: sumV / n, arousal: sumA / n, dominance: sumD / n },
-    totalSnapshots: rows.length,
+    avgVAD: {
+      valence: avgRow?.avg_v ?? 0,
+      arousal: avgRow?.avg_a ?? 0,
+      dominance: avgRow?.avg_d ?? 0,
+    },
+    totalSnapshots,
   };
 }
 

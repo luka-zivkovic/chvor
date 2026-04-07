@@ -27,7 +27,8 @@ export type MoodOctant =
   | "relaxed"     // +V -A +D
   | "docile"      // +V -A -D
   | "disdainful"  // -V -A +D
-  | "dependent";  // +V +A -D
+  | "dependent"   // +V +A -D
+  | "neutral";    // near-zero VAD
 
 export interface MoodState {
   vad: VADState;
@@ -36,7 +37,14 @@ export interface MoodState {
   turnCount: number;   // turns in current octant
 }
 
+const MOOD_DEAD_ZONE = 0.05;
+
 export function resolveMoodOctant(vad: VADState): MoodOctant {
+  // Near-zero VAD is genuinely neutral, not "exuberant"
+  if (Math.abs(vad.valence) < MOOD_DEAD_ZONE && Math.abs(vad.arousal) < MOOD_DEAD_ZONE && Math.abs(vad.dominance) < MOOD_DEAD_ZONE) {
+    return "neutral";
+  }
+
   const v = vad.valence >= 0;
   const a = vad.arousal >= 0;
   const d = vad.dominance >= 0;
