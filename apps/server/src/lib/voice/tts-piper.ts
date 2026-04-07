@@ -134,39 +134,39 @@ export class PiperTTSProvider implements TTSProvider {
   }
 
   private async doLoadModel(modelId: string): Promise<CachedSession | null> {
-      try {
-        const def = VOICE_MODELS.find((m) => m.id === modelId);
-        if (!def || def.files.length < 2) throw new Error(`Unknown Piper model: ${modelId}`);
+    try {
+      const def = VOICE_MODELS.find((m) => m.id === modelId);
+      if (!def || def.files.length < 2) throw new Error(`Unknown Piper model: ${modelId}`);
 
-        const dir = getModelsDir();
-        const onnxFile = def.files.find((f) => f.filename.endsWith(".onnx") && !f.filename.endsWith(".json"));
-        const configFile = def.files.find((f) => f.filename.endsWith(".json"));
-        if (!onnxFile || !configFile) throw new Error(`Invalid model files for ${modelId}`);
+      const dir = getModelsDir();
+      const onnxFile = def.files.find((f) => f.filename.endsWith(".onnx") && !f.filename.endsWith(".json"));
+      const configFile = def.files.find((f) => f.filename.endsWith(".json"));
+      if (!onnxFile || !configFile) throw new Error(`Invalid model files for ${modelId}`);
 
-        const modelPath = join(dir, onnxFile.filename);
-        const configPath = join(dir, configFile.filename);
+      const modelPath = join(dir, onnxFile.filename);
+      const configPath = join(dir, configFile.filename);
 
-        if (!existsSync(modelPath) || !existsSync(configPath)) {
-          throw new Error("Piper model not downloaded");
-        }
-
-        const config: PiperConfig = JSON.parse(readFileSync(configPath, "utf8"));
-        const ort = await import("onnxruntime-node");
-        const session = await ort.InferenceSession.create(modelPath, {
-          executionProviders: ["cpu"],
-        });
-
-        const cached = { session, config };
-        this.sessions.set(modelId, cached);
-        console.log(`[tts:piper] loaded model: ${modelId}`);
-        return cached;
-      } catch (err) {
-        this.initFailed.add(modelId);
-        console.error(`[tts:piper] failed to load ${modelId}:`, err instanceof Error ? err.message : err);
-        return null;
-      } finally {
-        this.initPromises.delete(modelId);
+      if (!existsSync(modelPath) || !existsSync(configPath)) {
+        throw new Error("Piper model not downloaded");
       }
+
+      const config: PiperConfig = JSON.parse(readFileSync(configPath, "utf8"));
+      const ort = await import("onnxruntime-node");
+      const session = await ort.InferenceSession.create(modelPath, {
+        executionProviders: ["cpu"],
+      });
+
+      const cached = { session, config };
+      this.sessions.set(modelId, cached);
+      console.log(`[tts:piper] loaded model: ${modelId}`);
+      return cached;
+    } catch (err) {
+      this.initFailed.add(modelId);
+      console.error(`[tts:piper] failed to load ${modelId}:`, err instanceof Error ? err.message : err);
+      return null;
+    } finally {
+      this.initPromises.delete(modelId);
+    }
   }
 
   async synthesize(

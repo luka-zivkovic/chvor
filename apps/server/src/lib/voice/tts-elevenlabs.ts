@@ -13,6 +13,7 @@ const FORMAT_MAP: Record<AudioFormat, string> = {
 export class ElevenLabsTTSProvider implements TTSProvider {
   name = "elevenlabs";
 
+  // Note: ElevenLabs API does not support a speed parameter — opts.speed is accepted but ignored
   async synthesize(
     text: string,
     opts?: { voice?: string; format?: AudioFormat; speed?: number }

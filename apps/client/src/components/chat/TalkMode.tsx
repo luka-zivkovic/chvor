@@ -52,6 +52,7 @@ export function TalkMode({ onSend }: Props) {
   }, [setTalkPhase, clearTtsTimeout]);
 
   const sendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noTtsResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSpeechResult = useCallback((text: string) => {
     if (!talkModeActiveRef.current || !text.trim()) return;
@@ -68,7 +69,8 @@ export function TalkMode({ onSend }: Props) {
 
     // If TTS is off, skip waiting for audio — resume listening after a short delay
     if (ttsModeRef.current === "off") {
-      setTimeout(() => {
+      noTtsResumeTimerRef.current = setTimeout(() => {
+        noTtsResumeTimerRef.current = null;
         if (talkModeActiveRef.current && (talkPhaseRef.current === "thinking" || talkPhaseRef.current === "sending")) {
           resumeListening();
         }
@@ -193,6 +195,7 @@ export function TalkMode({ onSend }: Props) {
     return () => {
       clearTtsTimeout();
       if (sendingTimerRef.current) clearTimeout(sendingTimerRef.current);
+      if (noTtsResumeTimerRef.current) clearTimeout(noTtsResumeTimerRef.current);
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.src = "";

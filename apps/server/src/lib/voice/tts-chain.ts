@@ -53,6 +53,8 @@ export async function synthesizeWithFallback(
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`${name}: ${msg}`);
       console.warn(`[tts] ${name} failed: ${msg}`);
+      // Evict cached provider so it's re-created fresh on next attempt
+      evictProviderCache(name);
     }
   }
 

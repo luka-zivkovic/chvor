@@ -104,7 +104,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       // Evict oldest entries beyond the cap
       if (entries.length >= MAX_CACHED_AUDIO) {
         const toRemove = entries.slice(0, entries.length - MAX_CACHED_AUDIO + 1);
-        for (const [key] of toRemove) {
+        for (const [key, oldUrl] of toRemove) {
+          if (oldUrl.startsWith("blob:")) URL.revokeObjectURL(oldUrl);
           delete updated[key];
         }
       }

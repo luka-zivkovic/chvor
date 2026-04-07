@@ -52,7 +52,7 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
   const stop = useCallback(async (): Promise<string | null> => {
     cancelledRef.current = true;
     const recorder = mediaRecorderRef.current;
-    if (!recorder) return null;
+    if (!recorder || recorder.state === "inactive") return null;
 
     return new Promise((resolve) => {
       recorder.onstop = async () => {
