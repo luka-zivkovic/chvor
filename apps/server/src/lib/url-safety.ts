@@ -4,8 +4,26 @@
  * A single source of truth so private-network checks can't diverge across files.
  */
 
+/** Regex patterns matching private/internal resolved IP addresses. */
+export const PRIVATE_IP_RANGES = [
+  /^127\./,
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^169\.254\./,
+  /^0\./,
+  /^::1$/,
+  /^fe80:/i,
+  /^fc00:/i,
+];
+
+/** Check if a resolved IP address is private/internal. */
+export function isPrivateIp(address: string): boolean {
+  return PRIVATE_IP_RANGES.some((r) => r.test(address));
+}
+
 /** Check if a hostname is a private/internal network address. */
-function isPrivateHostname(host: string): boolean {
+export function isPrivateHostname(host: string): boolean {
   // Normalize
   host = host.toLowerCase();
 

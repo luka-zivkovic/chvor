@@ -2,6 +2,7 @@ import { Stagehand, AISdkClient } from "@browserbasehq/stagehand";
 import { lookup } from "node:dns/promises";
 import { resolveRoleConfig, createModel } from "./llm-router.ts";
 import { getAllowLocalhost } from "../db/config-store.ts";
+import { isPrivateHostname, isPrivateIp } from "./url-safety.ts";
 
 interface BrowserSession {
   stagehand: Stagehand;
@@ -16,26 +17,6 @@ const SWEEP_INTERVAL = 60 * 1000; // 60 seconds
 const MAX_CONCURRENT = 3;
 
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
-
-// ---------------------------------------------------------------------------
-// SSRF protection — shared with native-tools.ts validateFetchUrl
-// ---------------------------------------------------------------------------
-
-const PRIVATE_IP_RANGES = [
-  /^127\./,
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^169\.254\./,
-  /^0\./,
-  /^::1$/,
-  /^fe80:/i,
-  /^fc00:/i,
-];
-
-function isPrivateIp(address: string): boolean {
-  return PRIVATE_IP_RANGES.some((r) => r.test(address));
-}
 
 // ---------------------------------------------------------------------------
 // Chromium hardening flags
@@ -63,6 +44,16 @@ function isHeadless(): boolean {
  * Install a Playwright route handler that intercepts every outgoing request,
  * resolves the target hostname, and aborts requests to private/internal IPs.
  * This prevents SSRF via redirects, JS-initiated navigation, iframes, and XHR.
+ *
+ * Defense layers:
+ * 1. Protocol allowlist — only http(s) pass
+ * 2. Hostname-level check — catches localhost, metadata endpoints, .local,
+ *    .internal, and standard private IP literals (including those that
+ *    dns.lookup() can't resolve, e.g. octal/hex/decimal encodings)
+ * 3. DNS resolution + resolved-IP check — catches domains that resolve to
+ *    private addresses (e.g. DNS rebinding)
+ * 4. DNS failure → abort — restrictive default; if we can't verify the
+ *    target is safe, block it
  */
 async function installSsrfGuard(stagehand: Stagehand): Promise<void> {
   await stagehand.page.route("**/*", async (route) => {
@@ -79,15 +70,33 @@ async function installSsrfGuard(stagehand: Stagehand): Promise<void> {
       return;
     }
 
-    let hostname: string;
+    let parsed: URL;
     try {
-      hostname = new URL(url).hostname;
+      parsed = new URL(url);
     } catch {
-      // Malformed URL — let browser handle the error
-      await route.continue();
+      await route.abort("blockedbyclient");
       return;
     }
 
+    // Layer 1: protocol allowlist
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      console.warn(`[browser-ssrf] blocked non-http protocol: ${parsed.protocol} from ${url}`);
+      await route.abort("blockedbyclient");
+      return;
+    }
+
+    const hostname = parsed.hostname;
+
+    // Layer 2: hostname-level check (catches localhost, metadata endpoints,
+    // .local/.internal suffixes, standard private IP literals, and non-standard
+    // encodings like octal/hex/decimal that dns.lookup() can't resolve)
+    if (isPrivateHostname(hostname)) {
+      console.warn(`[browser-ssrf] blocked private hostname ${hostname} from ${url}`);
+      await route.abort("blockedbyclient");
+      return;
+    }
+
+    // Layer 3: DNS resolution — catches domains that resolve to private IPs
     try {
       const { address } = await lookup(hostname);
       if (isPrivateIp(address)) {
@@ -96,8 +105,9 @@ async function installSsrfGuard(stagehand: Stagehand): Promise<void> {
         return;
       }
     } catch {
-      // DNS resolution failed — let the browser handle the network error naturally
-      await route.continue();
+      // Layer 4: DNS failure → abort (restrictive default)
+      console.warn(`[browser-ssrf] blocked request — DNS resolution failed for ${hostname}`);
+      await route.abort("blockedbyclient");
       return;
     }
 

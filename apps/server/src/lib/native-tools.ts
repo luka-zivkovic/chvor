@@ -16,6 +16,7 @@ import { installEntry, uninstallEntry, readLock } from "./registry-manager.ts";
 import type { RegistryEntryKind } from "@chvor/shared";
 import { insertActivity } from "../db/activity-store.ts";
 import { LLM_CRED_TYPES, IMAGE_GEN_PROVIDERS } from "./provider-registry.ts";
+import { isPrivateIp } from "./url-safety.ts";
 
 export type NativeToolContentItem =
   | { type: "text"; text: string }
@@ -53,18 +54,6 @@ export function getNativeToolTarget(qualifiedName: string): { kind: "skill" | "t
 // Security helpers
 // ---------------------------------------------------------------------------
 
-const PRIVATE_IP_RANGES = [
-  /^127\./,
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^169\.254\./,
-  /^0\./,
-  /^::1$/,
-  /^fe80:/i,
-  /^fc00:/i,
-];
-
 export async function validateFetchUrl(rawUrl: string): Promise<URL> {
   const parsed = new URL(rawUrl);
   if (!["http:", "https:"].includes(parsed.protocol)) {
@@ -72,7 +61,7 @@ export async function validateFetchUrl(rawUrl: string): Promise<URL> {
   }
   const { address } = await lookup(parsed.hostname);
   const { getAllowLocalhost } = await import("../db/config-store.ts");
-  if (!getAllowLocalhost() && PRIVATE_IP_RANGES.some((r) => r.test(address))) {
+  if (!getAllowLocalhost() && isPrivateIp(address)) {
     throw new Error(`Blocked private/internal address: ${parsed.hostname}. Enable "Allow localhost" in Settings → Permissions to access local services.`);
   }
   return parsed;
