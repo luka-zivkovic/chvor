@@ -2223,8 +2223,10 @@ export function resolveApproval(requestId: string, approved: boolean, alwaysAllo
     const isPc = /^PC (Task|shell):/i.test(pending.command);
     if (isPc) {
       const cleaned = pending.command.replace(/^PC (Task|shell):\s*/i, "");
-      const firstWord = cleaned.split(/\s+/)[0]?.toLowerCase() ?? "";
-      if (firstWord) addTrustedCommand("pc", firstWord);
+      const parts = cleaned.trim().split(/\s+/);
+      // Store up to 3 tokens for more precise matching (matching shell pattern)
+      const pattern = parts.slice(0, Math.min(parts.length, 3)).join(" ").toLowerCase();
+      if (pattern) addTrustedCommand("pc", pattern);
     } else {
       // Store 3 tokens (binary + subcommand + first arg) for more precise matching
       // e.g. "npm install express" not just "npm install" which would approve any package
@@ -4100,6 +4102,10 @@ async function handlePcDo(
   args: Record<string, unknown>,
   context?: NativeToolContext
 ): Promise<NativeToolResult> {
+  if (!getPcControlEnabled()) {
+    return { content: [{ type: "text", text: "PC Control is disabled. Enable it in settings to use this tool." }] };
+  }
+
   const task = args.task as string;
   const targetId = args.targetId as string | undefined;
 
@@ -4214,6 +4220,10 @@ async function handlePcObserve(
   args: Record<string, unknown>,
   context?: NativeToolContext
 ): Promise<NativeToolResult> {
+  if (!getPcControlEnabled()) {
+    return { content: [{ type: "text", text: "PC Control is disabled. Enable it in settings to use this tool." }] };
+  }
+
   const targetId = args.targetId as string | undefined;
 
   // Loop detection: warn if observing too many times without taking action
@@ -4287,6 +4297,10 @@ async function handlePcShell(
   args: Record<string, unknown>,
   context?: NativeToolContext
 ): Promise<NativeToolResult> {
+  if (!getPcControlEnabled()) {
+    return { content: [{ type: "text", text: "PC Control is disabled. Enable it in settings to use this tool." }] };
+  }
+
   const targetId = args.targetId as string | undefined;
   const command = args.command as string;
   const cwd = args.cwd as string | undefined;

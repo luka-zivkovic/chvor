@@ -89,7 +89,7 @@ export function PcViewer() {
                   Install the Chvor PC Agent on a target machine to get started.
                 </p>
                 <code className="text-[11px] bg-white/5 px-3 py-1.5 rounded-md text-emerald-400/80 font-mono">
-                  {`npx @chvor/pc-agent --server ws://${window.location.host}/ws/pc-agent`}
+                  {`npx @chvor/pc-agent --server ${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/pc-agent`}
                 </code>
               </div>
             )}

@@ -99,14 +99,22 @@ export const usePcStore = create<PcState>((set, get) => ({
   },
 
   handlePipelineEvent: (type, data) => {
-    if (type === "pc.pipeline.layer") {
+    if (type === "pc.pipeline.start") {
       set({
         pipelineActivity: {
-          task: "",
+          task: (data.task as string) ?? "",
+          layer: "action-router",
+          status: "trying",
+        },
+      });
+    } else if (type === "pc.pipeline.layer") {
+      set((s) => ({
+        pipelineActivity: {
+          task: s.pipelineActivity?.task ?? "",
           layer: data.layer as PipelineLayer,
           status: data.status as PipelineActivity["status"],
         },
-      });
+      }));
     } else if (type === "pc.pipeline.complete") {
       // Clear after a short delay so the UI can show the result
       setTimeout(() => set({ pipelineActivity: null }), 1500);

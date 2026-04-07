@@ -6,7 +6,13 @@ import type { A11yTree } from "./types.ts";
  * TODO: Implement using dbus-next to talk to AT-SPI2.
  * For now returns null (graceful degradation to vision layer).
  */
+
+let warnedOnce = false;
+
 export async function queryA11yTreeLinux(_opts?: { maxDepth?: number }): Promise<A11yTree | null> {
-  console.warn("[a11y-linux] Linux accessibility tree not yet implemented, falling back to vision");
+  if (!warnedOnce) {
+    console.warn("[a11y-linux] Linux accessibility tree not yet implemented, falling back to vision");
+    warnedOnce = true;
+  }
   return null;
 }
