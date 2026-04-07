@@ -2036,7 +2036,12 @@ async function handleBrowserExtract(
       BROWSER_OP_TIMEOUT,
       "Extract",
     );
-    const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+    let text: string;
+    try {
+      text = typeof result === "string" ? result : JSON.stringify(result);
+    } catch {
+      text = "[Extract returned non-serializable data]";
+    }
     return {
       content: [{ type: "text", text: text.length > 50_000 ? text.slice(0, 50_000) + "\n\n[...truncated]" : text }],
     };
@@ -2076,7 +2081,12 @@ async function handleBrowserObserve(
       BROWSER_OP_TIMEOUT,
       "Observe",
     );
-    const text = JSON.stringify(observations, null, 2);
+    let text: string;
+    try {
+      text = JSON.stringify(observations);
+    } catch {
+      text = "[Observe returned non-serializable data]";
+    }
     return {
       content: [{ type: "text", text: text.length > 50_000 ? text.slice(0, 50_000) + "\n\n[...truncated]" : text }],
     };

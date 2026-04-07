@@ -1,5 +1,7 @@
-import { Stagehand } from "@browserbasehq/stagehand";
-import { resolveConfig } from "./llm-router.ts";
+import { Stagehand, AISdkClient } from "@browserbasehq/stagehand";
+import { lookup } from "node:dns/promises";
+import { resolveRoleConfig, createModel } from "./llm-router.ts";
+import { getAllowLocalhost } from "../db/config-store.ts";
 
 interface BrowserSession {
   stagehand: Stagehand;
@@ -15,27 +17,92 @@ const MAX_CONCURRENT = 3;
 
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 
+// ---------------------------------------------------------------------------
+// SSRF protection — shared with native-tools.ts validateFetchUrl
+// ---------------------------------------------------------------------------
+
+const PRIVATE_IP_RANGES = [
+  /^127\./,
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^169\.254\./,
+  /^0\./,
+  /^::1$/,
+  /^fe80:/i,
+  /^fc00:/i,
+];
+
+function isPrivateIp(address: string): boolean {
+  return PRIVATE_IP_RANGES.some((r) => r.test(address));
+}
+
+// ---------------------------------------------------------------------------
+// Chromium hardening flags
+// ---------------------------------------------------------------------------
+
+const CHROMIUM_HARDENING_ARGS = [
+  "--disable-gpu",
+  "--disable-dev-shm-usage",
+  "--disable-extensions",
+  "--js-flags=--max-old-space-size=512",
+  "--disable-background-networking",
+  "--disable-default-apps",
+  "--no-first-run",
+];
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function isHeadless(): boolean {
   return process.env.CHVOR_BROWSER_HEADLESS !== "false";
 }
 
-/** Map Chvor provider ID to Stagehand's "provider/model" format. */
-function toStagehandModel(providerId: string, model: string): string {
-  // Stagehand expects "provider/model" format (e.g. "anthropic/claude-sonnet-4-6")
-  if (model.includes("/")) return model; // already prefixed
-  const PROVIDER_PREFIX: Record<string, string> = {
-    openai: "openai",
-    anthropic: "anthropic",
-    "google-ai": "google",
-    groq: "groq",
-  };
-  const prefix = PROVIDER_PREFIX[providerId];
-  if (!prefix) {
-    throw new Error(
-      `Unsupported provider "${providerId}" for browser agent. Supported: ${Object.keys(PROVIDER_PREFIX).join(", ")}`
-    );
-  }
-  return `${prefix}/${model}`;
+/**
+ * Install a Playwright route handler that intercepts every outgoing request,
+ * resolves the target hostname, and aborts requests to private/internal IPs.
+ * This prevents SSRF via redirects, JS-initiated navigation, iframes, and XHR.
+ */
+async function installSsrfGuard(stagehand: Stagehand): Promise<void> {
+  await stagehand.page.route("**/*", async (route) => {
+    if (getAllowLocalhost()) {
+      await route.continue();
+      return;
+    }
+
+    const url = route.request().url();
+
+    // Skip data: and blob: URLs (no network involved)
+    if (url.startsWith("data:") || url.startsWith("blob:")) {
+      await route.continue();
+      return;
+    }
+
+    let hostname: string;
+    try {
+      hostname = new URL(url).hostname;
+    } catch {
+      // Malformed URL — let browser handle the error
+      await route.continue();
+      return;
+    }
+
+    try {
+      const { address } = await lookup(hostname);
+      if (isPrivateIp(address)) {
+        console.warn(`[browser-ssrf] blocked request to private IP ${address} (${hostname}) from ${url}`);
+        await route.abort("blockedbyclient");
+        return;
+      }
+    } catch {
+      // DNS resolution failed — let the browser handle the network error naturally
+      await route.continue();
+      return;
+    }
+
+    await route.continue();
+  });
 }
 
 /**
@@ -57,12 +124,10 @@ export async function getBrowser(sessionId: string): Promise<Stagehand> {
     return session.stagehand;
   }
 
-  // Register the init promise BEFORE eviction to prevent double-init race
-  const promise = initBrowser(sessionId);
-  initializing.set(sessionId, promise);
-
-  // Evict oldest if at capacity
-  if (sessions.size >= MAX_CONCURRENT) {
+  // Capacity check BEFORE starting init — count both active AND initializing sessions.
+  // The current request isn't in either map yet, so use >= to reserve a slot for it.
+  if (sessions.size + initializing.size >= MAX_CONCURRENT) {
+    // Try to evict the oldest active (fully initialized) session
     let oldestId: string | null = null;
     let oldestTime = Infinity;
     for (const [id, s] of sessions) {
@@ -74,8 +139,16 @@ export async function getBrowser(sessionId: string): Promise<Stagehand> {
     if (oldestId) {
       console.log(`[browser-manager] evicting oldest session: ${oldestId}`);
       await closeBrowser(oldestId);
+    } else {
+      // All slots are occupied by in-flight initializations — nothing to evict
+      throw new Error(
+        `Browser capacity reached (${MAX_CONCURRENT} concurrent sessions). Try again shortly.`
+      );
     }
   }
+
+  const promise = initBrowser(sessionId);
+  initializing.set(sessionId, promise);
 
   try {
     const session = await promise;
@@ -86,18 +159,22 @@ export async function getBrowser(sessionId: string): Promise<Stagehand> {
 }
 
 async function initBrowser(sessionId: string): Promise<BrowserSession> {
-  const config = resolveConfig();
-  const stagehandModel = toStagehandModel(config.providerId, config.model);
+  const config = resolveRoleConfig("primary");
+
+  // Use AISdkClient to support ALL Chvor providers (not just the 4 that
+  // Stagehand natively maps). createModel() returns a Vercel AI SDK
+  // LanguageModelV1 for any configured provider — OpenAI, Anthropic, Google,
+  // Groq, DeepSeek, Mistral, Ollama, LM Studio, vLLM, OpenRouter, custom, etc.
+  const model = createModel(config);
+  const llmClient = new AISdkClient({ model });
 
   const stagehand = new Stagehand({
     env: "LOCAL",
     localBrowserLaunchOptions: {
       headless: isHeadless(),
+      args: CHROMIUM_HARDENING_ARGS,
     },
-    modelName: stagehandModel,
-    modelClientOptions: {
-      apiKey: config.apiKey,
-    },
+    llmClient,
   });
 
   try {
@@ -115,8 +192,13 @@ async function initBrowser(sessionId: string): Promise<BrowserSession> {
     }
     throw err;
   }
+
+  // Install network-level SSRF guard — intercepts ALL requests including
+  // redirects, JS-initiated navigations, iframes, and XHR/fetch from the page.
+  await installSsrfGuard(stagehand);
+
   console.log(
-    `[browser-manager] browser started for session ${sessionId} (headless=${isHeadless()}, model=${stagehandModel})`
+    `[browser-manager] browser started for session ${sessionId} (headless=${isHeadless()}, provider=${config.providerId}, model=${config.model})`
   );
 
   const session: BrowserSession = { stagehand, lastUsed: Date.now() };

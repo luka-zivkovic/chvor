@@ -550,12 +550,11 @@ startBackupScheduler();
 startOAuthTokenRefresh();
 
 // Graceful shutdown — clean up MCP child processes and browser sessions
-process.on("SIGINT", async () => {
+async function gracefulShutdown(): Promise<void> {
   console.log("[chvor] shutting down...");
   clearInterval(logRotationTimer);
   shutdownKeepAwake();
   shutdownScheduler();
-  // Daemon shutdown moved after gateway/MCP so running tasks can still use them
   shutdownManifest();
   stopPeriodicCleanup();
   stopDailyResetCheck();
@@ -566,33 +565,14 @@ process.on("SIGINT", async () => {
   stopAutoUpdate();
   stopMediaCleanup();
   stopAllPeriodicJobs();
+  stopBackupScheduler();
   await shutdownAllBrowsers();
   shutdownPcAgents();
   shutdownDaemon();
   await gateway.stopAll();
   await mcpManager.shutdown();
   process.exit(0);
-});
+}
 
-process.on("SIGTERM", async () => {
-  console.log("[chvor] shutting down...");
-  clearInterval(logRotationTimer);
-  shutdownKeepAwake();
-  shutdownScheduler();
-  shutdownManifest();
-  stopPeriodicCleanup();
-  stopDailyResetCheck();
-  stopBrowserSweep();
-  stopOAuthTokenRefresh();
-  stopAudioCleanup();
-  stopSkillWatcher();
-  stopAutoUpdate();
-  stopMediaCleanup();
-  stopAllPeriodicJobs();
-  await shutdownAllBrowsers();
-  shutdownPcAgents();
-  shutdownDaemon();
-  await gateway.stopAll();
-  await mcpManager.shutdown();
-  process.exit(0);
-});
+process.on("SIGINT", gracefulShutdown);
+process.on("SIGTERM", gracefulShutdown);
