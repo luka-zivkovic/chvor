@@ -31,20 +31,24 @@ export function insertActivity(entry: {
   const id = randomUUID();
   const timestamp = new Date().toISOString();
 
-  db.prepare(
-    `INSERT INTO activity_log (id, timestamp, source, title, content, schedule_id)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, timestamp, entry.source, entry.title, entry.content ?? null, entry.scheduleId ?? null);
-
-  // Auto-prune
-  const count = (db.prepare("SELECT COUNT(*) as c FROM activity_log").get() as { c: number }).c;
-  if (count > MAX_ENTRIES) {
+  const insertAndPrune = db.transaction(() => {
     db.prepare(
-      `DELETE FROM activity_log WHERE id IN (
-        SELECT id FROM activity_log ORDER BY timestamp ASC LIMIT ?
-      )`
-    ).run(count - MAX_ENTRIES);
-  }
+      `INSERT INTO activity_log (id, timestamp, source, title, content, schedule_id)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(id, timestamp, entry.source, entry.title, entry.content ?? null, entry.scheduleId ?? null);
+
+    // Auto-prune
+    const count = (db.prepare("SELECT COUNT(*) as c FROM activity_log").get() as { c: number }).c;
+    if (count > MAX_ENTRIES) {
+      db.prepare(
+        `DELETE FROM activity_log WHERE id IN (
+          SELECT id FROM activity_log ORDER BY timestamp ASC LIMIT ?
+        )`
+      ).run(count - MAX_ENTRIES);
+    }
+  });
+
+  insertAndPrune();
 
   return { id, timestamp, source: entry.source, title: entry.title, content: entry.content ?? null, read: false, scheduleId: entry.scheduleId ?? null };
 }
@@ -73,8 +77,9 @@ export function countUnread(): number {
   return (db.prepare("SELECT COUNT(*) as c FROM activity_log WHERE read = 0").get() as { c: number }).c;
 }
 
-export function markRead(id: string): void {
-  getDb().prepare("UPDATE activity_log SET read = 1 WHERE id = ?").run(id);
+export function markRead(id: string): boolean {
+  const result = getDb().prepare("UPDATE activity_log SET read = 1 WHERE id = ?").run(id);
+  return result.changes > 0;
 }
 
 export function markAllRead(): void {

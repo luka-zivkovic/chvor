@@ -1,6 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useActivityStore } from "../../stores/activity-store";
-import { Badge } from "../ui/badge";
 import type { ActivitySource } from "@chvor/shared";
 
 const SOURCE_META: Record<ActivitySource, { label: string; color: string }> = {
@@ -10,7 +9,7 @@ const SOURCE_META: Record<ActivitySource, { label: string; color: string }> = {
   workflow: { label: "workflow", color: "text-emerald-400" },
   "credential-access": { label: "cred", color: "text-purple-400" },
   webhook: { label: "webhook", color: "text-cyan-400" },
-  "pc-control": { label: "pc", color: "text-emerald-400" },
+  "pc-control": { label: "pc", color: "text-teal-400" },
   daemon: { label: "daemon", color: "text-indigo-400" },
 };
 
@@ -28,8 +27,12 @@ export default function ActivityPanel() {
   const { activities, loading, unreadCount, fetchActivities, markRead, markAllRead } =
     useActivityStore();
 
+  // Re-render every 60s to keep relative timestamps fresh
+  const [, setTick] = useState(0);
   useEffect(() => {
     fetchActivities();
+    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
   }, [fetchActivities]);
 
   return (
@@ -83,9 +86,6 @@ export default function ActivityPanel() {
                     {a.content}
                   </p>
                 )}
-                <Badge variant="outline" className="mt-1.5 text-[9px]">
-                  {meta.label}
-                </Badge>
               </div>
             </div>
           </button>

@@ -14,7 +14,8 @@ activityRoute.get("/unread", (c) => {
 });
 
 activityRoute.patch("/:id/read", (c) => {
-  markRead(c.req.param("id"));
+  const found = markRead(c.req.param("id"));
+  if (!found) return c.json({ error: "Activity not found" }, 404);
   return c.json({ data: { ok: true } });
 });
 

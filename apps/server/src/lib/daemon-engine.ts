@@ -150,11 +150,12 @@ async function daemonTick(): Promise<void> {
           result: resultText?.slice(0, 5000) ?? null,
         });
 
-        insertActivity({
+        const activityEntry = insertActivity({
           source: "daemon",
           title: `Completed: ${task.title}`,
           content: resultText?.slice(0, 2000) ?? null,
         });
+        wsRef?.broadcast({ type: "activity.new", data: activityEntry });
 
         console.log(`[daemon] task completed: ${task.title}`);
       } catch (err) {
@@ -174,6 +175,12 @@ async function daemonTick(): Promise<void> {
             status: "failed",
             error: `Failed after ${MAX_RETRIES} retries: ${error}`,
           });
+          const failEntry = insertActivity({
+            source: "daemon",
+            title: `Failed: ${task.title}`,
+            content: `Failed after ${MAX_RETRIES} retries: ${error}`.slice(0, 2000),
+          });
+          wsRef?.broadcast({ type: "activity.new", data: failEntry });
           console.error(`[daemon] task permanently failed: ${task.title}`, error);
         }
       } finally {

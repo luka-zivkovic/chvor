@@ -1214,11 +1214,15 @@ async function handleRunWorkflow(
     );
 
     // Log to activity feed
-    insertActivity({
+    const activityEntry = insertActivity({
       source: "workflow",
       title: `Workflow: ${skill.metadata.name}`,
       content: result.text.slice(0, 2000),
     });
+    try {
+      const { getWSInstance } = await import("../gateway/ws-instance.ts");
+      getWSInstance()?.broadcast({ type: "activity.new", data: activityEntry });
+    } catch { /* non-critical */ }
 
     return {
       content: [
@@ -1594,12 +1598,13 @@ async function handleUseCredential(
 
   // Audit log
   try {
-    const { insertActivity } = await import("../db/activity-store.ts");
-    insertActivity({
+    const activityEntry = insertActivity({
       source: "credential-access",
       title: `Credential used: "${result.cred.name}" (${result.cred.type})`,
       content: `Credential ${args.id} accessed via native__use_credential${context?.sessionId ? ` in session ${context.sessionId}` : ""}`,
     });
+    const { getWSInstance } = await import("../gateway/ws-instance.ts");
+    getWSInstance()?.broadcast({ type: "activity.new", data: activityEntry });
   } catch { /* best-effort logging */ }
 
   // Register secret values for dynamic redaction
@@ -4193,11 +4198,13 @@ async function handlePcDo(
 
   // Audit log
   try {
-    insertActivity({
+    const activityEntry = insertActivity({
       source: "pc-control",
       title: `PC ${result.success ? "✓" : "✗"}: ${task.slice(0, 100)}`,
       content: `Target: ${backend.hostname}, Layer: ${result.layerUsed}, Success: ${result.success}${result.error ? `, Error: ${result.error}` : ""}`,
     });
+    const { getWSInstance } = await import("../gateway/ws-instance.ts");
+    getWSInstance()?.broadcast({ type: "activity.new", data: activityEntry });
   } catch { /* non-critical */ }
 
   const content: NativeToolContentItem[] = [];
@@ -4328,11 +4335,13 @@ async function handlePcShell(
 
   // Audit log
   try {
-    insertActivity({
+    const activityEntry = insertActivity({
       source: "pc-control",
       title: `PC Shell: ${command.slice(0, 80)}`,
       content: `Target: ${backend.hostname}, Exit: ${result.exitCode}${cwd ? `, CWD: ${cwd}` : ""}`,
     });
+    const { getWSInstance } = await import("../gateway/ws-instance.ts");
+    getWSInstance()?.broadcast({ type: "activity.new", data: activityEntry });
   } catch { /* non-critical */ }
 
   let output = "";
