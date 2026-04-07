@@ -1,5 +1,6 @@
 import { clearSessionMessages, getRecentMessages } from "../db/session-store.ts";
 import { extractAndStoreMemories, cleanupSessionExtractionState } from "./memory-extractor.ts";
+import { clearSessionAccessTracking } from "./memory-graph.ts";
 import type { ChatMessage } from "@chvor/shared";
 
 /**
@@ -20,5 +21,6 @@ export async function resetSession(sessionId: string, reason: string): Promise<v
 
   clearSessionMessages(sessionId);
   cleanupSessionExtractionState(sessionId);
+  clearSessionAccessTracking(sessionId);
   console.log(`[session-reset] reset ${sessionId}: ${reason}`);
 }
