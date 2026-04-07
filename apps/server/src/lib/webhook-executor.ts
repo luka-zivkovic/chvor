@@ -124,10 +124,10 @@ export async function executeWebhook(
   let result: string | null = null;
   let error: string | null = null;
 
-  const MAX_RETRIES = 1;
+  const MAX_ATTEMPTS = 2;
   const RETRY_DELAY_MS = 3_000;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       const convResult = await executeConversation(messages, emit, undefined, undefined, {
         excludeTools: WEBHOOK_EXCLUDED_TOOLS,
@@ -140,7 +140,7 @@ export async function executeWebhook(
       break;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
-      if (attempt < MAX_RETRIES) {
+      if (attempt < MAX_ATTEMPTS - 1) {
         console.warn(`[webhooks] "${subscription.name}" attempt ${attempt + 1} failed, retrying in ${RETRY_DELAY_MS}ms:`, error);
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       } else {

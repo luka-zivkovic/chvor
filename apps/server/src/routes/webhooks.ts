@@ -115,8 +115,8 @@ function isDuplicate(key: string): boolean {
 
   recentDeliveries.set(key, now);
 
-  // Prune stale entries periodically (every 100 inserts, cheap enough)
-  if (recentDeliveries.size > 500) {
+  // Prune stale entries when map grows large
+  if (recentDeliveries.size > 200) {
     for (const [k, ts] of recentDeliveries) {
       if (now - ts >= DEDUP_TTL_MS) recentDeliveries.delete(k);
     }

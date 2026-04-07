@@ -133,7 +133,7 @@ export function verifyNotionSignature(
   rawBody: string,
   signatureHeader: string | undefined
 ): boolean {
-  if (!signatureHeader) return false;
+  if (!signatureHeader || !/^[a-f0-9]+$/i.test(signatureHeader)) return false;
   // Notion uses HMAC-SHA256 and sends the hex digest in x-notion-signature
   const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
   try {
