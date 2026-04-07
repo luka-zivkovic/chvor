@@ -15,16 +15,13 @@ import {
   DEFAULT_VAD,
   PERSONALITY_GRAVITIES,
   vadToColor,
+  vadDistance,
 } from "@chvor/shared";
 
-// ── VAD Math ──────────────────────────────────────────────────────────────
+// Re-export vadDistance for existing consumers
+export { vadDistance };
 
-export function vadDistance(a: VADState, b: VADState): number {
-  const dv = a.valence - b.valence;
-  const da = a.arousal - b.arousal;
-  const dd = a.dominance - b.dominance;
-  return Math.sqrt(dv * dv + da * da + dd * dd);
-}
+// ── VAD Math ──────────────────────────────────────────────────────────────
 
 export function vadLerp(a: VADState, b: VADState, t: number): VADState {
   return {
@@ -280,6 +277,11 @@ export class EmotionEngine {
   /** Get the personality gravity config */
   getGravity(): EmotionGravity {
     return this.gravity;
+  }
+
+  /** Temporarily override emotional range (used by advanced engine for energy modulation) */
+  setEmotionalRange(range: number): void {
+    this.gravity = { ...this.gravity, emotionalRange: range };
   }
 
   /** Record a message timestamp for pace calculation */

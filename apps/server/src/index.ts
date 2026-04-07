@@ -482,6 +482,17 @@ const logRotationTimer = setInterval(() => rotateOldLogs(), 24 * 60 * 60 * 1000)
 const purged = deleteSensitiveMemories();
 if (purged > 0) console.log(`[memory] purged ${purged} sensitive memor${purged === 1 ? "y" : "ies"}`);
 
+// Prune old emotion data at startup
+try {
+  const { pruneOldSnapshots } = await import("./db/emotion-store.ts");
+  const { pruneOldResidues } = await import("./db/emotion-residue-store.ts");
+  const snapshotsPruned = pruneOldSnapshots(90);
+  const residuesPruned = pruneOldResidues(30);
+  if (snapshotsPruned > 0 || residuesPruned > 0) {
+    console.log(`[emotion] pruned ${snapshotsPruned} old snapshots, ${residuesPruned} old residues`);
+  }
+} catch (err) { console.warn("[emotion] failed to prune old data:", (err as Error).message); }
+
 // Clean up orphaned ephemeral web sessions (ws-N format) from before persistent session IDs
 const cleanedOrphans = cleanupOrphanedWebSessions();
 if (cleanedOrphans > 0) console.log(`[sessions] cleaned ${cleanedOrphans} orphaned web session(s)`);

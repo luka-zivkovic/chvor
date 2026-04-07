@@ -20,10 +20,14 @@ export function EmotionHistoryPanel() {
   const sparklineRef = useRef<HTMLDivElement>(null);
   const [sparklineWidth, setSparklineWidth] = useState(280);
 
+  // Debounce pattern loading — only fetch once after history stabilizes (5s)
   useEffect(() => {
-    api.get<PatternData>("/api/emotions/patterns?days=30")
-      .then(setPatterns)
-      .catch((e: unknown) => console.warn("[emotion] failed to load patterns:", e));
+    const timer = setTimeout(() => {
+      api.get<PatternData>("/emotions/patterns?days=30")
+        .then(setPatterns)
+        .catch((e: unknown) => console.warn("[emotion] failed to load patterns:", e));
+    }, 5000);
+    return () => clearTimeout(timer);
   }, [sessionHistory.length]);
 
   useEffect(() => {

@@ -1,54 +1,25 @@
 import type { EmotionState, EmotionName, EmotionSnapshot, VADState, PrimaryEmotion, SecondaryEmotion } from "@chvor/shared";
-import { vadToColor } from "@chvor/shared";
+import {
+  vadToColor,
+  VALID_EMOTIONS,
+  DEFAULT_EMOTION,
+  VALID_PRIMARY_EMOTIONS,
+  VALID_SECONDARY_EMOTIONS,
+  LEGACY_TO_PRIMARY,
+  LEGACY_TO_VAD,
+} from "@chvor/shared";
 import { resolveEmotionBlend } from "./emotion-engine.ts";
-
-// ── Inlined validation sets (can't use runtime workspace imports on Windows junction) ──
-
-const VALID_EMOTIONS = new Set(["curious", "excited", "calm", "empathetic", "playful", "focused"]);
-const DEFAULT_EMOTION: EmotionState = { emotion: "calm", intensity: 0.5 };
-
-const VALID_PRIMARY = new Set([
-  "joy", "sadness", "anger", "fear", "surprise",
-  "disgust", "trust", "anticipation", "curiosity", "focus",
-]);
-
-const VALID_SECONDARY = new Set([
-  "love", "awe", "contempt", "remorse", "optimism",
-  "anxiety", "frustration", "amusement", "pride", "nostalgia",
-  "serenity", "determination", "compassion", "irritation", "melancholy",
-  "wonder", "grudging_satisfaction", "protective_concern",
-  "quiet_confidence", "restless_energy",
-]);
 
 // ── Regex patterns ────────────────────────────────────────────────────────
 
 // Enhanced: [E:primary/intensity+secondary/intensity|V,A,D]
-const ENHANCED_MARKER_RE = /^\[E:([\w]+)\/([\d.]+)(?:\+([\w]+)\/([\d.]+))?\|(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\]\s*/;
+const ENHANCED_MARKER_RE = /^\[E:([\w]+)\/(\d+(?:\.\d+)?)(?:\+([\w]+)\/(\d+(?:\.\d+)?))?\|(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\]\s*/;
 
 // Legacy: [EMOTION:name:intensity]
-const LEGACY_MARKER_RE = /^\[EMOTION:(\w+):([\d.]+)\]\s*/;
+const LEGACY_MARKER_RE = /^\[EMOTION:(\w+):(\d+(?:\.\d+)?)\]\s*/;
 
 const MAX_BUFFER_CHARS = 150;
 
-// ── Legacy → VAD lookup ───────────────────────────────────────────────────
-
-const LEGACY_TO_PRIMARY: Record<string, PrimaryEmotion> = {
-  curious: "curiosity",
-  excited: "anticipation",
-  calm: "trust",
-  empathetic: "trust",
-  playful: "joy",
-  focused: "focus",
-};
-
-const LEGACY_TO_VAD: Record<string, VADState> = {
-  curious:    { valence:  0.5, arousal: 0.4, dominance:  0.1 },
-  excited:    { valence:  0.7, arousal: 0.7, dominance:  0.4 },
-  calm:       { valence:  0.3, arousal: -0.3, dominance:  0.2 },
-  empathetic: { valence:  0.4, arousal: 0.0, dominance: -0.2 },
-  playful:    { valence:  0.7, arousal: 0.5, dominance:  0.3 },
-  focused:    { valence:  0.1, arousal: 0.3, dominance:  0.5 },
-};
 
 // ── Parser result types ───────────────────────────────────────────────────
 
@@ -72,13 +43,13 @@ function parseEnhancedMarker(text: string): { snapshot: EmotionSnapshot; remaind
   const a = parseFloat(match[6]);
   const d = parseFloat(match[7]);
 
-  // Validate primary — must be a known emotion (primary or secondary)
-  if (!VALID_PRIMARY.has(primaryName) && !VALID_SECONDARY.has(primaryName)) return null;
+  // Validate primary — must be a known primary emotion only
+  if (!VALID_PRIMARY_EMOTIONS.has(primaryName)) return null;
   if (isNaN(primaryIntensity)) return null;
   if (isNaN(v) || isNaN(a) || isNaN(d)) return null;
 
   // Validate secondary if present — can be primary or secondary emotion
-  if (secondaryName && !VALID_PRIMARY.has(secondaryName) && !VALID_SECONDARY.has(secondaryName)) {
+  if (secondaryName && !VALID_PRIMARY_EMOTIONS.has(secondaryName) && !VALID_SECONDARY_EMOTIONS.has(secondaryName)) {
     return null;
   }
 
@@ -117,9 +88,10 @@ function parseLegacyMarker(text: string): { snapshot: EmotionSnapshot; remainder
 
   if (!VALID_EMOTIONS.has(name) || isNaN(rawIntensity)) return null;
 
+  const emotionName = name as import("@chvor/shared").EmotionName;
   const intensity = Math.max(0, Math.min(1, rawIntensity));
-  const vad = LEGACY_TO_VAD[name] ?? { valence: 0, arousal: 0, dominance: 0 };
-  const primary = LEGACY_TO_PRIMARY[name] ?? "curiosity";
+  const vad = LEGACY_TO_VAD[emotionName] ?? { valence: 0, arousal: 0, dominance: 0 };
+  const primary = LEGACY_TO_PRIMARY[emotionName] ?? "curiosity";
 
   const snapshot: EmotionSnapshot = {
     vad,
@@ -139,7 +111,7 @@ function parseLegacyMarker(text: string): { snapshot: EmotionSnapshot; remainder
 // ── Default snapshot ──────────────────────────────────────────────────────
 
 function defaultSnapshot(): EmotionSnapshot {
-  const vad: VADState = { valence: 0.3, arousal: -0.3, dominance: 0.2 };
+  const vad: VADState = { ...LEGACY_TO_VAD.calm };
   return {
     vad,
     blend: resolveEmotionBlend(vad),

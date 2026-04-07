@@ -14,6 +14,7 @@ import {
   PERSONALITY_REGULATION,
   resolveMoodOctant,
   vadToColor,
+  SIGNIFICANT_SHIFT_THRESHOLD,
 } from "@chvor/shared";
 import type { RegulationPreference } from "@chvor/shared";
 import { EmotionEngine, vadDistance, vadLerp, vadScale, findClosestPrimary } from "./emotion-engine.ts";
@@ -34,7 +35,6 @@ const ENERGY_DECAY_PER_TURN = 0.03;
 const ENERGY_DECAY_PER_TOOL_ROUND = 0.05;
 const ENERGY_DECAY_HIGH_AROUSAL = 0.02;     // Extra decay when arousal > 0.5
 const REGULATION_COST = 0.05;               // Capacity cost per regulation event
-const SIGNIFICANT_SHIFT_THRESHOLD = 0.4;    // VAD distance for "significant" change
 
 // ── Advanced Emotion Engine ──────────────────────────────────────────────
 
@@ -188,14 +188,10 @@ export class AdvancedEmotionEngine {
       : false;
 
     if (shifted) {
-      // Significant shift — resolve all current residues
-      this.residues.forEach(r => {
-        if (!r.resolved) {
-          r.resolved = true;
-          try { if (r.id) resolveResidue(r.id); } catch { /* best-effort */ }
-        }
-      });
-      this.residues = this.residues.filter(r => !r.resolved);
+      // Significant shift — batch-resolve all current residues in one DB call
+      try { resolveAllResidues(); } catch (err) { console.warn("[emotion] failed to batch-resolve residues:", (err as Error).message); }
+      this.residues.forEach(r => { r.resolved = true; });
+      this.residues = [];
     }
 
     // If current emotion is non-trivial intensity, create/update residue
@@ -216,8 +212,9 @@ export class AdvancedEmotionEngine {
         try {
           const id = insertResidue(newResidue);
           this.residues.push({ ...newResidue, id, turnAge: 0 });
-        } catch {
-          // DB failure — still track in-memory without persistence
+        } catch (err) {
+          console.warn("[emotion] failed to persist residue:", (err as Error).message);
+          // Track in-memory without persistence — mark with empty id so we don't try to resolve in DB later
           this.residues.push({ ...newResidue, id: "", turnAge: 0 });
         }
       }
@@ -225,7 +222,7 @@ export class AdvancedEmotionEngine {
       // Cap residues
       if (this.residues.length > BLEED_MAX_RESIDUES) {
         const oldest = this.residues.shift();
-        try { if (oldest?.id) resolveResidue(oldest.id); } catch { /* best-effort */ }
+        try { if (oldest?.id) resolveResidue(oldest.id); } catch (err) { console.warn("[emotion] failed to resolve evicted residue:", (err as Error).message); }
       }
     }
 
@@ -234,7 +231,7 @@ export class AdvancedEmotionEngine {
       r.turnAge++;
       if (r.turnAge > BLEED_MAX_TURN_AGE) {
         r.resolved = true;
-        try { if (r.id) resolveResidue(r.id); } catch { /* best-effort */ }
+        try { if (r.id) resolveResidue(r.id); } catch (err) { console.warn("[emotion] failed to resolve stale residue:", (err as Error).message); }
         return false;
       }
       return true;
@@ -370,6 +367,10 @@ export class AdvancedEmotionEngine {
     // Enhancement 1: Set per-emotion inertia before base engine runs
     this.applyPerEmotionInertia();
 
+    // Enhancement 4 (pre-processing): Narrow emotional range when energy is low
+    const originalRange = this.baseEngine.getGravity().emotionalRange;
+    this.baseEngine.setEmotionalRange(this.getEnergyModulatedRange());
+
     // Enhancement 2: Generate mood congruence signal
     const moodSignal = this.generateMoodCongruenceSignal();
 
@@ -382,6 +383,12 @@ export class AdvancedEmotionEngine {
 
     // Run base engine pipeline
     let snapshot = this.baseEngine.processTurn(allSignals);
+
+    // Restore original range after base engine processing
+    this.baseEngine.setEmotionalRange(originalRange);
+
+    // Capture pre-regulation VAD for shift detection (regulation shouldn't mask real shifts)
+    const preRegulationVAD = { ...snapshot.vad };
 
     // Enhancement 5: Apply regulation
     snapshot = this.applyRegulation(snapshot);
@@ -401,8 +408,8 @@ export class AdvancedEmotionEngine {
     // Enhancement 2: Update mood layer
     this.updateMood(snapshot);
 
-    // Enhancement 3: Update residues
-    this.previousVAD = { ...snapshot.vad };
+    // Enhancement 3: Update residues (use pre-regulation VAD for shift detection)
+    this.previousVAD = preRegulationVAD;
     this.updateResidues(snapshot, topicHint);
 
     // Attach advanced state to snapshot

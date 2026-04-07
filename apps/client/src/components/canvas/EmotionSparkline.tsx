@@ -53,19 +53,6 @@ export const EmotionSparkline = memo(function EmotionSparkline({
           opacity="0.3"
         />
       )}
-      {/* Dots */}
-      {dots.map((d, i) => (
-        <circle
-          key={i}
-          cx={d.x}
-          cy={d.y}
-          r={i === dots.length - 1 ? 3 : 2}
-          fill={d.color}
-          opacity={i === dots.length - 1 ? 1 : 0.6}
-        >
-          <title>{d.label}</title>
-        </circle>
-      ))}
     </svg>
   );
 });

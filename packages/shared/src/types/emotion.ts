@@ -216,6 +216,19 @@ export interface EmotionSignal {
   weight: number;
 }
 
+// ── VAD Utilities ────────────────────────────────────────────────────────
+
+/** Euclidean distance between two VAD states */
+export function vadDistance(a: VADState, b: VADState): number {
+  const dv = a.valence - b.valence;
+  const da = a.arousal - b.arousal;
+  const dd = a.dominance - b.dominance;
+  return Math.sqrt(dv * dv + da * da + dd * dd);
+}
+
+/** VAD distance threshold for "significant" emotional shift */
+export const SIGNIFICANT_SHIFT_THRESHOLD = 0.4;
+
 // ── Signal source weights ─────────────────────────────────────────────────
 
 export const SIGNAL_WEIGHTS: Record<EmotionSignalSource, number> = {
@@ -336,7 +349,7 @@ export const PERSONALITY_GRAVITIES: Record<string, EmotionGravity> = {
 
 // ── Legacy ↔ VAD bridge ───────────────────────────────────────────────────
 
-const LEGACY_TO_PRIMARY: Record<EmotionName, PrimaryEmotion> = {
+export const LEGACY_TO_PRIMARY: Record<EmotionName, PrimaryEmotion> = {
   curious: "curiosity",
   excited: "anticipation",
   calm: "trust",
@@ -345,7 +358,7 @@ const LEGACY_TO_PRIMARY: Record<EmotionName, PrimaryEmotion> = {
   focused: "focus",
 };
 
-const LEGACY_TO_VAD: Record<EmotionName, VADState> = {
+export const LEGACY_TO_VAD: Record<EmotionName, VADState> = {
   curious:    { valence:  0.5, arousal: 0.4, dominance:  0.1 },
   excited:    { valence:  0.7, arousal: 0.7, dominance:  0.4 },
   calm:       { valence:  0.3, arousal: -0.3, dominance:  0.2 },
@@ -378,7 +391,7 @@ export function upgradeLegacyEmotion(legacy: EmotionState): EmotionSnapshot {
       intensity: legacy.intensity,
     },
     displayLabel: legacy.emotion,
-    color: EMOTION_COLORS[legacy.emotion],
+    color: vadToColor(vad),
     timestamp: new Date().toISOString(),
   };
 }

@@ -8,6 +8,10 @@ import {
 
 const emotionsRoute = new Hono();
 
+// Note: all /api/* routes are protected by chvorAuth middleware (see index.ts).
+// Session ownership validation is not needed in single-user mode but should be
+// added if multi-user support is introduced.
+
 // GET /api/emotions/current/:sessionId — latest snapshot for a session
 emotionsRoute.get("/current/:sessionId", (c) => {
   const sessionId = c.req.param("sessionId");

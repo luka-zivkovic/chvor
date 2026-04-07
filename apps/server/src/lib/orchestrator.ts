@@ -736,7 +736,7 @@ export async function executeConversation(
   // Load emotion history for context injection
   let emotionHistory: EmotionSnapshot[] = [];
   if (personaCfg.emotionsEnabled && options?.sessionId) {
-    emotionHistory = getSessionEmotionArc(options.sessionId);
+    emotionHistory = getSessionEmotionArc(options.sessionId, 50);
   }
 
   // Create emotion engine for this session
@@ -762,8 +762,10 @@ export async function executeConversation(
     // Load unresolved residues + relationship state from DB
     advancedEngine.loadResidues(getUnresolvedResidues(5));
     advancedEngine.loadRelationship(getRelationshipState());
-    // Increment session count once per conversation
-    try { incrementRelationshipSession(); } catch { /* non-critical */ }
+    // Increment session count once per conversation (only on first message — no prior emotion history)
+    if (emotionHistory.length === 0) {
+      try { incrementRelationshipSession(); } catch (err) { console.warn("[orchestrator] failed to increment session:", (err as Error).message); }
+    }
   }
 
   const { stable: stablePrompt, volatile: volatilePrompt } = buildSystemPrompt(skills, enabledTools, memoryFacts, personaCfg, sessionSummary, options?.voiceContext, emotionHistory, options?.channelType);
@@ -814,6 +816,15 @@ export async function executeConversation(
   let currentMessages: CoreMessage[] = sessionToMessages(budgetedMessages as ChatMessage[]);
 
   emit({ type: "brain.thinking", data: { thought: "Processing..." } });
+
+  // Tool severity mapping for emotion signals
+  const HIGH_SEVERITY_TOOLS = new Set(["native__execute_code", "native__shell", "native__web_search"]);
+  const LOW_SEVERITY_TOOLS = new Set(["native__read_file", "native__memory_query", "native__memory_store"]);
+  function toolSeverity(toolName: string): "low" | "medium" | "high" {
+    if (HIGH_SEVERITY_TOOLS.has(toolName)) return "high";
+    if (LOW_SEVERITY_TOOLS.has(toolName)) return "low";
+    return "medium";
+  }
 
   const emotionsEnabled = personaCfg.emotionsEnabled === true;
   let detectedEmotion: EmotionState | null = null;
@@ -1107,7 +1118,7 @@ export async function executeConversation(
             result: nativeResult,
             ...(nativeMedia.length > 0 ? { media: nativeMedia } : {}),
           });
-          if (emotionEngine) toolOutcomeResults.push({ success: true, severity: "medium" });
+          if (emotionEngine) toolOutcomeResults.push({ success: true, severity: toolSeverity(tc.toolName) });
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           logError("tool_failure", err, { toolName: tc.toolName, sessionId: options?.sessionId });
@@ -1125,7 +1136,7 @@ export async function executeConversation(
             toolName: tc.toolName,
             result: { error: errorMsg },
           });
-          if (emotionEngine) toolOutcomeResults.push({ success: false, severity: "medium" });
+          if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
         }
         continue;
       }
@@ -1173,7 +1184,7 @@ export async function executeConversation(
           result: mcpResult,
           ...(mcpMedia.length > 0 ? { media: mcpMedia } : {}),
         });
-        if (emotionEngine) toolOutcomeResults.push({ success: true, severity: "medium" });
+        if (emotionEngine) toolOutcomeResults.push({ success: true, severity: toolSeverity(tc.toolName) });
       } catch (err) {
         let errorMsg = err instanceof Error ? err.message : String(err);
         // Nudge LLM toward native fallback on rate-limit errors
@@ -1190,7 +1201,7 @@ export async function executeConversation(
           toolName: tc.toolName,
           result: { error: errorMsg },
         });
-        if (emotionEngine) toolOutcomeResults.push({ success: false, severity: "medium" });
+        if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
       }
     }
 

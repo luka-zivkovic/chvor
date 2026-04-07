@@ -1,20 +1,12 @@
 import { create } from "zustand";
 import type { EmotionSnapshot, EmotionState, VADState } from "@chvor/shared";
-import { upgradeLegacyEmotion, PERSONALITY_GRAVITIES } from "@chvor/shared";
+import { upgradeLegacyEmotion, PERSONALITY_GRAVITIES, vadDistance, SIGNIFICANT_SHIFT_THRESHOLD } from "@chvor/shared";
 import { api } from "../lib/api";
 
-const SIGNIFICANT_SHIFT_THRESHOLD = 0.4;
 const SIGNIFICANT_SHIFT_DURATION = 1200; // ms
 const MAX_SESSION_HISTORY = 200;
 
 let shiftTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
-function vadDistance(a: VADState, b: VADState): number {
-  const dv = a.valence - b.valence;
-  const da = a.arousal - b.arousal;
-  const dd = a.dominance - b.dominance;
-  return Math.sqrt(dv * dv + da * da + dd * dd);
-}
 
 interface EmotionStoreState {
   currentSnapshot: EmotionSnapshot | null;
