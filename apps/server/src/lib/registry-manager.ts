@@ -3,6 +3,7 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { parseAllDocuments } from "yaml";
 import type { RegistryLock, InstalledRegistryEntry, RegistryEntryKind, RegistryEntry, Skill, Tool, Capability, TemplateManifest } from "@chvor/shared";
+import { VALID_COMMUNICATION_STYLES } from "@chvor/shared";
 import { fetchRegistryIndex, fetchEntryContent, computeSha256, getDefaultRegistryUrl } from "./registry-client.ts";
 import { reloadAll } from "./capability-loader.ts";
 import { getPersona, updatePersona, getInstructionOverride, setInstructionOverride, clearInstructionOverride } from "../db/config-store.ts";
@@ -149,10 +150,9 @@ export function validateManifest(entryId: string, raw: unknown): TemplateManifes
       }
     }
     // Validate communicationStyle if present
-    const VALID_COMM_STYLES = ["concise", "balanced", "detailed"];
     if (persona.communicationStyle !== undefined) {
-      if (typeof persona.communicationStyle !== "string" || !VALID_COMM_STYLES.includes(persona.communicationStyle)) {
-        throw new Error(`Invalid template manifest for "${entryId}": "persona.communicationStyle" must be one of: ${VALID_COMM_STYLES.join(", ")}`);
+      if (typeof persona.communicationStyle !== "string" || !(VALID_COMMUNICATION_STYLES as readonly string[]).includes(persona.communicationStyle)) {
+        throw new Error(`Invalid template manifest for "${entryId}": "persona.communicationStyle" must be one of: ${VALID_COMMUNICATION_STYLES.join(", ")}`);
       }
     }
     // Validate exampleResponses if present

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { CommunicationStyle, ExampleResponse } from "@chvor/shared";
+import { PERSONA_LIMITS } from "@chvor/shared";
 import { PERSONALITY_PRESETS, TAG_CONFIG } from "@/lib/personality-presets";
 
 const CORE_IDENTITY = `You are Chvor, a personal AI assistant. You operate transparently — your reasoning, tool usage, and decisions are visible on the user's Brain Canvas in real-time. Never attempt to hide your actions or reasoning from the user.`;
@@ -77,6 +78,9 @@ export function PersonaPanel() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [pendingPresetId, setPendingPresetId] = useState<string | undefined>(
+    undefined
+  );
 
   useEffect(() => {
     fetchPersona();
@@ -90,6 +94,7 @@ export function PersonaPanel() {
       setBoundaries(persona.boundaries ?? "");
       setCommunicationStyle(persona.communicationStyle ?? "");
       setExampleResponses(persona.exampleResponses ?? []);
+      setPendingPresetId(undefined);
       setDirty(false);
     }
   }, [persona]);
@@ -103,9 +108,13 @@ export function PersonaPanel() {
       boundaries,
       communicationStyle: communicationStyle || undefined,
       exampleResponses,
+      ...(pendingPresetId !== undefined && { personalityPresetId: pendingPresetId }),
     });
     const { error: saveError } = usePersonaStore.getState();
-    if (!saveError) setDirty(false);
+    if (!saveError) {
+      setDirty(false);
+      setPendingPresetId(undefined);
+    }
     setSaving(false);
   };
 
@@ -155,6 +164,7 @@ export function PersonaPanel() {
                 setDirty(true);
               }}
               rows={5}
+              maxLength={PERSONA_LIMITS.profile}
               placeholder="e.g., You are a senior developer who gives direct, practical advice..."
             />
           </div>
@@ -173,6 +183,7 @@ export function PersonaPanel() {
                 setTone(e.target.value);
                 setDirty(true);
               }}
+              maxLength={PERSONA_LIMITS.tone}
               placeholder="e.g., direct, witty, warm, professional"
             />
           </div>
@@ -223,6 +234,7 @@ export function PersonaPanel() {
                 setDirty(true);
               }}
               rows={2}
+              maxLength={PERSONA_LIMITS.boundaries}
               placeholder="e.g., Don't use emojis. Never apologize unnecessarily."
             />
           </div>
@@ -303,6 +315,7 @@ export function PersonaPanel() {
                 setDirty(true);
               }}
               rows={3}
+              maxLength={PERSONA_LIMITS.directives}
               placeholder="e.g., Always respond in English. Keep responses under 200 words."
             />
           </div>
@@ -337,6 +350,7 @@ export function PersonaPanel() {
                     setCommunicationStyle(preset.communicationStyle);
                     setBoundaries(preset.boundaries);
                     setExampleResponses(preset.exampleResponses);
+                    setPendingPresetId(preset.id);
                     setDirty(true);
                   }}
                   className="rounded-lg border border-border/50 px-3 py-2.5 text-left transition-all hover:border-border hover:bg-muted/40"

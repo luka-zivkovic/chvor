@@ -134,27 +134,32 @@ export function OnboardingExperience({ onComplete }: Props) {
     setLaunching(true);
     try {
       // If a template was selected, install it first (skipPersona: onboarding applies merged persona below)
+      let templateInstalled = false;
       if (selectedTemplate) {
         try {
           await api.registry.install(selectedTemplate.id, "template", { skipPersona: true });
+          templateInstalled = true;
         } catch {
           toast.error("Template installation failed — launching without it");
         }
       }
 
+      // Only use template persona data if the template actually installed
+      const tPersona = templateInstalled ? selectedTemplate?.manifest.persona : undefined;
+
       await updatePersona({
-        profile: selectedTemplate?.manifest.persona?.profile ?? resolvedProfile,
+        profile: tPersona?.profile ?? resolvedProfile,
         onboarded: true,
         name: name.trim() || undefined,
         timezone,
         language,
-        aiName: (selectedTemplate?.manifest.persona?.aiName ?? aiName.trim()) || undefined,
+        aiName: (tPersona?.aiName ?? aiName.trim()) || undefined,
         userNickname: userNickname.trim() || undefined,
-        personalityPresetId: selectedTemplate ? undefined : selectedPreset ?? undefined,
-        tone: selectedTemplate?.manifest.persona?.tone ?? selectedPresetObj?.tone ?? undefined,
-        boundaries: selectedTemplate?.manifest.persona?.boundaries ?? selectedPresetObj?.boundaries ?? undefined,
-        communicationStyle: selectedTemplate?.manifest.persona?.communicationStyle ?? selectedPresetObj?.communicationStyle ?? undefined,
-        exampleResponses: selectedTemplate?.manifest.persona?.exampleResponses ?? selectedPresetObj?.exampleResponses ?? undefined,
+        personalityPresetId: tPersona ? undefined : selectedPreset ?? undefined,
+        tone: tPersona?.tone ?? selectedPresetObj?.tone ?? undefined,
+        boundaries: tPersona?.boundaries ?? selectedPresetObj?.boundaries ?? undefined,
+        communicationStyle: tPersona?.communicationStyle ?? selectedPresetObj?.communicationStyle ?? undefined,
+        exampleResponses: tPersona?.exampleResponses ?? selectedPresetObj?.exampleResponses ?? undefined,
       });
       // Wait for launch burst animation to complete
       launchTimerRef.current = setTimeout(() => onComplete(), 800);
