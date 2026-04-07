@@ -19,6 +19,9 @@ const SAFE_ENTRY_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
  * In-process mutex for lockfile read-modify-write operations.
  * Prevents concurrent operations (auto-updater, user install/uninstall)
  * from clobbering each other's lockfile writes.
+ *
+ * WARNING: This mutex is NOT reentrant. Never call `withLockMutex` from
+ * inside a callback already held by `withLockMutex` — it will deadlock.
  */
 let lockMutex: Promise<void> = Promise.resolve();
 
@@ -355,8 +358,9 @@ async function installTemplate(
     }
   }
 
-  // Update lockfile with template entry and provisioning metadata
-  lock.installed[entryId] = {
+  // Re-read lock after included-entry installs may have mutated it
+  const freshLock = readLock();
+  freshLock.installed[entryId] = {
     kind: "template",
     version: entry.version,
     installedAt: new Date().toISOString(),
@@ -369,8 +373,8 @@ async function installTemplate(
     previousPersona,
     previousSkillOverrides,
   };
-  lock.lastChecked = new Date().toISOString();
-  writeLock(lock);
+  freshLock.lastChecked = new Date().toISOString();
+  writeLock(freshLock);
 
   // Reload capabilities so any new skills/tools are available
   reloadAll();
@@ -746,12 +750,22 @@ export async function updateEntry(
       await installEntry(entryId, "template");
       return { updated: true, conflict: false };
     } catch (err) {
-      // Reinstall failed after uninstall — attempt to write the validated content
-      // directly so the template file at least exists on disk
+      // Reinstall failed after uninstall — write validated content + lockfile entry
+      // so the template is recoverable rather than an orphaned ghost file
       try {
         const dir = getDirForKind("template");
         mkdirSync(dir, { recursive: true });
         writeFileSync(join(dir, `${entryId}.yaml`), content, "utf8");
+        const recoveryLock = readLock();
+        recoveryLock.installed[entryId] = {
+          kind: "template",
+          version: entry.version,
+          installedAt: info.installedAt,
+          sha256,
+          source: "registry",
+          userModified: false,
+        };
+        writeLock(recoveryLock);
       } catch { /* best-effort recovery */ }
       throw new Error(`Template update failed for "${entryId}": ${err instanceof Error ? err.message : String(err)}`);
     }

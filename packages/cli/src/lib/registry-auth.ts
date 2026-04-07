@@ -19,6 +19,8 @@ function readAuth(): StoredAuth | null {
   if (!existsSync(authPath)) return null;
   try {
     const data = JSON.parse(readFileSync(authPath, "utf8")) as StoredAuth;
+    // Reject incomplete auth objects (e.g. "{}" left by failed logout)
+    if (!data.token || !data.registryUrl) return null;
     // Check expiry
     if (new Date(data.expiresAt) < new Date()) return null;
     return data;
