@@ -75,9 +75,10 @@ export function A2UIColumn({
 }) {
   const align = ALIGN_MAP[spec.align ?? "start"] ?? "";
   const gap = spec.gap ?? 8;
+  const children = spec.children?.explicitList ?? [];
   return (
     <div className={cn("flex flex-col", align)} style={{ gap }}>
-      {spec.children.explicitList.map((childId) => (
+      {children.map((childId) => (
         <Child key={childId} nodeId={childId} surface={surface} renderNode={renderNode} />
       ))}
     </div>
@@ -97,9 +98,10 @@ export function A2UIRow({
 }) {
   const align = ALIGN_MAP[spec.align ?? "start"] ?? "";
   const gap = spec.gap ?? 8;
+  const children = spec.children?.explicitList ?? [];
   return (
     <div className={cn("flex flex-row flex-wrap", align)} style={{ gap }}>
-      {spec.children.explicitList.map((childId) => (
+      {children.map((childId) => (
         <Child key={childId} nodeId={childId} surface={surface} renderNode={renderNode} />
       ))}
     </div>
@@ -185,9 +187,11 @@ export function A2UITable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
+          {rows.map((row, i) => {
+            const rowKey = spec.columns.map((c) => String(row[c.key] ?? "")).join("|") || String(i);
+            return (
             <tr
-              key={i}
+              key={rowKey}
               className="border-b border-border last:border-0 hover:bg-muted transition-colors"
             >
               {spec.columns.map((col) => (
@@ -196,7 +200,8 @@ export function A2UITable({
                 </td>
               ))}
             </tr>
-          ))}
+          );
+          })}
         </tbody>
       </table>
     </div>
@@ -225,8 +230,8 @@ export function A2UIButton({
     <Button
       variant={variant}
       size="sm"
-      // TODO(v0.9): wire action callback to send event back to server
-      onClick={() => console.log("[a2ui] action:", spec.action)}
+      disabled
+      title="Actions are not yet supported"
     >
       {label}
     </Button>
@@ -244,19 +249,16 @@ export function A2UIForm({
   surface: A2UISurface;
   renderNode: (nodeId: string, surface: A2UISurface, visited?: Set<string>, depth?: number) => React.ReactNode;
 }) {
+  const children = spec.children?.explicitList ?? [];
   return (
     <form
       className="flex flex-col gap-3 rounded-lg border border-border p-4"
-      // TODO(v0.9): collect input values and send form data back to server
-      onSubmit={(e) => {
-        e.preventDefault();
-        console.log("[a2ui] form submit:", spec.submitAction);
-      }}
+      onSubmit={(e) => e.preventDefault()}
     >
-      {spec.children.explicitList.map((childId) => (
+      {children.map((childId) => (
         <Child key={childId} nodeId={childId} surface={surface} renderNode={renderNode} />
       ))}
-      <Button type="submit" size="sm" className="self-start mt-1">
+      <Button type="submit" size="sm" className="self-start mt-1" disabled title="Form submission is not yet supported">
         {spec.submitLabel ?? "Submit"}
       </Button>
     </form>
@@ -264,8 +266,6 @@ export function A2UIForm({
 }
 
 /* ─── Input ─── */
-// TODO(v0.9): make controlled — add onChange to capture values for form submission
-
 export function A2UIInput({
   spec,
 }: {
@@ -284,7 +284,6 @@ export function A2UIInput({
         id={inputId}
         type={spec.inputType ?? "text"}
         placeholder={spec.placeholder ?? ""}
-        data-bind={spec.bindTo}
         className="h-9 w-full rounded-md border border-border bg-input px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
     </div>
@@ -337,13 +336,14 @@ export function A2UIChart({
   const dataDesc = rawData.map((d) => `${d.label ?? "?"}: ${d.value ?? 0}`).join(", ");
 
   if (spec.chartType === "line") {
-    const contentWidth = rawData.length * 50;
+    const step = Math.max(30, Math.min(50, 600 / rawData.length));
+    const contentWidth = rawData.length * step;
     const width = padLeft + contentWidth + padRight;
     const height = padTop + chartHeight + padBottom;
 
     const points = rawData
       .map((d, i) => {
-        const x = padLeft + i * 50 + 25;
+        const x = padLeft + i * step + step / 2;
         const y = padTop + chartHeight - (values[i] / maxVal) * chartHeight;
         return `${x},${y}`;
       })
@@ -354,8 +354,8 @@ export function A2UIChart({
         {spec.title && (
           <p className="text-sm font-medium text-foreground">{spec.title}</p>
         )}
-        <div className="rounded-lg border border-border p-3">
-          <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label={`${chartTitle}: ${dataDesc}`}>
+        <div className="overflow-x-auto rounded-lg border border-border p-3">
+          <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ minWidth: width }} role="img" aria-label={`${chartTitle}: ${dataDesc}`}>
             <title>{chartTitle}</title>
             {/* Grid lines */}
             {ticks.map((tick, i) => {
@@ -393,7 +393,7 @@ export function A2UIChart({
             />
             {/* Data points + labels */}
             {rawData.map((d, i) => {
-              const x = padLeft + i * 50 + 25;
+              const x = padLeft + i * step + step / 2;
               const y = padTop + chartHeight - (values[i] / maxVal) * chartHeight;
               return (
                 <g key={i}>
@@ -417,7 +417,7 @@ export function A2UIChart({
     );
   }
 
-  // Bar chart (default, also fallback for "pie")
+  // Bar chart (default, fallback for unsupported chart types)
   const barWidth = Math.min(32, Math.floor(240 / rawData.length));
   const barGap = 6;
   const contentWidth = rawData.length * (barWidth + barGap);

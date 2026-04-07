@@ -97,11 +97,19 @@ export function A2UIPreviewModal() {
       dragging.current = false;
       resizing.current = false;
     };
+    const onResize = () => {
+      setPos((p) => ({
+        x: Math.max(0, Math.min(p.x, window.innerWidth - 100)),
+        y: Math.max(0, Math.min(p.y, window.innerHeight - 60)),
+      }));
+    };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("resize", onResize);
     };
   }, []);
 

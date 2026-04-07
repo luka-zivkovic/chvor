@@ -14,12 +14,15 @@ describe("isSafeImageSrc", () => {
     expect(isSafeImageSrc("data:image/png;base64,abc123")).toBe(true);
   });
 
-  it("allows absolute paths", () => {
-    expect(isSafeImageSrc("/images/logo.png")).toBe(true);
+  // Relative and absolute paths are intentionally blocked — they could hit
+  // internal API routes (e.g. /api/admin/...) via credentialed GET requests.
+  it("blocks absolute paths (could reach internal API routes)", () => {
+    expect(isSafeImageSrc("/images/logo.png")).toBe(false);
+    expect(isSafeImageSrc("/api/internal")).toBe(false);
   });
 
-  it("allows relative paths", () => {
-    expect(isSafeImageSrc("./assets/icon.svg")).toBe(true);
+  it("blocks relative paths", () => {
+    expect(isSafeImageSrc("./assets/icon.svg")).toBe(false);
   });
 
   it("blocks javascript: URLs", () => {

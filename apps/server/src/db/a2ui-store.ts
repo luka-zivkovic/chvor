@@ -83,9 +83,15 @@ function getA2UIDb(): Database.Database {
 export function listSurfaces(): A2UISurfaceListItem[] {
   const database = getA2UIDb();
   const rows = database
-    .prepare("SELECT * FROM surfaces ORDER BY updated_at DESC")
-    .all() as SurfaceRow[];
-  return rows.map(rowToListItem);
+    .prepare("SELECT id, title, rendering, created_at, updated_at FROM surfaces ORDER BY updated_at DESC")
+    .all() as Pick<SurfaceRow, "id" | "title" | "rendering" | "created_at" | "updated_at">[];
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    rendering: row.rendering === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
 }
 
 export function getSurface(id: string): A2UISurface | null {
@@ -104,15 +110,19 @@ export function surfaceExists(id: string): boolean {
   return row !== undefined;
 }
 
+/**
+ * Upsert a surface. Returns true if a new row was inserted, false if updated.
+ */
 export function upsertSurface(surface: {
   surfaceId: string;
   title?: string;
   root?: string | null;
   components?: Record<string, A2UIComponentEntry>;
   rendering?: boolean;
-}): void {
+}): boolean {
   const database = getA2UIDb();
   const now = new Date().toISOString();
+  let inserted = false;
 
   const upsert = database.transaction(() => {
     const existing = database
@@ -120,9 +130,16 @@ export function upsertSurface(surface: {
       .get(surface.surfaceId) as SurfaceRow | undefined;
 
     if (existing) {
+      let existingComponents: Record<string, A2UIComponentEntry> = {};
+      try {
+        existingComponents = JSON.parse(existing.components) as Record<string, A2UIComponentEntry>;
+      } catch {
+        console.error(`[a2ui-db] corrupt components JSON for "${surface.surfaceId}", resetting`);
+      }
+
       const mergedComponents = surface.components
-        ? { ...JSON.parse(existing.components), ...surface.components }
-        : JSON.parse(existing.components);
+        ? { ...existingComponents, ...surface.components }
+        : existingComponents;
 
       database.prepare(`
         UPDATE surfaces SET
@@ -141,6 +158,7 @@ export function upsertSurface(surface: {
         surface.surfaceId,
       );
     } else {
+      inserted = true;
       database.prepare(`
         INSERT INTO surfaces (id, title, root, components, bindings, rendering, created_at, updated_at)
         VALUES (?, ?, ?, ?, '{}', ?, ?, ?)
@@ -157,6 +175,7 @@ export function upsertSurface(surface: {
   });
 
   upsert();
+  return inserted;
 }
 
 export function updateBindings(id: string, bindings: Record<string, unknown>): void {
@@ -168,9 +187,19 @@ export function updateBindings(id: string, bindings: Record<string, unknown>): v
       .prepare("SELECT bindings FROM surfaces WHERE id = ?")
       .get(id) as { bindings: string } | undefined;
 
-    if (!existing) return;
+    if (!existing) {
+      console.error(`[a2ui-db] updateBindings: surface "${id}" not found — bindings dropped`);
+      return;
+    }
 
-    const merged = { ...JSON.parse(existing.bindings), ...bindings };
+    let existingBindings: Record<string, unknown> = {};
+    try {
+      existingBindings = JSON.parse(existing.bindings) as Record<string, unknown>;
+    } catch {
+      console.error(`[a2ui-db] corrupt bindings JSON for "${id}", resetting`);
+    }
+
+    const merged = { ...existingBindings, ...bindings };
     database.prepare("UPDATE surfaces SET bindings = ?, updated_at = ? WHERE id = ?")
       .run(JSON.stringify(merged), now, id);
   });
@@ -185,9 +214,10 @@ export function updateSurfaceTitle(id: string, title: string): void {
     .run(title, now, id);
 }
 
-export function deleteSurface(id: string): void {
+export function deleteSurface(id: string): boolean {
   const database = getA2UIDb();
-  database.prepare("DELETE FROM surfaces WHERE id = ?").run(id);
+  const result = database.prepare("DELETE FROM surfaces WHERE id = ?").run(id);
+  return result.changes > 0;
 }
 
 export function deleteAllSurfaces(): void {

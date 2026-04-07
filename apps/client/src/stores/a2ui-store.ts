@@ -21,6 +21,7 @@ interface A2UIState {
   handleSurfaceUpdate: (data: A2UISurfaceUpdate & { root?: string }) => void;
   handleDataUpdate: (data: A2UIDataModelUpdate) => void;
   handleDelete: (data: A2UIDeleteSurface) => void;
+  handleDeleteAll: () => void;
 
   setActiveSurface: (id: string | null) => void;
   resetAll: () => void;
@@ -81,12 +82,25 @@ export const useA2UIStore = create<A2UIState>((set, get) => ({
   },
 
   handleSurfaceUpdate: (data) => {
-    const { surfaces } = get();
+    const { surfaces, surfaceList, activeSurfaceId, activeSurface } = get();
     const existing = surfaces[data.surfaceId];
 
     const incoming = toComponentMap(data.components);
+
+    // Merge: spread existing first, then incoming on top — incoming keys move to end of insertion order
     const merged_raw = existing
-      ? { ...existing.components, ...incoming }
+      ? (() => {
+          const result: Record<string, A2UIComponentEntry> = {};
+          // Add existing keys that are NOT being updated (preserve order)
+          for (const k of Object.keys(existing.components)) {
+            if (!(k in incoming)) result[k] = existing.components[k];
+          }
+          // Add all incoming keys at the end (most recent)
+          for (const k of Object.keys(incoming)) {
+            result[k] = incoming[k];
+          }
+          return result;
+        })()
       : incoming;
 
     const effectiveRoot = data.root ?? existing?.root ?? null;
@@ -94,7 +108,7 @@ export const useA2UIStore = create<A2UIState>((set, get) => ({
     const keys = Object.keys(merged_raw);
     let newComponents = merged_raw;
     if (keys.length > MAX_COMPONENTS_PER_SURFACE) {
-      // Prune oldest components but always preserve the root
+      // Prune oldest components (front of insertion order) but always preserve the root
       const withoutRoot = effectiveRoot ? keys.filter((k) => k !== effectiveRoot) : keys;
       const kept = withoutRoot.slice(-(MAX_COMPONENTS_PER_SURFACE - (effectiveRoot ? 1 : 0)));
       if (effectiveRoot) kept.unshift(effectiveRoot);
@@ -103,16 +117,19 @@ export const useA2UIStore = create<A2UIState>((set, get) => ({
 
     const rootValid = effectiveRoot ? effectiveRoot in newComponents : false;
 
+    const effectiveTitle = data.title ?? existing?.title ?? data.surfaceId;
+
     const merged: A2UISurface = existing
       ? {
           ...existing,
+          title: data.title ?? existing.title,
           components: newComponents,
           rendering: rootValid,
           ...(data.root ? { root: data.root } : {}),
         }
       : {
           surfaceId: data.surfaceId,
-          title: data.surfaceId,
+          title: effectiveTitle,
           root: data.root ?? null,
           components: newComponents,
           bindings: {},
@@ -122,30 +139,28 @@ export const useA2UIStore = create<A2UIState>((set, get) => ({
     const newSurfaces = { ...surfaces, [data.surfaceId]: merged };
 
     // Update sidebar list if this surface isn't already there
-    const { surfaceList } = get();
     const exists = surfaceList.some((s) => s.id === data.surfaceId);
     const newList = exists
       ? surfaceList.map((s) =>
-          s.id === data.surfaceId ? { ...s, updatedAt: new Date().toISOString() } : s
+          s.id === data.surfaceId ? { ...s, title: effectiveTitle, updatedAt: new Date().toISOString() } : s
         )
       : [
-          { id: data.surfaceId, title: data.surfaceId, rendering: rootValid, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+          { id: data.surfaceId, title: effectiveTitle, rendering: rootValid, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
           ...surfaceList,
         ];
 
-    // Auto-select if this is the active surface
-    const activeSurfaceId = get().activeSurfaceId;
-    const activeSurface = activeSurfaceId === data.surfaceId ? merged : get().activeSurface;
+    // Auto-select if this is the active surface — compute before set()
+    const newActiveSurface = activeSurfaceId === data.surfaceId ? merged : activeSurface;
 
     set({
       surfaces: newSurfaces,
       surfaceList: newList,
-      activeSurface,
+      activeSurface: newActiveSurface,
     });
   },
 
   handleDataUpdate: (data) => {
-    const { surfaces } = get();
+    const { surfaces, activeSurfaceId, activeSurface } = get();
     const existing = surfaces[data.surfaceId];
     if (!existing) return;
 
@@ -154,18 +169,16 @@ export const useA2UIStore = create<A2UIState>((set, get) => ({
       bindings: { ...existing.bindings, ...data.bindings },
     };
 
+    // Compute derived values before set() — avoid get() inside set()
+    const newActiveSurface = activeSurfaceId === data.surfaceId ? updated : activeSurface;
+
     set({
       surfaces: { ...surfaces, [data.surfaceId]: updated },
-      activeSurface: get().activeSurfaceId === data.surfaceId ? updated : get().activeSurface,
+      activeSurface: newActiveSurface,
     });
   },
 
   handleDelete: (data) => {
-    if (data.surfaceId === "__all__") {
-      set({ surfaces: {}, surfaceList: [], activeSurfaceId: null, activeSurface: null });
-      return;
-    }
-
     const { surfaces, activeSurfaceId, surfaceList } = get();
     const { [data.surfaceId]: _, ...rest } = surfaces;
     const newList = surfaceList.filter((s) => s.id !== data.surfaceId);
@@ -177,6 +190,10 @@ export const useA2UIStore = create<A2UIState>((set, get) => ({
       activeSurfaceId: newActive,
       activeSurface: newActive && rest[newActive] ? rest[newActive] : null,
     });
+  },
+
+  handleDeleteAll: () => {
+    set({ surfaces: {}, surfaceList: [], activeSurfaceId: null, activeSurface: null });
   },
 
   setActiveSurface: (id) => {

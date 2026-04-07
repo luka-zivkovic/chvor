@@ -623,7 +623,7 @@ export const api = {
 
   a2ui: {
     listSurfaces: () => request<import("@chvor/shared").A2UISurfaceListItem[]>("/a2ui/surfaces"),
-    getSurface: (id: string) => request<import("@chvor/shared").A2UISurface>(`/a2ui/surfaces/${id}`),
+    getSurface: (id: string) => request<import("@chvor/shared").A2UISurface>(`/a2ui/surfaces/${encodeURIComponent(id)}`),
     deleteSurface: (id: string) =>
       request<{ id: string; deleted: boolean }>(`/a2ui/surfaces/${encodeURIComponent(id)}`, { method: "DELETE" }),
     deleteAll: () =>
