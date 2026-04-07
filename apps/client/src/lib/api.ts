@@ -225,10 +225,10 @@ export const api = {
       request<RegistryEntry & { installed: boolean; installedVersion: string | null; userModified: boolean }>(
         `/registry/skill/${encodeURIComponent(id)}`,
       ),
-    install: (id: string, kind?: string) =>
+    install: (id: string, kind?: string, options?: { skipPersona?: boolean }) =>
       request<{ entry: Skill | Tool; skill: Skill | Tool; dependencies: string[] }>("/registry/install", {
         method: "POST",
-        body: JSON.stringify({ id, kind }),
+        body: JSON.stringify({ id, kind, ...options }),
       }),
     uninstall: (id: string) =>
       request<{ id: string; uninstalled: boolean }>(`/registry/entry/${encodeURIComponent(id)}`, {

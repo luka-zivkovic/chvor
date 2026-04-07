@@ -7,6 +7,8 @@ import { fetchRegistryIndex, fetchEntryContent, computeSha256, getDefaultRegistr
 import { reloadAll } from "./capability-loader.ts";
 import { getPersona, updatePersona, getInstructionOverride, setInstructionOverride, clearInstructionOverride } from "../db/config-store.ts";
 import { createSchedule, deleteSchedule } from "../db/schedule-store.ts";
+import cronParser from "cron-parser";
+const parseExpression = cronParser.parseExpression ?? cronParser;
 import { getOrCreateDefault, saveWorkspace, deleteWorkspace } from "../db/workspace-store.ts";
 
 const USER_SKILLS_DIR = process.env.CHVOR_SKILLS_DIR || join(homedir(), ".chvor", "skills");
@@ -186,6 +188,11 @@ export function validateManifest(entryId: string, raw: unknown): TemplateManifes
       if (typeof s.cronExpression !== "string" || !s.cronExpression.trim()) {
         throw new Error(`Invalid template manifest for "${entryId}": schedules[${i}].cronExpression must be a non-empty string`);
       }
+      try {
+        parseExpression(s.cronExpression as string);
+      } catch {
+        throw new Error(`Invalid template manifest for "${entryId}": schedules[${i}].cronExpression "${s.cronExpression}" is not a valid cron expression`);
+      }
       if (typeof s.prompt !== "string" || !s.prompt.trim()) {
         throw new Error(`Invalid template manifest for "${entryId}": schedules[${i}].prompt must be a non-empty string`);
       }
@@ -234,6 +241,11 @@ export function validateManifest(entryId: string, raw: unknown): TemplateManifes
   return raw as TemplateManifest;
 }
 
+export interface InstallOptions {
+  /** Skip applying persona during template install (caller will handle it) */
+  skipPersona?: boolean;
+}
+
 /**
  * Install a template from the registry.
  * Downloads the template YAML, installs included skills/tools, and provisions
@@ -249,6 +261,7 @@ async function installTemplate(
   registryUrl: string,
   lock: RegistryLock,
   installing: Set<string>,
+  options?: InstallOptions,
 ): Promise<{ installed: Capability; dependencies: string[]; failedDependencies: string[] }> {
   // Download template YAML and verify integrity
   const content = await fetchEntryContent(registryUrl, "template", entryId);
@@ -271,11 +284,21 @@ async function installTemplate(
   const filePath = join(dir, `${entryId}.yaml`);
   writeFileSync(filePath, content, "utf8");
 
-  // Snapshot current persona before any changes (for undo on uninstall)
+  // Snapshot only template-modifiable persona fields before changes (for undo on uninstall)
+  // Avoids storing sensitive user data (name, timezone, etc.) in the lockfile
   let previousPersona: Record<string, unknown> | undefined;
   if (manifest.persona) {
     try {
-      previousPersona = getPersona() as unknown as Record<string, unknown>;
+      const current = getPersona();
+      previousPersona = {
+        profile: current.profile,
+        directives: current.directives,
+        aiName: current.aiName,
+        tone: current.tone,
+        boundaries: current.boundaries,
+        communicationStyle: current.communicationStyle,
+        exampleResponses: current.exampleResponses,
+      };
     } catch {
       // First run, no persona to snapshot
     }
@@ -302,7 +325,8 @@ async function installTemplate(
   }
 
   // Provision: apply persona (with backup stored in lockfile)
-  if (manifest.persona) {
+  // skipPersona: onboarding handles its own merged persona update after install
+  if (manifest.persona && !options?.skipPersona) {
     try {
       updatePersona(manifest.persona);
     } catch (err) {
@@ -412,6 +436,7 @@ export async function installEntry(
   entryId: string,
   kind?: RegistryEntryKind,
   installing = new Set<string>(),
+  options?: InstallOptions,
 ): Promise<{ installed: Capability; dependencies: string[]; failedDependencies: string[] }> {
   assertSafeEntryId(entryId);
   if (installing.has(entryId)) {
@@ -431,7 +456,7 @@ export async function installEntry(
 
   const resolvedKind = kind ?? entry.kind ?? "skill";
   if (resolvedKind === "template") {
-    return installTemplate(entryId, entry, registryUrl, lock, installing);
+    return installTemplate(entryId, entry, registryUrl, lock, installing, options);
   }
 
   // Guard: don't overwrite user-created skills/tools with registry entries

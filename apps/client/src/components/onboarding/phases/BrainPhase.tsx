@@ -76,7 +76,11 @@ export function BrainPhase({ direction, onBack, onNext }: Props) {
     }
   }
 
+  const [savingNext, setSavingNext] = useState(false);
+
   async function handleNext() {
+    if (savingNext) return;
+    setSavingNext(true);
     try {
       if (activeLLMProvider && selectedModel) {
         await api.llmConfig.set({ providerId: activeLLMProvider.id, model: selectedModel });
@@ -92,6 +96,8 @@ export function BrainPhase({ direction, onBack, onNext }: Props) {
       onNext();
     } catch {
       toast.error("Failed to save model configuration");
+    } finally {
+      setSavingNext(false);
     }
   }
 
@@ -277,7 +283,7 @@ export function BrainPhase({ direction, onBack, onNext }: Props) {
 
         <motion.div variants={staggerItem} className="flex justify-end gap-2 pt-2">
           <Button variant="outline" size="sm" onClick={onBack}>Back</Button>
-          <Button size="sm" onClick={handleNext} disabled={!hasLLM}>Next</Button>
+          <Button size="sm" onClick={handleNext} disabled={!hasLLM || savingNext}>Next</Button>
         </motion.div>
       </motion.div>
     </motion.div>

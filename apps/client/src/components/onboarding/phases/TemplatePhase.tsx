@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -8,31 +8,18 @@ import { staggerContainer, staggerItem, phaseVariants } from "../onboarding-vari
 
 interface Props {
   direction: number;
+  prefetchedTemplates?: RegistryEntryWithStatus[] | null;
+  prefetchedError?: string | null;
   onBack: () => void;
   onSkip: () => void;
   onSelectTemplate: (id: string, manifest: TemplateManifest) => void;
 }
 
-export function TemplatePhase({ direction, onBack, onSkip, onSelectTemplate }: Props) {
-  const [templates, setTemplates] = useState<RegistryEntryWithStatus[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export function TemplatePhase({ direction, prefetchedTemplates, prefetchedError, onBack, onSkip, onSelectTemplate }: Props) {
+  const templates = prefetchedTemplates ?? [];
+  const loading = prefetchedTemplates === null && !prefetchedError;
+  const [error, setError] = useState<string | null>(prefetchedError ?? null);
   const [loadingManifest, setLoadingManifest] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const entries = await api.registry.search({ kind: "template" });
-        if (!cancelled) setTemplates(entries);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
 
   async function handleSelect(entry: RegistryEntryWithStatus) {
     setError(null);

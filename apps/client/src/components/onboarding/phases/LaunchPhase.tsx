@@ -6,11 +6,12 @@ interface Props {
   direction: number;
   aiName: string;
   userName: string;
+  launching?: boolean;
   onBack: () => void;
   onLaunch: () => void;
 }
 
-export function LaunchPhase({ direction, aiName, userName, onBack, onLaunch }: Props) {
+export function LaunchPhase({ direction, aiName, userName, launching, onBack, onLaunch }: Props) {
   return (
     <motion.div
       key="launch"
@@ -43,13 +44,14 @@ export function LaunchPhase({ direction, aiName, userName, onBack, onLaunch }: P
           You can also set up a password in Settings &gt; Security.
         </motion.p>
         <motion.div variants={staggerItem} className="flex gap-3 pt-4">
-          <Button variant="outline" size="sm" onClick={onBack}>Back</Button>
+          <Button variant="outline" size="sm" onClick={onBack} disabled={launching}>Back</Button>
           <Button
             size="sm"
             onClick={onLaunch}
+            disabled={launching}
             className="px-8 relative overflow-hidden"
           >
-            <span className="relative z-10">Start</span>
+            <span className="relative z-10">{launching ? "Launching..." : "Start"}</span>
           </Button>
         </motion.div>
       </motion.div>
