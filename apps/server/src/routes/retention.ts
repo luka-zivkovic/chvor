@@ -8,7 +8,7 @@ retention.get("/", (c) => {
   try {
     return c.json({ data: getRetentionConfig() });
   } catch (err) {
-    return c.json({ error: String(err) }, 500);
+    return c.json({ error: err instanceof Error ? err.message : "Internal error" }, 500);
   }
 });
 
@@ -23,7 +23,7 @@ retention.patch("/", async (c) => {
     const updated = updateRetentionConfig(body);
     return c.json({ data: updated });
   } catch (err) {
-    return c.json({ error: String(err) }, 500);
+    return c.json({ error: err instanceof Error ? err.message : "Internal error" }, 500);
   }
 });
 

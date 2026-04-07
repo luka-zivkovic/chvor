@@ -4,12 +4,12 @@ import { extractAndStoreMemories } from "./memory-extractor.ts";
 import { resetSession } from "./session-reset.ts";
 import { clearSecrets } from "./sensitive-filter.ts";
 import { pruneOldSnapshots } from "../db/emotion-store.ts";
+import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
+import { getConfig, setConfig } from "../db/config-store.ts";
 import type { ChatMessage } from "@chvor/shared";
 
 const ARCHIVE_WINDOW = 20; // messages per extraction call
 const MAX_WINDOWS = 5; // max extraction calls per session
-
-let cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
 export async function runRetentionCleanup(): Promise<{ archived: number; deleted: number }> {
   const config = getRetentionConfig();
@@ -75,20 +75,17 @@ export async function runRetentionCleanup(): Promise<{ archived: number; deleted
 const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 
 export function startPeriodicCleanup(): void {
-  if (cleanupTimer) return;
-  cleanupTimer = setInterval(() => {
-    runRetentionCleanup().catch((err) =>
-      console.error("[retention] periodic cleanup failed:", err)
-    );
-  }, CLEANUP_INTERVAL);
-  cleanupTimer.unref();
+  startPeriodicJob({
+    id: "retention-cleanup",
+    intervalMs: CLEANUP_INTERVAL,
+    run: async () => {
+      await runRetentionCleanup();
+    },
+  });
 }
 
 export function stopPeriodicCleanup(): void {
-  if (cleanupTimer) {
-    clearInterval(cleanupTimer);
-    cleanupTimer = null;
-  }
+  stopPeriodicJob("retention-cleanup");
 }
 
 // ── Daily session reset ──────────────────────────────────────
@@ -100,11 +97,20 @@ async function runDailyResetCheck(): Promise<void> {
   const resetHour = config.defaultPolicy.dailyResetHour;
   if (resetHour === null) return;
 
-  const currentHour = new Date().getHours();
+  const now = new Date();
+  const currentHour = now.getHours();
   if (currentHour !== resetHour) return;
 
+  // Prevent double-reset: check if we already ran today
+  const today = now.toISOString().slice(0, 10); // YYYY-MM-DD
+  const lastResetDate = getConfig("session.lastDailyResetDate") ?? "";
+  if (lastResetDate === today) return;
+
   const sessionIds = getActiveSessionIds();
-  if (sessionIds.length === 0) return;
+  if (sessionIds.length === 0) {
+    setConfig("session.lastDailyResetDate", today);
+    return;
+  }
 
   let resetCount = 0;
   for (const id of sessionIds) {
@@ -115,6 +121,9 @@ async function runDailyResetCheck(): Promise<void> {
       console.error(`[daily-reset] failed for session ${id}:`, (err as Error).message);
     }
   }
+
+  setConfig("session.lastDailyResetDate", today);
+
   if (resetCount > 0) {
     console.log(`[daily-reset] reset ${resetCount} session(s) at hour ${resetHour}`);
   }

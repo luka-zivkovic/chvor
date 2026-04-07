@@ -68,9 +68,11 @@ backup.post("/restore", async (c) => {
     const body = await c.req.parseBody();
     const file = body["file"];
     if (!file || !(file instanceof File)) {
+      restoreInProgress = false;
       return c.json({ error: "Missing backup file" }, 400);
     }
     if (file.size > MAX_RESTORE_SIZE) {
+      restoreInProgress = false;
       return c.json({ error: `Backup file too large (max ${MAX_RESTORE_SIZE / 1024 / 1024}MB)` }, 413);
     }
 
@@ -78,18 +80,18 @@ backup.post("/restore", async (c) => {
     await performRestore(buffer);
 
     // Trigger graceful shutdown (uses existing SIGTERM handlers in index.ts)
+    // Don't reset restoreInProgress — the process is about to die
     setTimeout(() => process.kill(process.pid, "SIGTERM"), 500);
 
     return c.json({
       data: { success: true, message: "Restore complete. Server restarting..." },
     });
   } catch (err) {
+    restoreInProgress = false;
     return c.json(
       { error: err instanceof Error ? err.message : "Restore failed" },
       500
     );
-  } finally {
-    restoreInProgress = false;
   }
 });
 

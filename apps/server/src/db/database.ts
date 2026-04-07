@@ -704,6 +704,15 @@ export function getDb(): Database.Database {
     console.log("[db] migration v17 applied: daemon_tasks retry_count column");
   }
 
+  if (currentVersion < 18) {
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT OR IGNORE INTO system_jobs (job_id, interval_ms, next_run_at, status) VALUES (?, ?, ?, 'idle')"
+    ).run("retention-cleanup", 24 * 60 * 60 * 1000, now);
+    db.pragma("user_version = 18");
+    console.log("[db] migration v18 applied: retention-cleanup job");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }

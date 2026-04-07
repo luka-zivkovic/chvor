@@ -22,11 +22,17 @@ export function getBackupDir(): string {
 // ── Config ───────────────────────────────────────────────────────
 
 export function getBackupConfig(): BackupConfig {
+  const parseIntSafe = (raw: string | null, fallback: number): number => {
+    if (raw === null) return fallback;
+    const n = parseInt(raw, 10);
+    return Number.isNaN(n) ? fallback : n;
+  };
+
   return {
     enabled: (getConfig("backup.enabled") ?? "false") === "true",
-    intervalHours: parseInt(getConfig("backup.intervalHours") ?? "24", 10) || 24,
-    maxCount: parseInt(getConfig("backup.maxCount") ?? "10", 10) || 10,
-    maxAgeDays: parseInt(getConfig("backup.maxAgeDays") ?? "30", 10) || 30,
+    intervalHours: parseIntSafe(getConfig("backup.intervalHours"), 24),
+    maxCount: parseIntSafe(getConfig("backup.maxCount"), 10),
+    maxAgeDays: parseIntSafe(getConfig("backup.maxAgeDays"), 30),
     directory: getConfig("backup.directory") ?? "",
     lastRunAt: getConfig("backup.lastRunAt") || null,
     lastError: getConfig("backup.lastError") || null,
@@ -34,23 +40,34 @@ export function getBackupConfig(): BackupConfig {
 }
 
 export function updateBackupConfig(updates: UpdateBackupConfigRequest): BackupConfig {
-  if (updates.enabled !== undefined) setConfig("backup.enabled", String(updates.enabled));
+  if (updates.enabled !== undefined) {
+    if (typeof updates.enabled !== "boolean") throw new Error("enabled must be a boolean");
+    setConfig("backup.enabled", String(updates.enabled));
+  }
   if (updates.intervalHours !== undefined) {
+    if (typeof updates.intervalHours !== "number" || Number.isNaN(updates.intervalHours)) {
+      throw new Error("intervalHours must be a number");
+    }
     setConfig("backup.intervalHours", String(Math.max(1, Math.min(720, Math.floor(updates.intervalHours)))));
   }
   if (updates.maxCount !== undefined) {
+    if (typeof updates.maxCount !== "number" || Number.isNaN(updates.maxCount)) {
+      throw new Error("maxCount must be a number");
+    }
     setConfig("backup.maxCount", String(Math.max(1, Math.floor(updates.maxCount))));
   }
   if (updates.maxAgeDays !== undefined) {
+    if (typeof updates.maxAgeDays !== "number" || Number.isNaN(updates.maxAgeDays)) {
+      throw new Error("maxAgeDays must be a number");
+    }
     setConfig("backup.maxAgeDays", String(Math.max(0, Math.floor(updates.maxAgeDays))));
   }
   if (updates.directory !== undefined) {
+    if (typeof updates.directory !== "string") throw new Error("directory must be a string");
     const dir = updates.directory.trim();
     if (dir === "") {
-      // Empty string resets to default
       setConfig("backup.directory", "");
     } else {
-      // Must be an absolute path
       if (!isAbsolute(dir)) {
         throw new Error("Backup directory must be an absolute path");
       }
@@ -192,21 +209,33 @@ export function listBackups(): BackupInfo[] {
     .sort()
     .reverse();
 
+  const AdmZip = require("adm-zip");
+
   const results: BackupInfo[] = [];
   for (const f of files) {
     const filePath = join(backupDir, f);
     const stat = statSync(filePath);
 
-    // Extract ID from manifest if possible, otherwise use filename
-    // For listing, we use filename-derived info to avoid unzipping
-    const match = f.match(/chvor-backup-(.+)\.chvor-backup/);
-    const id = match ? match[1] : f;
+    // Read manifest from ZIP to get accurate source and createdAt
+    let source: "manual" | "scheduled" = "manual";
+    let createdAt = stat.mtime.toISOString();
+    try {
+      const zip = new AdmZip(filePath);
+      const manifestEntry = zip.getEntries().find((e: { entryName: string }) => e.entryName.endsWith("/manifest.json"));
+      if (manifestEntry) {
+        const manifest: BackupManifest = JSON.parse(manifestEntry.getData().toString("utf8"));
+        source = manifest.source;
+        createdAt = manifest.createdAt;
+      }
+    } catch {
+      // Fall back to filesystem metadata if manifest is unreadable
+    }
 
     results.push({
-      id: f, // use filename as ID for simplicity
+      id: f,
       filename: f,
-      createdAt: stat.mtime.toISOString(),
-      source: "manual", // Can't determine without reading manifest
+      createdAt,
+      source,
       sizeBytes: stat.size,
     });
   }
@@ -304,9 +333,28 @@ export async function performRestore(buffer: Buffer): Promise<void> {
   await new Promise((r) => setTimeout(r, 200));
 
   // Replace files (with path traversal protection)
-  const resolvedDataDir = resolve(DATA_DIR);
   const resolvedSkillsDir = resolve(SKILLS_DIR);
   const resolvedToolsDir = resolve(TOOLS_DIR);
+
+  // Determine if the backup contains skills/tools so we can clean stale files
+  const hasSkills = entries.some((e) => {
+    const parts = e.name.split("/").slice(1);
+    return parts.length > 0 && parts[0] === "skills";
+  });
+  const hasTools = entries.some((e) => {
+    const parts = e.name.split("/").slice(1);
+    return parts.length > 0 && parts[0] === "tools";
+  });
+
+  // Remove existing skills/tools before restoring to prevent stale files
+  if (hasSkills && existsSync(SKILLS_DIR)) {
+    rmSync(SKILLS_DIR, { recursive: true, force: true });
+    mkdirSync(SKILLS_DIR, { recursive: true });
+  }
+  if (hasTools && existsSync(TOOLS_DIR)) {
+    rmSync(TOOLS_DIR, { recursive: true, force: true });
+    mkdirSync(TOOLS_DIR, { recursive: true });
+  }
 
   for (const entry of entries) {
     // Strip the top-level directory prefix
