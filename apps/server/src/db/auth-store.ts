@@ -186,8 +186,7 @@ export async function verifyCredential(
     return { valid: false, reason: "invalid" };
   }
 
-  // Reset on success
-  setAuthConfig("auth.failed_attempts", "0");
+  // Clear lockout on success, but keep failed_attempts so escalation persists
   setAuthConfig("auth.lockout_until", "");
   return { valid: true };
 }

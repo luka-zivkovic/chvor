@@ -75,6 +75,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { timingSafeEqual } from "node:crypto";
 import { resolveApproval } from "./lib/native-tools.ts";
 import { rotateOldLogs } from "./lib/error-logger.ts";
 import { initManifest, shutdownManifest } from "./lib/health-manifest.ts";
@@ -336,16 +337,19 @@ function verifyPcToken(provided: string | null, expected: string): boolean {
   if (!provided) return false;
   const a = Buffer.from(provided);
   const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  const { timingSafeEqual } = require("node:crypto");
-  return timingSafeEqual(a, b);
+  // Pad to equal length so timingSafeEqual doesn't need an early-exit length check
+  const len = Math.max(a.length, b.length);
+  const aPad = Buffer.concat([a, Buffer.alloc(len - a.length)]);
+  const bPad = Buffer.concat([b, Buffer.alloc(len - b.length)]);
+  // Both content AND original length must match
+  return timingSafeEqual(aPad, bPad) && a.length === b.length;
 }
 
-/** Check if a request originates from localhost. */
-function isLocalhostRequest(c: { req: { header: (name: string) => string | undefined } }): boolean {
-  const fwd = c.req.header("x-forwarded-for");
-  const ip = fwd?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "";
-  return ["127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"].includes(ip);
+/** Check if a request originates from localhost using the actual TCP socket address. */
+function isLocalhostRequest(c: { env?: { incoming?: { socket?: { remoteAddress?: string } } }; req: { header: (name: string) => string | undefined } }): boolean {
+  // Use the real socket address — never trust x-forwarded-for/x-real-ip for security gates
+  const ip = c.env?.incoming?.socket?.remoteAddress ?? "";
+  return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ip);
 }
 
 app.get(

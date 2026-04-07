@@ -287,7 +287,7 @@ export function SecurityContent() {
             <div className="flex flex-col gap-2">
               <p className="text-xs text-destructive">Enter your {authMethod === "password" ? "password" : "PIN"} to confirm:</p>
               <input
-                type={authMethod === "password" ? "password" : "text"}
+                type="password"
                 className="w-full bg-background border border-border rounded px-2 py-1 text-xs"
                 placeholder={authMethod === "password" ? "Password" : "PIN"}
                 value={disableCredential}
