@@ -76,12 +76,22 @@ export class TelegramChannel implements ChannelAdapter {
       const msg = ctx.message;
       if (!msg.from || msg.from.is_bot) return;
 
+      const isVoiceGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
+      const voiceChatType = msg.message_thread_id ? "thread" : isVoiceGroup ? "group" : "dm";
+
+      // Access control — same policy check as text messages
+      if (this.shouldFilter(voiceChatType as "dm" | "group" | "thread", String(msg.from.id))) return;
+
       try {
         // Download voice file from Telegram
         const file = await ctx.getFile();
+        // Reject oversized voice files before downloading
+        if (file.file_size && file.file_size > MAX_ARTIFACT_BYTES) {
+          console.warn(`[telegram] skipping oversized voice file: ${file.file_size} bytes`);
+          await ctx.reply("Voice message is too large to process.");
+          return;
+        }
         const audioData = new Uint8Array(await this.downloadFile(file.file_path!));
-
-        const isVoiceGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
         const normalized: NormalizedMessage = {
           id: randomUUID(),
           channelType: "telegram",
@@ -91,7 +101,7 @@ export class TelegramChannel implements ChannelAdapter {
           text: "", // Will be filled by voice middleware preProcess
           timestamp: new Date(msg.date * 1000).toISOString(),
           threadId: msg.message_thread_id ? String(msg.message_thread_id) : undefined,
-          chatType: msg.message_thread_id ? "thread" : isVoiceGroup ? "group" : "dm",
+          chatType: voiceChatType,
           audioData,
           inputModality: "voice",
         };

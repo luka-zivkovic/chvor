@@ -13,12 +13,25 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
   const [error, setError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const cancelledRef = useRef(false);
 
   const start = useCallback(async () => {
     setError(null);
+    cancelledRef.current = false;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      // If stop() was called before getUserMedia resolved, release immediately
+      if (cancelledRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      // Pick best supported MIME type
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+          ? "audio/mp4"
+          : "";
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -26,14 +39,18 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
       };
 
       mediaRecorderRef.current = recorder;
-      recorder.start();
+      recorder.start(250); // timeslice ensures chunks accumulate during recording
       setIsRecording(true);
     } catch (err) {
-      setError("Microphone access denied");
+      const msg = err instanceof Error && err.name === "NotSupportedError"
+        ? "Audio recording not supported in this browser"
+        : "Microphone access denied";
+      setError(msg);
     }
   }, []);
 
   const stop = useCallback(async (): Promise<string | null> => {
+    cancelledRef.current = true;
     const recorder = mediaRecorderRef.current;
     if (!recorder) return null;
 
@@ -42,7 +59,7 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
         setIsRecording(false);
         recorder.stream.getTracks().forEach((t) => t.stop());
 
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         if (blob.size === 0) {
           resolve(null);
           return;
@@ -50,8 +67,9 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
 
         try {
           const form = new FormData();
-          form.append("audio", blob, "recording.webm");
-          form.append("format", "webm");
+          const ext = recorder.mimeType?.includes("mp4") ? "mp4" : "webm";
+          form.append("audio", blob, `recording.${ext}`);
+          form.append("format", ext);
 
           const res = await fetch("/api/voice/transcribe", {
             method: "POST",
@@ -83,10 +101,13 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
   useEffect(() => {
     return () => {
       const recorder = mediaRecorderRef.current;
-      if (recorder && recorder.state !== "inactive") {
-        recorder.stop();
+      if (recorder) {
+        // Detach onstop to prevent state updates / fetch on unmounted component
+        recorder.onstop = null;
+        if (recorder.state !== "inactive") recorder.stop();
+        recorder.stream.getTracks().forEach((t) => t.stop());
       }
-      recorder?.stream.getTracks().forEach((t) => t.stop());
+      cancelledRef.current = true;
     };
   }, []);
 

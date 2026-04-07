@@ -69,7 +69,7 @@ export function TalkMode({ onSend }: Props) {
     // If TTS is off, skip waiting for audio — resume listening after a short delay
     if (ttsModeRef.current === "off") {
       setTimeout(() => {
-        if (talkModeActiveRef.current && talkPhaseRef.current === "thinking") {
+        if (talkModeActiveRef.current && (talkPhaseRef.current === "thinking" || talkPhaseRef.current === "sending")) {
           resumeListening();
         }
       }, NO_TTS_RESUME_DELAY_MS);
@@ -188,11 +188,15 @@ export function TalkMode({ onSend }: Props) {
     return () => window.removeEventListener("keydown", handleKey);
   }, [setTalkModeActive, stopListening, clearTtsTimeout]);
 
-  // Cleanup on unmount / deactivation
+  // Cleanup on unmount / deactivation — pause audio and clear timers
   useEffect(() => {
     return () => {
       clearTtsTimeout();
       if (sendingTimerRef.current) clearTimeout(sendingTimerRef.current);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+      }
     };
   }, [clearTtsTimeout]);
 
@@ -201,7 +205,7 @@ export function TalkMode({ onSend }: Props) {
   const isRecorderFallback = !webSpeech.isSupported;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm">
+    <div role="dialog" aria-modal="true" aria-label="Talk Mode" className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm">
       <audio
         ref={audioRef}
         onEnded={handleAudioEnd}

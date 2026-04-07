@@ -18,12 +18,17 @@ function ensureDir(): void {
   }
 }
 
+const ALLOWED_AUDIO_EXTS = new Set(["mp3", "ogg", "wav", "opus"]);
+
 /** Save audio data and return the file ID (without extension). */
 export async function saveAudio(data: Uint8Array, ext: string): Promise<string> {
+  if (!ALLOWED_AUDIO_EXTS.has(ext)) throw new Error(`Invalid audio extension: ${ext}`);
   ensureDir();
   const id = randomUUID();
   const filename = `${id}.${ext}`;
   await writeFile(join(AUDIO_DIR, filename), data);
+  // Auto-start cleanup on first save if not already running
+  if (!cleanupTimer) startAudioCleanup();
   return id;
 }
 
@@ -35,6 +40,7 @@ export function readAudio(id: string): { data: Buffer; ext: string } | null {
   const match = files.find((f) => f.startsWith(id));
   if (!match) return null;
   const ext = match.split(".").pop() ?? "mp3";
+  if (!ALLOWED_AUDIO_EXTS.has(ext)) return null;
   return { data: readFileSync(join(AUDIO_DIR, match)), ext };
 }
 

@@ -110,13 +110,30 @@ export class PiperTTSProvider implements TTSProvider {
     return null;
   }
 
+  /** Clear failure state so a model can be retried. */
+  resetForRetry(modelId?: string): void {
+    if (modelId) {
+      this.initFailed.delete(modelId);
+      this.initPromises.delete(modelId);
+    } else {
+      this.initFailed.clear();
+      this.initPromises.clear();
+    }
+  }
+
   /** Load an ONNX session for a specific model. */
   private async loadModel(modelId: string): Promise<CachedSession | null> {
     if (this.sessions.has(modelId)) return this.sessions.get(modelId)!;
     if (this.initFailed.has(modelId)) return null;
     if (this.initPromises.has(modelId)) return this.initPromises.get(modelId)!;
 
-    const promise = (async (): Promise<CachedSession | null> => {
+    // Store promise in map BEFORE starting async work to prevent duplicate loads
+    const promise = this.doLoadModel(modelId);
+    this.initPromises.set(modelId, promise);
+    return promise;
+  }
+
+  private async doLoadModel(modelId: string): Promise<CachedSession | null> {
       try {
         const def = VOICE_MODELS.find((m) => m.id === modelId);
         if (!def || def.files.length < 2) throw new Error(`Unknown Piper model: ${modelId}`);
@@ -150,10 +167,6 @@ export class PiperTTSProvider implements TTSProvider {
       } finally {
         this.initPromises.delete(modelId);
       }
-    })();
-
-    this.initPromises.set(modelId, promise);
-    return promise;
   }
 
   async synthesize(

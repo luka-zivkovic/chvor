@@ -1,5 +1,5 @@
 // apps/client/src/components/chat/AudioPlayback.tsx
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -11,6 +11,15 @@ export function AudioPlayback({ audioUrl, autoPlay = false }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [blocked, setBlocked] = useState(false);
+
+  // Auto-play when audioUrl changes and autoPlay is true
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || !autoPlay || !audioUrl) return;
+    el.play()
+      .then(() => { setPlaying(true); setBlocked(false); })
+      .catch(() => { setBlocked(true); });
+  }, [audioUrl, autoPlay]);
 
   const toggle = () => {
     const el = audioRef.current;
@@ -37,6 +46,7 @@ export function AudioPlayback({ audioUrl, autoPlay = false }: Props) {
       />
       <button
         onClick={toggle}
+        aria-label={blocked ? "Tap to play" : playing ? "Stop" : "Play"}
         title={blocked ? "Tap to play" : playing ? "Stop" : "Play"}
         className={cn(
           "ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full transition-all",
@@ -51,6 +61,7 @@ export function AudioPlayback({ audioUrl, autoPlay = false }: Props) {
           viewBox="0 0 24 24"
           fill="currentColor"
           stroke="none"
+          aria-hidden="true"
         >
           {playing && !blocked ? (
             <rect x="6" y="6" width="12" height="12" rx="1" />

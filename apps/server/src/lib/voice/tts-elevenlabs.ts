@@ -15,7 +15,7 @@ export class ElevenLabsTTSProvider implements TTSProvider {
 
   async synthesize(
     text: string,
-    opts?: { voice?: string; format?: AudioFormat }
+    opts?: { voice?: string; format?: AudioFormat; speed?: number }
   ): Promise<TTSResult> {
     const apiKey = getApiKey("elevenlabs");
     if (!apiKey) throw new Error("ElevenLabs API key not found");

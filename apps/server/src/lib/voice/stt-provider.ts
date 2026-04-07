@@ -20,7 +20,7 @@ export class WhisperSTTProvider implements STTProvider {
     if (!apiKey) throw new Error("OpenAI API key not found for Whisper STT");
 
     const ext = format.replace("oga", "ogg");
-    const blob = new Blob([audio as unknown as Uint8Array<ArrayBuffer>], { type: `audio/${ext}` });
+    const blob = new Blob([audio as Uint8Array<ArrayBuffer>], { type: `audio/${ext}` });
     const form = new FormData();
     form.append("file", blob, `audio.${ext}`);
     form.append("model", "whisper-1");

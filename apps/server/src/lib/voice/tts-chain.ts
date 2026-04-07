@@ -20,6 +20,15 @@ function getOrCreateProvider(name: TTSProviderName): TTSProvider {
   return providerCache[name]!;
 }
 
+/** Evict a cached provider so it's re-created on next request (e.g. after a transient failure). */
+export function evictProviderCache(name?: TTSProviderName): void {
+  if (name) {
+    delete providerCache[name];
+  } else {
+    for (const key of Object.keys(providerCache)) delete providerCache[key as TTSProviderName];
+  }
+}
+
 /** Synthesize text to audio, trying providers in fallback order. */
 export async function synthesizeWithFallback(
   text: string,

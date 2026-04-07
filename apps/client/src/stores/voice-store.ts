@@ -97,7 +97,19 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   audioUrls: {},
   setAudioUrl: (messageId, url) =>
-    set((s) => ({ audioUrls: { ...s.audioUrls, [messageId]: url } })),
+    set((s) => {
+      const entries = Object.entries(s.audioUrls);
+      const MAX_CACHED_AUDIO = 20;
+      const updated = { ...s.audioUrls, [messageId]: url };
+      // Evict oldest entries beyond the cap
+      if (entries.length >= MAX_CACHED_AUDIO) {
+        const toRemove = entries.slice(0, entries.length - MAX_CACHED_AUDIO + 1);
+        for (const [key] of toRemove) {
+          delete updated[key];
+        }
+      }
+      return { audioUrls: updated };
+    }),
   lastPlayedAudioId: null,
   setLastPlayedAudioId: (id) => set({ lastPlayedAudioId: id }),
 
@@ -263,6 +275,12 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       activePolls.set(modelId, poll);
     } catch (err) {
       console.error("[voice] start download failed:", err);
+      // Reflect failure in UI so user can retry
+      set((s) => ({
+        models: s.models.map((m) =>
+          m.id === modelId ? { ...m, status: "error", progress: { status: "error", percent: 0, error: "Failed to start download" } } : m
+        ),
+      }));
     }
   },
 }));

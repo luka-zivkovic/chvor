@@ -15,7 +15,7 @@ export class OpenAITTSProvider implements TTSProvider {
 
   async synthesize(
     text: string,
-    opts?: { voice?: string; format?: AudioFormat }
+    opts?: { voice?: string; format?: AudioFormat; speed?: number }
   ): Promise<TTSResult> {
     const apiKey = getApiKey("openai");
     if (!apiKey) throw new Error("OpenAI API key not found");
@@ -33,6 +33,7 @@ export class OpenAITTSProvider implements TTSProvider {
         model: "tts-1",
         input: text,
         voice,
+        speed: Math.max(0.25, Math.min(4.0, opts?.speed ?? 1.0)),
         response_format: FORMAT_MAP[format] ?? "mp3",
       }),
       signal: AbortSignal.timeout(30_000),
