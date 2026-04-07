@@ -274,17 +274,22 @@ async function doExtraction(
     abortSignal: AbortSignal.timeout(30_000),
   });
 
-  // Parse JSON response — strip markdown fences if present
+  // Parse JSON response — strip markdown fences and preamble if present
   let text = result.text.trim();
   if (text.startsWith("```")) {
     text = text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+  }
+  // Robust extraction: find the first [ and last ] to handle LLM preamble/postamble
+  const firstBracket = text.indexOf("[");
+  const lastBracket = text.lastIndexOf("]");
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    text = text.slice(firstBracket, lastBracket + 1);
   }
 
   let facts: unknown[];
   try {
     facts = JSON.parse(text);
   } catch {
-    // Don't attempt regex recovery — it stores LLM reasoning text as facts.
     // The sliding window will re-extract any real facts in the next pass.
     console.warn("[memory] failed to parse extraction result as JSON, skipping batch");
     return;

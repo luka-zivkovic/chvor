@@ -16,7 +16,7 @@ vi.mock("../../db/database.ts", () => ({
   })),
 }));
 
-import { spreadActivation, strengthenCoAccessedEdges, linkBySharedEntities } from "../memory-graph.ts";
+import { spreadActivation, strengthenCoAccessedEdges, linkBySharedEntities, clearSessionAccessTracking } from "../memory-graph.ts";
 import { getEdgesForMemory, getNeighborMemories, recordMemoryAccess, createEdge, boostEdgeWeight } from "../../db/memory-store.ts";
 
 const mockGetEdges = vi.mocked(getEdgesForMemory);
@@ -67,6 +67,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetEdges.mockReturnValue([]);
   mockGetNeighbors.mockReturnValue([]);
+  // Clear per-session access dedup state between tests
+  clearSessionAccessTracking("sess-1");
 });
 
 // ── spreadActivation ────────────────────────────────────
@@ -220,16 +222,16 @@ describe("strengthenCoAccessedEdges", () => {
   it("boosts all pairs for 3 IDs", () => {
     strengthenCoAccessedEdges(["a", "b", "c"]);
     expect(mockBoostEdge).toHaveBeenCalledTimes(3);
-    expect(mockBoostEdge).toHaveBeenCalledWith("a", "b", 0.05);
-    expect(mockBoostEdge).toHaveBeenCalledWith("a", "c", 0.05);
-    expect(mockBoostEdge).toHaveBeenCalledWith("b", "c", 0.05);
+    expect(mockBoostEdge).toHaveBeenCalledWith("a", "b", 0.02);
+    expect(mockBoostEdge).toHaveBeenCalledWith("a", "c", 0.02);
+    expect(mockBoostEdge).toHaveBeenCalledWith("b", "c", 0.02);
   });
 
-  it("caps at 30 IDs", () => {
+  it("caps at 20 IDs", () => {
     const ids = Array.from({ length: 35 }, (_, i) => `id-${i}`);
     strengthenCoAccessedEdges(ids);
-    // 30 * 29 / 2 = 435 pairs
-    expect(mockBoostEdge).toHaveBeenCalledTimes(435);
+    // 20 * 19 / 2 = 190 pairs
+    expect(mockBoostEdge).toHaveBeenCalledTimes(190);
   });
 });
 

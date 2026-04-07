@@ -102,6 +102,11 @@ memories.patch("/:id", async (c) => {
 // Register DELETE / before DELETE /:id to prevent route shadowing
 memories.delete("/", (c) => {
   try {
+    // Require explicit confirmation to prevent accidental wipe
+    const confirm = c.req.query("confirm");
+    if (confirm !== "true") {
+      return c.json({ error: "Pass ?confirm=true to delete all memories. This action is irreversible." }, 400);
+    }
     deleteAllMemories();
     return c.json({ data: null });
   } catch (err) {

@@ -15,6 +15,27 @@ import {
 } from "../db/memory-store.ts";
 import { getDb } from "../db/database.ts";
 
+// Per-session access dedup: only record once per memory per session to prevent
+// strength inflation from repeated retrieval on every conversation turn
+const sessionAccessSets = new Map<string, Set<string>>();
+
+/** Clear session access tracking (call on session cleanup). */
+export function clearSessionAccessTracking(sessionId: string): void {
+  sessionAccessSets.delete(sessionId);
+}
+
+function shouldRecordAccess(memoryId: string, sessionId?: string): boolean {
+  if (!sessionId) return true; // no session = always record
+  let set = sessionAccessSets.get(sessionId);
+  if (!set) {
+    set = new Set();
+    sessionAccessSets.set(sessionId, set);
+  }
+  if (set.has(memoryId)) return false;
+  set.add(memoryId);
+  return true;
+}
+
 // Relation-specific bonuses for spreading activation scoring
 const RELATION_BONUS: Record<EdgeRelation, number> = {
   causal: 1.5,
@@ -62,7 +83,10 @@ export function spreadActivation(
     });
 
     // Record access for direct matches (boosts strength + logs for preloading)
-    recordMemoryAccess(mem.id, sessionId, queryText);
+    // Deduped per-session to prevent strength inflation from repeated retrieval every turn
+    if (shouldRecordAccess(mem.id, sessionId)) {
+      recordMemoryAccess(mem.id, sessionId, queryText);
+    }
   }
 
   // Spread to neighbors
@@ -104,8 +128,10 @@ export function spreadActivation(
       relation,
     });
 
-    // Small priming boost for activated neighbors
-    recordMemoryAccess(memory.id, sessionId);
+    // Small priming boost for activated neighbors (deduped per-session)
+    if (shouldRecordAccess(memory.id, sessionId)) {
+      recordMemoryAccess(memory.id, sessionId);
+    }
   }
 
   return results;
@@ -119,14 +145,18 @@ export function spreadActivation(
 export function strengthenCoAccessedEdges(memoryIds: string[]): void {
   if (memoryIds.length < 2) return;
 
-  // Cap to prevent O(n²) blowup — 30 IDs = max 435 pairs
-  const capped = memoryIds.length > 30 ? memoryIds.slice(0, 30) : memoryIds;
+  // Cap to prevent O(n²) blowup — 20 IDs = max 190 pairs
+  const capped = memoryIds.length > 20 ? memoryIds.slice(0, 20) : memoryIds;
 
+  // Only boost edges that already exist — don't create phantom associations
+  // between unrelated memories that happened to be co-retrieved by coincidence
   const db = getDb();
   const tx = db.transaction(() => {
     for (let i = 0; i < capped.length; i++) {
       for (let j = i + 1; j < capped.length; j++) {
-        boostEdgeWeight(capped[i], capped[j], 0.05);
+        // boostEdgeWeight only UPDATEs existing edges (no INSERT), so this is safe
+        // but reduce boost to prevent graph densification from broad queries
+        boostEdgeWeight(capped[i], capped[j], 0.02);
       }
     }
   });

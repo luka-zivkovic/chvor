@@ -16,8 +16,8 @@ interface MemoryState {
 
   fetchAll: () => Promise<void>;
   addMemory: (content: string) => Promise<void>;
-  removeMemory: (id: string) => void;
-  updateMemory: (id: string, content: string) => void;
+  removeMemory: (id: string) => Promise<void>;
+  updateMemory: (id: string, content: string) => Promise<void>;
   clearAll: () => Promise<void>;
   fetchGraph: () => Promise<void>;
   fetchStats: () => Promise<void>;
@@ -55,15 +55,38 @@ export const useMemoryStore = create<MemoryState>((set) => ({
     }
   },
 
-  removeMemory: (id) =>
-    set((st) => ({ memories: st.memories.filter((m) => m.id !== id) })),
+  removeMemory: async (id) => {
+    // Optimistic update
+    set((st) => ({ memories: st.memories.filter((m) => m.id !== id) }));
+    try {
+      await api.memories.delete(id);
+    } catch (err) {
+      // Revert: re-fetch from server on failure
+      set({ error: err instanceof Error ? err.message : String(err) });
+      try {
+        const memories = await api.memories.list();
+        set({ memories });
+      } catch { /* best effort revert */ }
+    }
+  },
 
-  updateMemory: (id, content) =>
+  updateMemory: async (id, content) => {
+    // Optimistic update
     set((st) => ({
       memories: st.memories.map((m) =>
         m.id === id ? { ...m, abstract: content, content } : m
       ),
-    })),
+    }));
+    try {
+      await api.memories.update(id, { content });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+      try {
+        const memories = await api.memories.list();
+        set({ memories });
+      } catch { /* best effort revert */ }
+    }
+  },
 
   clearAll: async () => {
     try {

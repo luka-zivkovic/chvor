@@ -698,6 +698,26 @@ export function getDb(): Database.Database {
   return db;
 }
 
+/**
+ * Recreate the memory_node_vec virtual table with a new dimension.
+ * Called when the embedding provider changes and produces different-sized vectors.
+ */
+export function rebuildVecTable(newDimensions: number): void {
+  if (!vecAvailable || !db) return;
+  try {
+    db.exec("DROP TABLE IF EXISTS memory_node_vec");
+    db.exec(`
+      CREATE VIRTUAL TABLE memory_node_vec USING vec0(
+        id TEXT PRIMARY KEY,
+        embedding float[${newDimensions}]
+      )
+    `);
+    console.log(`[db] rebuilt memory_node_vec with ${newDimensions} dimensions`);
+  } catch (err) {
+    console.error("[db] failed to rebuild vec table:", (err as Error).message);
+  }
+}
+
 /** Close the database and clear the singleton. Used before restore overwrites the DB file. */
 export function closeDb(): void {
   if (db) {
