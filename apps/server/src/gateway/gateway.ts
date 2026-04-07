@@ -80,8 +80,8 @@ export class Gateway extends EventEmitter {
     );
 
     // ── Voice STT pre-processing ──
-    if (rawMessage.audioData) {
-      this.emitEvent({ type: "voice.status", data: { state: "transcribing" } }, targetClient); // voice events stay per-client
+    if (rawMessage.audioData && targetClient) {
+      this.emitEvent({ type: "voice.status", data: { state: "transcribing" } }, targetClient);
     }
     let message: NormalizedMessage;
     try {
@@ -270,7 +270,9 @@ export class Gateway extends EventEmitter {
 
     if (ttsMode !== "off" && responseText.trim()) {
       try {
-        this.emitEvent({ type: "voice.status", data: { state: "synthesizing" } }, targetClient);
+        if (targetClient) {
+          this.emitEvent({ type: "voice.status", data: { state: "synthesizing" } }, targetClient);
+        }
         const voiceResult = await postProcess(responseText, {
           ttsMode,
           inputModality,
@@ -279,16 +281,21 @@ export class Gateway extends EventEmitter {
         voiceAudio = voiceResult.audio;
         voiceAudioUrl = voiceResult.audioUrl;
         if (voiceAudioUrl) {
-          this.emitEvent(
-            { type: "chat.audio", data: { audioUrl: voiceAudioUrl, duration: voiceResult.duration, messageId: `resp-${message.id}` } },
-            targetClient
-          );
+          // Broadcast audio to all tabs sharing this session (consistent with chat.chunk)
+          for (const clientId of sessionBroadcastClients()) {
+            this.emitEvent(
+              { type: "chat.audio", data: { audioUrl: voiceAudioUrl, duration: voiceResult.duration, messageId: `resp-${message.id}` } },
+              clientId
+            );
+          }
         }
-        this.emitEvent({ type: "voice.status", data: { state: "ready" } }, targetClient);
       } catch (err) {
         console.error("[gateway] TTS post-processing failed:", err);
-        this.emitEvent({ type: "voice.status", data: { state: "ready" } }, targetClient);
       }
+    }
+    // Always clear voice status if it was emitted (handles TTS off + STT on case)
+    if (rawMessage.audioData && targetClient) {
+      this.emitEvent({ type: "voice.status", data: { state: "ready" } }, targetClient);
     }
 
     const timestamp = new Date().toISOString();

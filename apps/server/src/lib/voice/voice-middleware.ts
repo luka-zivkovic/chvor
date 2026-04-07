@@ -26,22 +26,21 @@ export async function preProcess(msg: NormalizedMessage): Promise<NormalizedMess
     return msg; // Text message — pass through
   }
 
-  msg.inputModality = "voice";
-
   try {
     const provider = getSTTProvider();
-    const format = msg.channelType === "telegram" ? "ogg" : "webm";
+    const OGG_CHANNELS: string[] = ["telegram", "whatsapp"];
+    const format = OGG_CHANNELS.includes(msg.channelType) ? "ogg" : "webm";
     const result = await provider.transcribe(msg.audioData, format);
-    msg.text = result.text;
-    console.log(`[voice] STT transcribed: "${result.text.slice(0, 80)}..."`);
+    if (process.env.VOICE_DEBUG) {
+      console.log(`[voice] STT transcribed: "${result.text.slice(0, 80)}..."`);
+    }
+    // Return a new object — don't mutate the input
+    return { ...msg, inputModality: "voice", text: result.text, audioData: undefined };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error("[voice] STT failed:", errMsg);
-    msg.text = "";
     throw new Error(`Voice transcription failed: ${errMsg}`);
   }
-
-  return msg;
 }
 
 /**
@@ -125,7 +124,7 @@ async function summarizeForTTS(text: string): Promise<string> {
 /** Strip markdown formatting for cleaner TTS output. */
 function stripMarkdown(text: string): string {
   return text
-    .replace(/```[\s\S]*?```/g, "")
+    .replace(/```[\s\S]*?```/g, " [code block] ")
     .replace(/`[^`]+`/g, (m) => m.slice(1, -1))
     .replace(/#{1,6}\s/g, "")
     .replace(/\*\*([^*]+)\*\*/g, "$1")

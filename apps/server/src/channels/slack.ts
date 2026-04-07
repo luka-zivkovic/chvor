@@ -211,6 +211,7 @@ export class SlackChannel implements ChannelAdapter {
             filename: `voice.${ext}`,
             ...(threadId ? { thread_ts: threadId } : {}),
           } as never);
+          return; // Audio sent successfully — don't duplicate with text
         } catch (err) {
           console.warn("[slack] audio upload failed:", err);
         }

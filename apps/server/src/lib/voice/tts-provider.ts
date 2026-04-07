@@ -41,6 +41,10 @@ export function resolveTtsProviderOrder(): TTSProviderName[] {
 
 /** Resolve output format based on channel type. */
 export function resolveOutputFormat(channelType: string): AudioFormat {
-  if (channelType === "telegram") return "ogg";
-  return "mp3";
+  const FORMAT_MAP: Record<string, AudioFormat> = {
+    telegram: "ogg",
+    whatsapp: "ogg",
+    discord: "ogg",
+  };
+  return FORMAT_MAP[channelType] ?? "mp3";
 }

@@ -200,6 +200,7 @@ export class DiscordChannel implements ChannelAdapter {
           const ext = options.audio.format === "ogg" ? "ogg" : options.audio.format;
           const attachment = new AttachmentBuilder(Buffer.from(options.audio.data), { name: `voice.${ext}` });
           await channel.send({ files: [attachment] });
+          return; // Audio sent successfully — don't duplicate with text
         } catch (err) {
           console.warn("[discord] audio send failed, falling back to text:", err);
         }

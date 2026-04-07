@@ -4,7 +4,7 @@ import { getConfig, setConfig } from "../db/config-store.ts";
 import { getSTTProvider } from "../lib/voice/stt-provider.ts";
 import { getLocalWhisperProvider } from "../lib/voice/stt-whisper-local.ts";
 import { getApiKey, resolveTtsProviderOrder } from "../lib/voice/tts-provider.ts";
-import { listModels, getDownloadProgress, startDownload, deleteModel, getModelStatus } from "../lib/voice/model-manager.ts";
+import { listModels, getDownloadProgress, startDownload, deleteModel, getModelStatus, getModelDef } from "../lib/voice/model-manager.ts";
 
 const app = new Hono();
 
@@ -174,6 +174,9 @@ app.put("/config", async (c) => {
     setConfig("voice.tts.speed", String(speed));
   }
   if (body.piperVoice !== undefined) {
+    if (body.piperVoice && !getModelDef(body.piperVoice)) {
+      return c.json({ error: "Unknown Piper voice model" }, 400);
+    }
     setConfig("voice.tts.piperVoice", body.piperVoice ?? "");
   }
   if (body.ttsMaxLength !== undefined) {
@@ -200,12 +203,14 @@ app.get("/models", (c) => {
 // GET /api/voice/models/:id/status — check download progress
 app.get("/models/:id/status", (c) => {
   const id = c.req.param("id");
+  if (!getModelDef(id)) return c.json({ error: "Unknown model" }, 404);
   return c.json(getDownloadProgress(id));
 });
 
 // POST /api/voice/models/:id/download — start downloading a model
 app.post("/models/:id/download", async (c) => {
   const id = c.req.param("id");
+  if (!getModelDef(id)) return c.json({ error: "Unknown model" }, 404);
   const status = getModelStatus(id);
   if (status === "ready") {
     return c.json({ ok: true, status: "ready" });
@@ -225,6 +230,8 @@ app.post("/models/:id/download", async (c) => {
 // DELETE /api/voice/models/:id — remove a downloaded model
 app.delete("/models/:id", (c) => {
   const id = c.req.param("id");
+  if (!getModelDef(id)) return c.json({ error: "Unknown model" }, 404);
+  if (id === "whisper-tiny-en") return c.json({ error: "Whisper model deletion not supported — managed by HuggingFace cache" }, 422);
   const deleted = deleteModel(id);
   return c.json({ ok: deleted });
 });

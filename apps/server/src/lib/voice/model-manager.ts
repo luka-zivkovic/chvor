@@ -151,11 +151,12 @@ export async function startDownload(modelId: string): Promise<void> {
   const def = getModelDef(modelId);
   if (!def) throw new Error(`Unknown model: ${modelId}`);
 
-  // Atomic check-then-set: use downloads Map as the mutex
+  // Prevent concurrent downloads of the same model
   const existing = downloads.get(modelId);
   if (existing?.status === "downloading") return;
   if (getModelStatus(modelId) === "ready") return;
 
+  // Set status before any async work to prevent concurrent calls from passing the guard
   downloads.set(modelId, { status: "downloading", percent: 0 });
 
   try {
@@ -215,7 +216,8 @@ export async function startDownload(modelId: string): Promise<void> {
           const chunk = await reader.read();
           done = chunk.done;
           if (chunk.value) {
-            writer.write(chunk.value);
+            const canContinue = writer.write(chunk.value);
+            if (!canContinue) await new Promise<void>((r) => writer.once("drain", r));
             downloadedBytes += chunk.value.length;
             const percent = Math.min(99, Math.round((downloadedBytes / totalSize) * 100));
             downloads.set(modelId, { status: "downloading", percent });

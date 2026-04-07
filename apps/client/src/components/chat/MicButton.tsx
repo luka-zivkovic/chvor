@@ -10,11 +10,11 @@ interface Props {
   disabled?: boolean;
 }
 
-/** Cached STT status from server; invalidated on credential changes. */
-let sttStatusCache: { available: boolean; needsCredential: string | null } | null = null;
+/** Cached STT status from server; invalidated on credential changes or after TTL. */
+let sttStatusCache: { available: boolean; needsCredential: string | null; expiresAt: number } | null = null;
 
 async function checkSttStatus(): Promise<{ available: boolean; needsCredential: string | null }> {
-  if (sttStatusCache) return sttStatusCache;
+  if (sttStatusCache && Date.now() < sttStatusCache.expiresAt) return sttStatusCache;
   try {
     const res = await fetch("/api/voice/status", { credentials: "same-origin" });
     if (!res.ok) return { available: false, needsCredential: null };
@@ -23,7 +23,7 @@ async function checkSttStatus(): Promise<{ available: boolean; needsCredential: 
     const whisperLocal = json.stt?.alternatives?.find((a: any) => a.id === "whisper-local");
     const available = whisperApi?.available || whisperLocal?.available || false;
     const needsCredential = !available ? (whisperApi?.needsCredential ?? "openai") : null;
-    sttStatusCache = { available, needsCredential };
+    sttStatusCache = { available, needsCredential, expiresAt: Date.now() + 60_000 };
     return sttStatusCache;
   } catch {
     // Fail closed: don't cache failures, let user retry

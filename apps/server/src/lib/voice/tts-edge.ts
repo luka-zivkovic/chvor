@@ -13,7 +13,9 @@ export class EdgeTTSProvider implements TTSProvider {
     text: string,
     opts?: { voice?: string; format?: AudioFormat }
   ): Promise<TTSResult> {
-    const { EdgeTTS } = (await import("node-edge-tts")) as any;
+    let EdgeTTS: any;
+    try { ({ EdgeTTS } = await import("node-edge-tts")); }
+    catch { throw new Error("Edge TTS not available (node-edge-tts not installed)"); }
 
     const voice = opts?.voice ?? "en-US-AriaNeural";
     const tmpPath = join(tmpdir(), `chvor-edge-tts-${randomUUID()}.mp3`);
