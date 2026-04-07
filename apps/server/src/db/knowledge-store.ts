@@ -129,14 +129,6 @@ export function updateResourceContentText(id: string, contentText: string): void
   ).run(contentText, now, id);
 }
 
-export function incrementMemoryCount(id: string): void {
-  const db = getDb();
-  const now = new Date().toISOString();
-  db.prepare(
-    "UPDATE knowledge_resources SET memory_count = memory_count + 1, updated_at = ? WHERE id = ?",
-  ).run(now, id);
-}
-
 export function setMemoryCount(id: string, count: number): void {
   const db = getDb();
   const now = new Date().toISOString();

@@ -57,9 +57,11 @@ export function UploadZone({ onUpload, onIngestUrl, uploading }: UploadZoneProps
   const handleUrlSubmit = useCallback(() => {
     const trimmed = urlInput.trim();
     if (!trimmed) return;
+    setSizeError(null);
     try {
       new URL(trimmed);
     } catch {
+      setSizeError("Invalid URL");
       return;
     }
     onIngestUrl(trimmed);
