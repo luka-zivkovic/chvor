@@ -10,8 +10,7 @@ import { createModelForRole } from "./llm-router.ts";
 import {
   createMemory,
   findTopKSimilarMemories,
-  updateMemory,
-  reduceMemoryStrength,
+  mergeMemoryAbstract,
   getAllMemoryContents,
 } from "../db/memory-store.ts";
 import type { CreateMemoryOptions } from "../db/memory-store.ts";
@@ -19,13 +18,14 @@ import {
   getResource,
   updateResourceStatus,
   updateResourceContentText,
-  incrementMemoryCount,
   setMemoryCount,
+  deleteMemoriesForResource,
 } from "../db/knowledge-store.ts";
 import { getMediaDir, mimeToExt } from "./media-store.ts";
 import { validateFetchUrl } from "./native-tools.ts";
 import { extractDocxText } from "./docx-extractor.ts";
-import { containsSensitiveData } from "./sensitive-filter.ts";
+import { containsSensitiveData, redactSensitiveData } from "./sensitive-filter.ts";
+import { isEmbedderAvailable } from "./embedder.ts";
 import type { KnowledgeResource, MemoryCategory, MemoryProvenance } from "@chvor/shared";
 
 // ─── Constants ────────────────────────────────────────────
@@ -126,6 +126,13 @@ async function doIngestionInner(resourceId: string): Promise<void> {
   const resource = getResource(resourceId);
   if (!resource) throw new Error(`Resource ${resourceId} not found`);
 
+  // Clear any partial memories from a previous crashed run to prevent duplicates
+  const removed = deleteMemoriesForResource(resourceId);
+  if (removed > 0) {
+    console.log(`[knowledge] cleared ${removed} partial memories from previous run for ${resource.title}`);
+    setMemoryCount(resourceId, 0);
+  }
+
   updateResourceStatus(resourceId, "processing");
   console.log(`[knowledge] starting ingestion: ${resource.title} (${resource.type})`);
 
@@ -138,8 +145,9 @@ async function doIngestionInner(resourceId: string): Promise<void> {
     return;
   }
 
-  // Store extracted text for re-processing
-  updateResourceContentText(resourceId, text);
+  // Store redacted text for re-processing; chunking below uses unredacted `text`
+  // so the LLM sees full context for fact extraction, while DB never stores raw secrets.
+  updateResourceContentText(resourceId, redactSensitiveData(text));
 
   // Step 2: Chunk
   const chunks = chunkText(text);
@@ -149,7 +157,7 @@ async function doIngestionInner(resourceId: string): Promise<void> {
 
   // Step 3: Extract facts from each chunk
   // Start with existing facts; accumulate newly created abstracts to prevent re-extraction
-  const existingFacts = getAllMemoryContents();
+  const existingFacts = getAllMemoryContents(50_000);
   let totalMemories = 0;
 
   for (const chunk of chunks.slice(0, MAX_CHUNKS)) {
@@ -324,8 +332,7 @@ function stripHtml(html: string): string {
 async function extractImageDescription(resource: KnowledgeResource): Promise<string> {
   if (!resource.mediaId) throw new Error("No mediaId for image resource");
   const buffer = readMediaBuffer(resource.mediaId, resource.mimeType);
-  const base64 = buffer.toString("base64");
-  const mimeType = resource.mimeType || "image/png";
+  const mimeType = (resource.mimeType || "image/png") as "image/png" | "image/jpeg" | "image/webp";
 
   let model;
   try {
@@ -340,7 +347,7 @@ async function extractImageDescription(resource: KnowledgeResource): Promise<str
       {
         role: "user",
         content: [
-          { type: "image", image: Buffer.from(base64, "base64"), mimeType: mimeType as "image/png" },
+          { type: "image", image: buffer, mimeType },
           { type: "text", text: IMAGE_EXTRACTION_PROMPT },
         ],
       },
@@ -432,7 +439,7 @@ async function extractFactsFromChunk(
     if (containsSensitiveData(fact.abstract)) continue;
     if (typeof fact.overview === "string" && containsSensitiveData(fact.overview)) continue;
 
-    // Dedup via vector similarity
+    // Dedup via vector similarity (or text fallback when embedder unavailable)
     const similar = await findTopKSimilarMemories(fact.abstract, 1, 0.5);
 
     if (similar.length > 0 && similar[0].similarity > 0.95) {
@@ -449,10 +456,19 @@ async function extractFactsFromChunk(
         const decision = await decideDuplicate(fact.abstract, similar[0].memory.abstract);
         if (decision === "SKIP") continue;
         if (decision === "MERGE") {
-          updateMemory(similar[0].memory.id, fact.abstract);
+          const overview = typeof fact.overview === "string" ? fact.overview : null;
+          mergeMemoryAbstract(similar[0].memory.id, fact.abstract, overview);
           continue;
         }
       } catch {
+        continue;
+      }
+    }
+
+    // Text-based dedup fallback when embedder is unavailable
+    if (similar.length === 0 && !isEmbedderAvailable()) {
+      const lower = fact.abstract.toLowerCase();
+      if (existingFacts.some((f) => f.toLowerCase() === lower)) {
         continue;
       }
     }

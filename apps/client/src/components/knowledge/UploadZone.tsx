@@ -14,20 +14,20 @@ const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 MB — matches server limit
 export function UploadZone({ onUpload, onIngestUrl, uploading }: UploadZoneProps) {
   const [dragOver, setDragOver] = useState(false);
   const [urlInput, setUrlInput] = useState("");
-  const [sizeError, setSizeError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [mode, setMode] = useState<"file" | "url">("file");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const validateAndUpload = useCallback(
     (file: File) => {
-      setSizeError(null);
+      setValidationError(null);
       const ext = "." + (file.name.split(".").pop()?.toLowerCase() ?? "");
       if (!ACCEPTED_EXTS.has(ext)) {
-        setSizeError(`Unsupported file type: ${ext}`);
+        setValidationError(`Unsupported file type: ${ext}`);
         return;
       }
       if (file.size > MAX_FILE_BYTES) {
-        setSizeError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB, max 20 MB)`);
+        setValidationError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB, max 20 MB)`);
         return;
       }
       onUpload(file);
@@ -57,9 +57,11 @@ export function UploadZone({ onUpload, onIngestUrl, uploading }: UploadZoneProps
   const handleUrlSubmit = useCallback(() => {
     const trimmed = urlInput.trim();
     if (!trimmed) return;
+    setValidationError(null);
     try {
       new URL(trimmed);
     } catch {
+      setValidationError("Invalid URL");
       return;
     }
     onIngestUrl(trimmed);
@@ -71,7 +73,7 @@ export function UploadZone({ onUpload, onIngestUrl, uploading }: UploadZoneProps
       {/* Mode toggle */}
       <div className="flex gap-1 rounded-md border border-border/50 p-0.5">
         <button
-          onClick={() => { setMode("file"); setSizeError(null); }}
+          onClick={() => { setMode("file"); setValidationError(null); }}
           className={cn(
             "flex-1 rounded px-2 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.1em] transition-colors",
             mode === "file"
@@ -82,7 +84,7 @@ export function UploadZone({ onUpload, onIngestUrl, uploading }: UploadZoneProps
           File
         </button>
         <button
-          onClick={() => { setMode("url"); setSizeError(null); }}
+          onClick={() => { setMode("url"); setValidationError(null); }}
           className={cn(
             "flex-1 rounded px-2 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.1em] transition-colors",
             mode === "url"
@@ -161,8 +163,8 @@ export function UploadZone({ onUpload, onIngestUrl, uploading }: UploadZoneProps
         </div>
       )}
 
-      {sizeError && (
-        <p className="text-[10px] text-red-400">{sizeError}</p>
+      {validationError && (
+        <p className="text-[10px] text-red-400">{validationError}</p>
       )}
     </div>
   );

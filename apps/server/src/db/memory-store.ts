@@ -469,6 +469,27 @@ export function updateMemory(id: string, content: string): Memory | null {
   return getMemory(id)!;
 }
 
+/**
+ * Update abstract only, preserving existing overview/detail.
+ * Used by knowledge ingestion MERGE to avoid destroying context.
+ */
+export function mergeMemoryAbstract(id: string, newAbstract: string, newOverview?: string | null): Memory | null {
+  const existing = getMemory(id);
+  if (!existing) return null;
+  const db = getDb();
+  const now = new Date().toISOString();
+  // Keep existing overview if the new one isn't provided, or if the existing one is already set
+  const overview = existing.overview ?? newOverview ?? null;
+  db.prepare(
+    "UPDATE memory_nodes SET abstract = ?, overview = ?, updated_at = ? WHERE id = ?"
+  ).run(newAbstract, overview, now, id);
+  // Fire-and-forget re-embed
+  embedAndStoreVector(id, newAbstract).catch((err) => {
+    console.warn("[memory] re-embedding failed for", id, (err as Error).message);
+  });
+  return getMemory(id)!;
+}
+
 export function updateMemoryOverview(id: string, overview: string): void {
   const db = getDb();
   db.prepare("UPDATE memory_nodes SET overview = ? WHERE id = ? AND overview IS NULL").run(overview, id);
