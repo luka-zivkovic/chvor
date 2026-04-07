@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { getDb, closeDb } from "../db/database.ts";
 import { getConfig, setConfig } from "../db/config-store.ts";
+import AdmZip from "adm-zip";
 import type { BackupManifest, BackupInfo, BackupConfig, UpdateBackupConfigRequest } from "@chvor/shared";
 
 // ── Paths ────────────────────────────────────────────────────────
@@ -208,8 +209,6 @@ export function listBackups(): BackupInfo[] {
     .filter((f) => f.endsWith(".chvor-backup"))
     .sort()
     .reverse();
-
-  const AdmZip = require("adm-zip");
 
   const results: BackupInfo[] = [];
   for (const f of files) {
