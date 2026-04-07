@@ -28,6 +28,16 @@ interface ScheduleRow {
   updated_at: string;
 }
 
+function safeJsonParse<T>(json: string | null, fallback: T, label: string, id: string): T {
+  if (!json) return fallback;
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    console.warn(`[schedule-store] corrupt JSON in ${label} for schedule ${id}, using fallback`);
+    return fallback;
+  }
+}
+
 function rowToSchedule(row: ScheduleRow): Schedule {
   return {
     id: row.id,
@@ -37,19 +47,23 @@ function rowToSchedule(row: ScheduleRow): Schedule {
     workspaceId: row.workspace_id,
     enabled: row.enabled === 1,
     oneShot: row.one_shot === 1,
-    deliverTo: row.deliver_to
-      ? (JSON.parse(row.deliver_to) as DeliveryTarget[])
-      : null,
+    deliverTo: safeJsonParse<DeliveryTarget[] | null>(row.deliver_to, null, "deliver_to", row.id),
     workflowId: row.workflow_id ?? null,
-    workflowParams: row.workflow_params
-      ? (JSON.parse(row.workflow_params) as Record<string, string>)
-      : null,
+    workflowParams: safeJsonParse<Record<string, string> | null>(row.workflow_params, null, "workflow_params", row.id),
     lastRunAt: row.last_run_at,
     lastResult: row.last_result,
     lastError: row.last_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+export const MAX_SCHEDULES = 100;
+
+export function countSchedules(): number {
+  const db = getDb();
+  const row = db.prepare("SELECT COUNT(*) as count FROM schedules").get() as { count: number };
+  return row.count;
 }
 
 export function listSchedules(): Schedule[] {
@@ -69,6 +83,9 @@ export function getSchedule(id: string): Schedule | null {
 }
 
 export function createSchedule(req: CreateScheduleRequest): Schedule {
+  if (countSchedules() >= MAX_SCHEDULES) {
+    throw new Error(`Schedule limit reached (max ${MAX_SCHEDULES}). Delete unused schedules before creating new ones.`);
+  }
   try {
     parseExpression(req.cronExpression);
   } catch {
@@ -155,24 +172,26 @@ export function deleteSchedule(id: string): boolean {
 
 export function recordRun(
   id: string,
+  startedAt: string,
   result: string | null,
   error: string | null
 ): void {
   const db = getDb();
-  const now = new Date().toISOString();
+  const completedAt = new Date().toISOString();
   const truncated = result ? result.slice(0, 2000) : null;
+  const truncatedError = error ? error.slice(0, 2000) : null;
 
   // Insert into run history
   const runId = randomUUID();
   db.prepare(
     `INSERT INTO schedule_runs (id, schedule_id, started_at, completed_at, status, result, error)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(runId, id, now, now, error ? "failed" : "completed", truncated, error);
+  ).run(runId, id, startedAt, completedAt, error ? "failed" : "completed", truncated, truncatedError);
 
   // Update schedule's last_run fields for quick access
   db.prepare(
     `UPDATE schedules SET last_run_at = ?, last_result = ?, last_error = ?, updated_at = ? WHERE id = ?`
-  ).run(now, truncated, error, now, id);
+  ).run(completedAt, truncated, truncatedError, completedAt, id);
 
   // Prune: keep only last 50 runs per schedule
   db.prepare(

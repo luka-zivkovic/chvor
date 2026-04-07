@@ -14,9 +14,13 @@ export function startBackupScheduler(): void {
     run: async () => {
       console.log("[backup] scheduled backup starting...");
       const info = await createBackup("scheduled");
-      setConfig("backup.lastRunAt", new Date().toISOString());
-      setConfig("backup.lastError", "");
       console.log(`[backup] scheduled backup complete: ${info.filename} (${info.sizeBytes} bytes)`);
+      try {
+        setConfig("backup.lastRunAt", new Date().toISOString());
+        setConfig("backup.lastError", "");
+      } catch (err) {
+        console.error("[backup] failed to update backup config:", err);
+      }
     },
   });
 }

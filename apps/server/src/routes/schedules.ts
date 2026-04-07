@@ -54,6 +54,9 @@ schedules.post("/", async (c) => {
         400
       );
     }
+    if (body.name.length > 200) {
+      return c.json({ error: "name must be 200 characters or fewer" }, 400);
+    }
     const schedule = createSchedule(body);
     syncSchedule(schedule.id);
     getWSInstance()?.broadcast({ type: "schedule.created", data: schedule });

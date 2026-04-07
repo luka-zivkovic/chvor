@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import type { Schedule } from "@chvor/shared";
 import { useScheduleStore } from "../../stores/schedule-store";
 import { api } from "../../lib/api";
@@ -46,7 +47,8 @@ export function ScheduleCard({ schedule }: Props) {
     try {
       await api.schedules.delete(schedule.id);
       removeSchedule(schedule.id);
-    } catch {
+    } catch (err) {
+      toast.error(`Failed to delete schedule: ${err instanceof Error ? err.message : String(err)}`);
       setConfirmDelete(false);
     }
   };

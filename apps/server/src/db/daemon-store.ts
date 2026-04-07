@@ -10,6 +10,7 @@ interface DaemonTaskRow {
   priority: number;
   status: string;
   progress: string | null;
+  retry_count: number;
   result: string | null;
   error: string | null;
   created_at: string;
@@ -26,6 +27,7 @@ function rowToTask(row: DaemonTaskRow): DaemonTask {
     priority: row.priority,
     status: row.status as DaemonTaskStatus,
     progress: row.progress,
+    retryCount: row.retry_count ?? 0,
     result: row.result,
     error: row.error,
     createdAt: row.created_at,
@@ -91,6 +93,7 @@ export function claimNextTask(): DaemonTask | null {
 export function updateDaemonTask(id: string, updates: {
   status?: DaemonTaskStatus;
   progress?: string | null;
+  retryCount?: number;
   result?: string | null;
   error?: string | null;
 }): void {
@@ -104,6 +107,10 @@ export function updateDaemonTask(id: string, updates: {
   if (updates.progress !== undefined) {
     sets.push("progress = ?");
     params.push(updates.progress);
+  }
+  if (updates.retryCount !== undefined) {
+    sets.push("retry_count = ?");
+    params.push(updates.retryCount);
   }
   if (updates.result !== undefined) {
     sets.push("result = ?");

@@ -1,7 +1,7 @@
 import type { ChatMessage, ExecutionEvent, WebhookSubscription, ParsedWebhookEvent, WebhookFilter } from "@chvor/shared";
 import type { WSManager } from "../gateway/ws.ts";
 import type { ChannelSender } from "./scheduler.ts";
-import { recordWebhookEvent } from "../db/webhook-store.ts";
+import { recordWebhookEvent, countRecentWebhookEvents } from "../db/webhook-store.ts";
 import { executeConversation } from "./orchestrator.ts";
 import { insertActivity } from "../db/activity-store.ts";
 import { logError } from "./error-logger.ts";
@@ -40,7 +40,8 @@ export function matchesFilters(
 
   if (filters.branches && filters.branches.length > 0) {
     const branch = parsed.details.branch as string | undefined;
-    if (branch && !filters.branches.includes(branch)) return false;
+    // If a branch filter is set but the event has no branch, reject it
+    if (!branch || !filters.branches.includes(branch)) return false;
   }
 
   return true;
@@ -70,6 +71,15 @@ function checkRateLimit(subscriptionId: string): boolean {
   const timestamps = rateLimits.get(subscriptionId) ?? [];
   const recent = timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
   if (recent.length >= RATE_LIMIT_MAX) return false;
+
+  // DB-backed fallback: survives server restarts
+  try {
+    const dbCount = countRecentWebhookEvents(subscriptionId, RATE_LIMIT_WINDOW_MS);
+    if (dbCount >= RATE_LIMIT_MAX) return false;
+  } catch {
+    // If DB check fails, rely on in-memory only
+  }
+
   recent.push(now);
   rateLimits.set(subscriptionId, recent);
 

@@ -91,13 +91,24 @@ webhooks.delete("/:id", (c) => {
 
 // ── Receiver endpoint (NO auth — external services call this) ──
 
+const MAX_WEBHOOK_BODY_BYTES = 1_048_576; // 1MB
+
 webhooks.post("/:id/receive", async (c) => {
   const sub = getWebhookSubscription(c.req.param("id"));
   if (!sub) return c.json({ error: "not found" }, 404);
   if (!sub.enabled) return c.json({ error: "subscription disabled" }, 410);
 
+  // Reject oversized payloads before reading full body
+  const contentLength = parseInt(c.req.header("content-length") ?? "0", 10);
+  if (contentLength > MAX_WEBHOOK_BODY_BYTES) {
+    return c.json({ error: "payload too large" }, 413);
+  }
+
   // Get raw body for signature verification
   const rawBody = await c.req.text();
+  if (rawBody.length > MAX_WEBHOOK_BODY_BYTES) {
+    return c.json({ error: "payload too large" }, 413);
+  }
   let body: unknown;
   try {
     body = JSON.parse(rawBody);

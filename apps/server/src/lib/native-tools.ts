@@ -31,6 +31,7 @@ export interface NativeToolContext {
   originClientId?: string;
   channelType?: string;
   channelId?: string;
+  workspaceId?: string;
 }
 
 type NativeToolHandler = (
@@ -616,7 +617,8 @@ const createScheduleToolDef = tool({
 });
 
 async function handleCreateSchedule(
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  context?: NativeToolContext
 ): Promise<NativeToolResult> {
   const { createSchedule } = await import("../db/schedule-store.ts");
   const { syncSchedule } = await import("./scheduler.ts");
@@ -689,7 +691,7 @@ async function handleCreateSchedule(
     name,
     cronExpression,
     prompt,
-    workspaceId: "default-constellation",
+    workspaceId: context?.workspaceId ?? "default-constellation",
     oneShot,
     deliverTo,
     workflowId,

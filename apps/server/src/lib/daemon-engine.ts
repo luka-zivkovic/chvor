@@ -113,9 +113,17 @@ async function daemonTick(): Promise<void> {
       try {
         console.log(`[daemon] executing task: ${task.title}`);
         const { executeConversation } = await import("./orchestrator.ts");
-        const noop = () => {};
+        const emit = (event: import("@chvor/shared").ExecutionEvent): void => {
+          wsRef?.broadcast({ type: "execution.event", data: event });
+        };
 
-        // Race execution against timeout, with proper cleanup
+        emit({ type: "execution.started", data: { executionId: `daemon-${task.id}` } });
+
+        // Race execution against timeout, with proper cleanup.
+        // Note: if the timeout wins, execPromise continues in the background
+        // because executeConversation does not accept an AbortSignal.
+        // The running guard (currentTask) prevents claiming new tasks until
+        // the finally block clears it.
         const execPromise = executeConversation(
           [{
             id: randomUUID(),
@@ -124,7 +132,7 @@ async function daemonTick(): Promise<void> {
             channelType: "daemon",
             timestamp: new Date().toISOString(),
           }],
-          noop as any,
+          emit,
         );
         const timeoutPromise = new Promise<null>((resolve) => {
           taskTimeoutHandle = setTimeout(() => resolve(null), TASK_TIMEOUT_MS);
@@ -153,11 +161,11 @@ async function daemonTick(): Promise<void> {
         const error = err instanceof Error ? err.message : String(err);
 
         // Retry logic: re-queue if under retry limit
-        const retryCount = parseInt(task.progress ?? "0", 10);
+        const retryCount = task.retryCount ?? 0;
         if (retryCount < MAX_RETRIES) {
           updateDaemonTask(task.id, {
             status: "queued",
-            progress: String(retryCount + 1),
+            retryCount: retryCount + 1,
             error: `Retry ${retryCount + 1}/${MAX_RETRIES}: ${error}`,
           });
           console.log(`[daemon] task "${task.title}" failed, re-queued (retry ${retryCount + 1}/${MAX_RETRIES})`);

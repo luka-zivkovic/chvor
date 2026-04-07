@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { ScheduleRun } from "@chvor/shared";
 import { useScheduleStore } from "../../stores/schedule-store";
 import { cronToHuman, getNextRun, formatRelativeTime } from "../../lib/cron-utils";
@@ -57,10 +57,14 @@ export function ScheduleDetail() {
     useScheduleStore();
   const schedule = schedules.find((s) => s.id === selectedScheduleId);
 
-  if (!schedule) {
-    selectSchedule(null);
-    return null;
-  }
+  // Clear selection if schedule was deleted — via effect, not during render
+  useEffect(() => {
+    if (selectedScheduleId && !schedule) {
+      selectSchedule(null);
+    }
+  }, [selectedScheduleId, schedule, selectSchedule]);
+
+  if (!schedule) return null;
 
   const humanCron = cronToHuman(schedule.cronExpression);
   const nextRun = schedule.enabled ? getNextRun(schedule.cronExpression) : null;

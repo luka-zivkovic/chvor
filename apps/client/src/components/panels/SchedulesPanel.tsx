@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useScheduleStore } from "../../stores/schedule-store";
 import { usePulseStore } from "../../stores/pulse-store";
 import { ScheduleList } from "../schedules/ScheduleList";
@@ -142,8 +143,8 @@ function DaemonSection() {
     try {
       const updated = await api.daemon.updateConfig(updates);
       setConfig(updated);
-    } catch {
-      // silent
+    } catch (err) {
+      toast.error(`Failed to update daemon config: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
