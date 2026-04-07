@@ -45,13 +45,14 @@ export function resolveEnvPlaceholders(
     resolved[key] = value.replace(PLACEHOLDER_RE, (_match, credType: string) => {
       const data = credentialsByType.get(credType);
       if (!data) {
-        console.warn(
-          `[credential-resolver] no credential found for type: ${credType}`
-        );
-        return "";
+        throw new Error(`[credential-resolver] missing credential for type "${credType}" in env var "${key}" — add it in Settings > Credentials`);
       }
       // Prefer well-known field names, fall back to first value
-      return data.apiKey ?? data.token ?? data.key ?? Object.values(data)[0] ?? "";
+      const val = data.apiKey ?? data.token ?? data.key ?? Object.values(data)[0];
+      if (!val) {
+        throw new Error(`[credential-resolver] credential "${credType}" has no usable value for env var "${key}"`);
+      }
+      return val;
     });
   }
 

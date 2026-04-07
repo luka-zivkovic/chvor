@@ -2,10 +2,38 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { homedir } from "node:os";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Tool } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
 import { resolveEnvPlaceholders, resolveUrlPlaceholders } from "./credential-resolver.ts";
 import { loadTools } from "./capability-loader.ts";
+
+// Read version from package.json once at module load
+const __dirname = dirname(fileURLToPath(import.meta.url));
+let APP_VERSION = "0.0.1";
+try {
+  const pkg = JSON.parse(readFileSync(resolve(__dirname, "../../package.json"), "utf-8"));
+  APP_VERSION = pkg.version ?? APP_VERSION;
+} catch { /* fallback to default */ }
+
+// Timeouts (ms) — prevents hung MCP servers from blocking the platform
+const SPAWN_TIMEOUT_MS = 30_000;
+const DISCOVERY_TIMEOUT_MS = 15_000;
+const CALL_TIMEOUT_MS = 60_000;
+const HEALTH_CHECK_TIMEOUT_MS = 5_000;
+
+/** Race a promise against a timeout. Throws on timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
 
 interface McpToolInfo {
   name: string;
@@ -108,13 +136,13 @@ class McpManager {
 
     const client = new Client({
       name: "chvor",
-      version: "0.1.0",
+      version: APP_VERSION,
     });
 
-    await client.connect(transport);
+    await withTimeout(client.connect(transport), SPAWN_TIMEOUT_MS, `MCP spawn for ${tool.id}`);
 
     // Discover tools from the MCP server
-    const toolsResult = await client.listTools();
+    const toolsResult = await withTimeout(client.listTools(), DISCOVERY_TIMEOUT_MS, `MCP listTools for ${tool.id}`);
     const tools: McpToolInfo[] = (toolsResult.tools ?? []).map((t) => ({
       name: t.name,
       description: t.description ?? "",
@@ -139,6 +167,7 @@ class McpManager {
   /**
    * Call a tool on an MCP server.
    * On failure, attempts to close the stale connection, respawn, and retry once.
+   * Has a per-call timeout to prevent hung tool calls from blocking the orchestrator.
    */
   async callTool(
     toolId: string,
@@ -149,10 +178,11 @@ class McpManager {
     if (!conn) throw new Error(`No MCP connection for tool: ${toolId}`);
 
     try {
-      return await conn.client.callTool({
-        name: toolName,
-        arguments: args,
-      });
+      return await withTimeout(
+        conn.client.callTool({ name: toolName, arguments: args }),
+        CALL_TIMEOUT_MS,
+        `MCP callTool ${toolId}/${toolName}`,
+      );
     } catch (firstErr) {
       console.warn(`[mcp] callTool failed for ${toolId}/${toolName}, attempting reconnect…`);
       const toolRef = conn.tool;
@@ -160,10 +190,11 @@ class McpManager {
       await this.getConnection(toolRef);
       const newConn = this.connections.get(toolId);
       if (!newConn) throw firstErr;
-      return await newConn.client.callTool({
-        name: toolName,
-        arguments: args,
-      });
+      return await withTimeout(
+        newConn.client.callTool({ name: toolName, arguments: args }),
+        CALL_TIMEOUT_MS,
+        `MCP callTool retry ${toolId}/${toolName}`,
+      );
     }
   }
 
@@ -177,7 +208,8 @@ class McpManager {
 
   /**
    * Parse a qualified tool name (toolId__toolName) back to its parts.
-   * Falls back to searching all connections if no prefix.
+   * Falls back to searching all connections if no prefix — logs a warning
+   * if multiple connections expose the same tool name (ambiguous match).
    */
   findToolForQualifiedName(
     qualifiedToolName: string
@@ -189,22 +221,36 @@ class McpManager {
         toolName: qualifiedToolName.slice(sepIndex + 2),
       };
     }
-    // No prefix — search all connections
+    // No prefix — search all connections (warn on ambiguity)
+    const matches: Array<{ toolId: string; toolName: string }> = [];
     for (const conn of this.connections.values()) {
       if (conn.tools.some((t) => t.name === qualifiedToolName)) {
-        return { toolId: conn.toolId, toolName: qualifiedToolName };
+        matches.push({ toolId: conn.toolId, toolName: qualifiedToolName });
       }
     }
-    return null;
+    if (matches.length > 1) {
+      console.warn(`[mcp] ambiguous tool name "${qualifiedToolName}" found in ${matches.length} connections: ${matches.map((m) => m.toolId).join(", ")}. Using first match. Prefer qualified names (toolId__toolName).`);
+    }
+    return matches[0] ?? null;
   }
 
   /**
    * Get status of all active MCP connections (for diagnosis tool).
+   * Probes each connection with a lightweight listTools call to detect stale transports.
    */
-  getConnectionStatus(): Array<{ toolId: string; connected: boolean; toolCount: number }> {
+  async getConnectionStatus(): Promise<Array<{ toolId: string; connected: boolean; toolCount: number }>> {
     const result: Array<{ toolId: string; connected: boolean; toolCount: number }> = [];
-    for (const [id, conn] of this.connections) {
-      result.push({ toolId: id, connected: true, toolCount: conn.tools.length });
+    // Snapshot entries to avoid issues if connections mutate during async probes
+    const entries = [...this.connections.entries()];
+    for (const [id, conn] of entries) {
+      let connected = false;
+      try {
+        await withTimeout(conn.client.listTools(), HEALTH_CHECK_TIMEOUT_MS, `health check ${id}`);
+        connected = true;
+      } catch {
+        console.warn(`[mcp] health check failed for ${id} — marking as disconnected`);
+      }
+      result.push({ toolId: id, connected, toolCount: conn.tools.length });
     }
     return result;
   }

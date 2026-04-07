@@ -2224,8 +2224,10 @@ export function resolveApproval(requestId: string, approved: boolean, alwaysAllo
       const firstWord = cleaned.split(/\s+/)[0]?.toLowerCase() ?? "";
       if (firstWord) addTrustedCommand("pc", firstWord);
     } else {
+      // Store 3 tokens (binary + subcommand + first arg) for more precise matching
+      // e.g. "npm install express" not just "npm install" which would approve any package
       const parts = pending.command.trim().split(/\s+/);
-      const pattern = parts.slice(0, Math.min(parts.length, 2)).join(" ").toLowerCase();
+      const pattern = parts.slice(0, Math.min(parts.length, 3)).join(" ").toLowerCase();
       if (pattern) addTrustedCommand("shell", pattern);
     }
   }
@@ -2795,7 +2797,7 @@ async function handleDiagnose(args: Record<string, unknown>): Promise<NativeTool
 
     const skills = loadSkills();
     const tools = loadTools();
-    const mcpStatus = mcpManager.getConnectionStatus();
+    const mcpStatus = await mcpManager.getConnectionStatus();
     const browserCount = getActiveBrowserCount();
     const creds = listCredentials();
     const memories = listMemories();

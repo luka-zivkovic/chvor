@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { readFileSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadTools, getTool, reloadAll } from "../lib/capability-loader.ts";
@@ -156,9 +156,35 @@ tools.post("/import", async (c) => {
       return c.json({ error: "Invalid tool name — cannot derive a safe file name" }, 400);
     }
 
+    // Validate mcp.command and args if present — reject path traversal and code execution
+    if (preview.kind === "tool" && preview.mcpServer?.command) {
+      const cmd = preview.mcpServer.command;
+      if (cmd.includes("..") || cmd.includes("/") || cmd.includes("\\")) {
+        return c.json({ error: `Invalid mcp.command "${cmd}" — must be a bare command name, not a path` }, 400);
+      }
+      // Validate args — block path traversal and inline code execution flags
+      const dangerousArgPatterns = ["--eval", "-e", "--exec", "--import", "-c"];
+      for (const arg of preview.mcpServer.args ?? []) {
+        if (typeof arg !== "string") continue;
+        if (arg.includes("..") || /^[/\\]/.test(arg)) {
+          return c.json({ error: `Invalid mcp.args entry "${arg}" — must not contain path traversal or absolute paths` }, 400);
+        }
+        if (dangerousArgPatterns.includes(arg.toLowerCase())) {
+          return c.json({ error: `Invalid mcp.args entry "${arg}" — code execution flags are not allowed` }, 400);
+        }
+      }
+    }
+
     const userDir = join(homedir(), ".chvor", "tools");
     mkdirSync(userDir, { recursive: true });
     const filePath = join(userDir, `${slug}.md`);
+
+    // Prevent silent overwrite of existing tool files
+    const forceOverwrite = c.req.query("force") === "true";
+    if (existsSync(filePath) && !forceOverwrite) {
+      return c.json({ error: `Tool "${slug}" already exists. Use ?force=true to overwrite.` }, 409);
+    }
+
     writeFileSync(filePath, body, "utf-8");
 
     const { tools: reloaded } = reloadAll();

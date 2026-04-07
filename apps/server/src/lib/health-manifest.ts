@@ -53,12 +53,12 @@ function parseHistory(content: string): HistoryRow[] {
 // Manifest generation
 // ---------------------------------------------------------------------------
 
-export function writeManifest(): void {
+export async function writeManifest(): Promise<void> {
   try {
     const now = new Date().toISOString();
     const skills = loadSkills();
     const tools = loadTools();
-    const mcpStatus = mcpManager.getConnectionStatus();
+    const mcpStatus = await mcpManager.getConnectionStatus();
     const browserCount = getActiveBrowserCount();
     const creds = listCredentials();
     const schedules = listSchedules();
@@ -79,7 +79,7 @@ export function writeManifest(): void {
 
     // MCP status string
     const totalTools = tools.filter((t) => t.mcpServer).length;
-    const mcpRunning = mcpStatus.length;
+    const mcpRunning = mcpStatus.filter((s) => s.connected).length;
     const mcpStr = `${mcpRunning}/${totalTools}`;
 
     // Notes for this snapshot
@@ -138,7 +138,7 @@ export function writeManifest(): void {
       "|-----------|--------|--------|",
       `| Skills | ${skills.length} loaded | ${skills.filter((s) => s.source === "bundled").length} bundled, ${skills.filter((s) => s.source === "user").length} user |`,
       `| Tools | ${tools.length} loaded | ${tools.filter((t) => t.builtIn).length} bundled, ${tools.filter((t) => !t.builtIn).length} user |`,
-      `| MCP servers | ${mcpStr} running | ${mcpStatus.map((s) => s.toolId).join(", ") || "none active"} |`,
+      `| MCP servers | ${mcpStr} running | ${mcpStatus.filter((s) => s.connected).map((s) => s.toolId).join(", ") || "none active"} |`,
       `| Browser | ${browserCount} session(s) | ${browserCount > 0 ? "active" : "idle"} |`,
       `| Scheduler | ${activeSchedules.length} active | ${schedules.length} total |`,
       `| Channels | ${activeChannels}/${totalChannels} active | ${channelParts.join(", ")} |`,
@@ -178,8 +178,8 @@ export function initManifest(): void {
     clearInterval(timer);
     timer = null;
   }
-  writeManifest();
-  timer = setInterval(() => writeManifest(), INTERVAL_MS);
+  writeManifest().catch((err) => console.error("[health-manifest] initial write failed:", err));
+  timer = setInterval(() => writeManifest().catch((err) => console.error("[health-manifest] periodic write failed:", err)), INTERVAL_MS);
   console.log("[health-manifest] initialized (interval: 30m)");
 }
 
