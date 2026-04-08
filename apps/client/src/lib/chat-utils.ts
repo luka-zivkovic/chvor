@@ -1,6 +1,7 @@
 /** Human-friendly labels for common native tools. */
 const FRIENDLY_NAMES: Record<string, string> = {
   native__web_request: "Web Request",
+  native__web_search: "Web Search",
   native__add_credential: "Save Credential",
   native__update_credential: "Update Credential",
   native__list_credentials: "List Credentials",
