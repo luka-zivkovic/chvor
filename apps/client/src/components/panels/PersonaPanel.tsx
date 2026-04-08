@@ -135,7 +135,7 @@ export function PersonaPanel() {
   };
 
   const addExample = () => {
-    if (exampleResponses.length >= 5) return;
+    if (exampleResponses.length >= PERSONA_LIMITS.maxExamples) return;
     setExampleResponses((prev) => [...prev, { user: "", assistant: "" }]);
     setDirty(true);
   };
@@ -271,6 +271,7 @@ export function PersonaPanel() {
                     <Input
                       value={ex.user}
                       onChange={(e) => updateExample(i, "user", e.target.value)}
+                      maxLength={PERSONA_LIMITS.exampleText}
                       placeholder="What the user says..."
                     />
                   </div>
@@ -284,6 +285,7 @@ export function PersonaPanel() {
                         updateExample(i, "assistant", e.target.value)
                       }
                       rows={2}
+                      maxLength={PERSONA_LIMITS.exampleText}
                       placeholder="How the AI should respond..."
                     />
                   </div>
