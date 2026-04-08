@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -40,35 +40,47 @@ export default function Dashboard() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updating, setUpdating] = useState(false);
 
-  useEffect(() => {
-    invoke<ChvorConfig>("read_config", { instance: null }).then(setConfig);
-    invoke<UpdateInfo>("check_server_update").then(setUpdateInfo).catch(() => {});
+  // Refs to avoid stale closures in the tray listener
+  const handleStartRef = useRef<() => void>(() => {});
+  const handleStopRef = useRef<() => void>(() => {});
+  const handleUpdateRef = useRef<() => void>(() => {});
 
-    // Listen for tray actions
+  useEffect(() => {
+    let mounted = true;
+
+    invoke<ChvorConfig>("read_config", { instance: null })
+      .then((c) => { if (mounted) setConfig(c); })
+      .catch((e) => console.error("[dashboard] Failed to load config:", e));
+
+    invoke<UpdateInfo>("check_server_update")
+      .then((u) => { if (mounted) setUpdateInfo(u); })
+      .catch((e) => console.warn("[dashboard] Update check failed:", e));
+
+    // Listen for tray actions — use refs so handlers always have fresh state
     const unlisten = listen<string>("tray-action", (event) => {
       switch (event.payload) {
         case "start":
-          handleStart();
+          handleStartRef.current();
           break;
         case "stop":
-          handleStop();
+          handleStopRef.current();
           break;
         case "update":
-          handleUpdate();
+          handleUpdateRef.current();
           break;
       }
     });
 
     return () => {
+      mounted = false;
       unlisten.then((fn) => fn());
     };
   }, []);
 
-  async function handleStart() {
+  const handleStart = useCallback(async () => {
     setStarting(true);
     try {
       await invoke("start_server", { port: config?.port || null });
-      // Wait for health
       await invoke("poll_health", {
         port: config?.port || "9147",
         token: config?.token || null,
@@ -79,9 +91,9 @@ export default function Dashboard() {
     } finally {
       setStarting(false);
     }
-  }
+  }, [config, refresh]);
 
-  async function handleStop() {
+  const handleStop = useCallback(async () => {
     setStopping(true);
     try {
       await invoke("stop_server");
@@ -91,14 +103,14 @@ export default function Dashboard() {
     } finally {
       setStopping(false);
     }
-  }
+  }, [refresh]);
 
-  function handleOpen() {
+  const handleOpen = useCallback(() => {
     const p = port || config?.port || "9147";
     invoke("open_browser", { url: `http://localhost:${p}` });
-  }
+  }, [port, config]);
 
-  async function handleUpdate() {
+  const handleUpdate = useCallback(async () => {
     setUpdating(true);
     try {
       await invoke("stop_server");
@@ -108,7 +120,6 @@ export default function Dashboard() {
         port: config?.port || "9147",
         token: config?.token || null,
       });
-      // Refresh state
       const newConfig = await invoke<ChvorConfig>("read_config", { instance: null });
       setConfig(newConfig);
       setUpdateInfo(null);
@@ -118,7 +129,12 @@ export default function Dashboard() {
     } finally {
       setUpdating(false);
     }
-  }
+  }, [config, refresh]);
+
+  // Keep refs in sync so tray listener always calls fresh handlers
+  useEffect(() => { handleStartRef.current = handleStart; }, [handleStart]);
+  useEffect(() => { handleStopRef.current = handleStop; }, [handleStop]);
+  useEffect(() => { handleUpdateRef.current = handleUpdate; }, [handleUpdate]);
 
   return (
     <div className="flex flex-col h-screen">
@@ -201,6 +217,7 @@ export default function Dashboard() {
               onClick={refresh}
               className="p-2 rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
               title="Refresh status"
+              aria-label="Refresh status"
             >
               <RefreshCw className="w-4 h-4" />
             </button>

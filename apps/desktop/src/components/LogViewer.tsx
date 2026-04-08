@@ -56,6 +56,7 @@ export default function LogViewer() {
           onClick={loadLogs}
           className="p-1 rounded hover:bg-secondary transition-colors"
           title="Refresh logs"
+          aria-label="Refresh logs"
         >
           <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
         </button>

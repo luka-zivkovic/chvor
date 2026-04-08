@@ -1,7 +1,6 @@
 use serde::Serialize;
-use std::path::PathBuf;
 
-use super::config::chvor_home;
+use super::config::{app_dir, chvor_home, validate_port};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,11 +46,6 @@ pub fn get_asset_name(version: &str) -> String {
     format!("chvor-v{}-{}-{}.{}", version, os, arch, ext)
 }
 
-fn app_dir() -> PathBuf {
-    // App binaries are shared across instances (mirrors paths.ts:getAppDir)
-    dirs::home_dir().expect("home dir").join(".chvor").join("app")
-}
-
 #[tauri::command]
 pub fn get_platform_info() -> PlatformInfo {
     PlatformInfo {
@@ -63,10 +57,19 @@ pub fn get_platform_info() -> PlatformInfo {
 
 #[tauri::command]
 pub fn open_browser(url: String) -> Result<(), String> {
-    // Only allow http(s) URLs targeting localhost to prevent arbitrary protocol handler abuse
-    if !url.starts_with("http://localhost:") && !url.starts_with("https://localhost:") {
-        return Err("Only localhost URLs are allowed".to_string());
+    // Parse URL properly to prevent bypasses like http://localhost:@evil.com
+    let parsed = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
+
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err("Only http/https URLs are allowed".to_string());
     }
+
+    match parsed.host_str() {
+        Some("localhost") | Some("127.0.0.1") | Some("[::1]") => {}
+        _ => return Err("Only localhost URLs are allowed".to_string()),
+    }
+
     open::that(&url).map_err(|e| format!("Failed to open browser: {}", e))
 }
 
@@ -79,7 +82,11 @@ pub async fn save_credentials(
     provider_name: String,
     api_key: String,
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    validate_port(&port)?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     let url = format!("http://localhost:{}/api/credentials", port);
 
     let body = serde_json::json!({
@@ -110,7 +117,11 @@ pub async fn configure_persona(
     token: String,
     timezone: String,
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    validate_port(&port)?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     let url = format!("http://localhost:{}/api/persona", port);
 
     let body = serde_json::json!({
@@ -135,7 +146,7 @@ pub async fn configure_persona(
 #[tauri::command]
 pub fn get_chvor_dirs(instance: Option<String>) -> ChvorDirs {
     let home = chvor_home(instance.as_deref());
-    let shared_home = dirs::home_dir().expect("home dir").join(".chvor");
+    let shared_home = chvor_home(None);
     ChvorDirs {
         home: home.to_string_lossy().to_string(),
         app: app_dir().to_string_lossy().to_string(),

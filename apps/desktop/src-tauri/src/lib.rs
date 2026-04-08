@@ -76,11 +76,16 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn cleanup_server() {
+/// Clean up the server process on exit. Called from tray quit and window destroy.
+pub fn cleanup_server() {
     let pid_path = chvor_home(None).join("chvor.pid");
     if let Ok(raw) = std::fs::read_to_string(&pid_path) {
         if let Ok(pid) = raw.trim().parse::<u32>() {
-            kill_server_process(pid);
+            if commands::server::is_server_process(pid) {
+                kill_server_process(pid);
+            } else {
+                eprintln!("[cleanup] PID {} does not appear to be a chvor server, skipping kill", pid);
+            }
         }
         let _ = std::fs::remove_file(&pid_path);
     }
