@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { platform } from "node:os";
 import { validatePort } from "../lib/validate.js";
 
 export async function docker(opts: { port?: string }): Promise<void> {
@@ -15,12 +16,16 @@ export async function docker(opts: { port?: string }): Promise<void> {
     // no existing container — fine
   }
 
+  const dockerSocket = platform() === "win32"
+    ? "//./pipe/docker_engine"
+    : "/var/run/docker.sock";
+
   console.log("Starting chvor container...");
   execFileSync("docker", [
     "run", "-d", "--name", "chvor",
     "-p", `${port}:9147`,
     "-v", "chvor-data:/data",
-    "-v", "/var/run/docker.sock:/var/run/docker.sock",
+    "-v", `${dockerSocket}:/var/run/docker.sock`,
     image,
   ], { stdio: "inherit" });
 

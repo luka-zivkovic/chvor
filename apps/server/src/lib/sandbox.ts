@@ -143,117 +143,124 @@ export async function executeInSandbox(opts: {
   executionTimestamps.push(now);
   activeContainers++;
 
-  // Verify image exists locally before creating container
-  const available = await listAvailableImages();
-  if (!available.includes(language)) {
-    activeContainers--;
-    throw new Error(`Docker image for "${language}" is not pulled. Pull it first in Settings → Permissions → Code Sandbox.`);
-  }
-
-  // Build command based on language
-  const cmd =
-    language === "python" ? ["python3", "-c", code] :
-    language === "node" ? ["node", "-e", code] :
-    ["bash", "-c", code];
-
-  // Create container — no host mounts, no network by default
-  const createBody = {
-    Image: image,
-    Cmd: cmd,
-    Labels: { [CONTAINER_LABEL]: "true" },
-    HostConfig: {
-      Memory: config.memoryLimitMb * 1024 * 1024,
-      CpuQuota: config.cpuQuota,
-      NetworkMode: config.networkDisabled ? "none" : "bridge",
-      PidsLimit: 256,
-      Ulimits: [
-        { Name: "nofile", Soft: 1024, Hard: 2048 },
-        { Name: "nproc", Soft: 256, Hard: 512 },
-      ],
-      ReadonlyRootfs: false,
-      Binds: [] as string[],   // no host mounts — code runs in ephemeral /workspace
-    },
-    WorkingDir: "/workspace",
-    Tty: false,
-  };
-
-  const createRes = await dockerRequest(
-    "POST",
-    `/${API_VERSION}/containers/create?name=${containerName}`,
-    createBody
-  );
-  if (createRes.status !== 201) {
-    const errBody = createRes.body.toString();
-    throw new Error(`Container create failed (${createRes.status}): ${errBody}`);
-  }
-  const { Id: containerId } = JSON.parse(createRes.body.toString());
-
   try {
-    // Start container
-    const startRes = await dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/start`);
-    if (startRes.status !== 204 && startRes.status !== 304) {
-      throw new Error(`Container start failed: HTTP ${startRes.status}`);
+    // Verify image exists locally before creating container
+    const available = await listAvailableImages();
+    if (!available.includes(language)) {
+      throw new Error(`Docker image for "${language}" is not pulled. Pull it first in Settings → Permissions → Code Sandbox.`);
     }
 
-    // Wait for completion with timeout
-    const timeoutMs = config.timeoutMs;
-    let timedOut = false;
+    // Build command based on language
+    const cmd =
+      language === "python" ? ["python3", "-c", code] :
+      language === "node" ? ["node", "-e", code] :
+      ["bash", "-c", code];
 
-    const waitPromise = dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/wait`);
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
+    // Create container — no host mounts, no network by default
+    const createBody = {
+      Image: image,
+      Cmd: cmd,
+      Labels: { [CONTAINER_LABEL]: "true" },
+      HostConfig: {
+        Memory: config.memoryLimitMb * 1024 * 1024,
+        CpuQuota: config.cpuQuota,
+        NetworkMode: config.networkDisabled ? "none" : "bridge",
+        PidsLimit: 256,
+        Ulimits: [
+          { Name: "nofile", Soft: 1024, Hard: 2048 },
+          { Name: "nproc", Soft: 256, Hard: 512 },
+        ],
+        ReadonlyRootfs: false,
+        Binds: [] as string[],   // no host mounts — code runs in ephemeral /workspace
+      },
+      WorkingDir: "/workspace",
+      Tty: false,
+    };
 
-    const waitResult = await Promise.race([waitPromise, timeoutPromise]);
+    const createRes = await dockerRequest(
+      "POST",
+      `/${API_VERSION}/containers/create?name=${containerName}`,
+      createBody
+    );
+    if (createRes.status !== 201) {
+      const errBody = createRes.body.toString();
+      throw new Error(`Container create failed (${createRes.status}): ${errBody}`);
+    }
+    const { Id: containerId } = JSON.parse(createRes.body.toString());
 
-    if (waitResult === null) {
-      timedOut = true;
-      // Kill the container
+    try {
+      // Start container
+      const startRes = await dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/start`);
+      if (startRes.status !== 204 && startRes.status !== 304) {
+        throw new Error(`Container start failed: HTTP ${startRes.status}`);
+      }
+
+      // Wait for completion with timeout
+      const timeoutMs = config.timeoutMs;
+      let timedOut = false;
+
+      const waitPromise = dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/wait`);
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
+
+      const waitResult = await Promise.race([waitPromise, timeoutPromise]);
+
+      if (waitResult === null) {
+        timedOut = true;
+        // Kill the container
+        try {
+          await dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/kill`);
+        } catch {
+          // already dead
+        }
+      }
+
+      // Read logs — Docker multiplexed stream format
+      const logsRes = await dockerRequest(
+        "GET",
+        `/${API_VERSION}/containers/${containerId}/logs?stdout=1&stderr=1&timestamps=0`
+      );
+      const { stdout, stderr } = demuxDockerLogs(logsRes.body);
+
+      // Check OOM
+      const inspectRes = await dockerRequest("GET", `/${API_VERSION}/containers/${containerId}/json`);
+      let exitCode = -1;
+      let oomKilled = false;
+      if (inspectRes.status === 200) {
+        const info = JSON.parse(inspectRes.body.toString());
+        exitCode = info.State?.ExitCode ?? -1;
+        oomKilled = info.State?.OOMKilled ?? false;
+      }
+
+      if (timedOut) exitCode = 124; // conventional timeout exit code
+
+      const truncNote = (orig: string) =>
+        orig.length > MAX_OUTPUT_BYTES
+          ? orig.slice(0, MAX_OUTPUT_BYTES) + `\n[truncated: ${orig.length} bytes total, showing first ${MAX_OUTPUT_BYTES}]`
+          : orig;
+
+      return {
+        stdout: truncNote(stdout),
+        stderr: truncNote(stderr),
+        exitCode,
+        durationMs: Date.now() - startTime,
+        timedOut,
+        oomKilled,
+      };
+    } finally {
+      // Always cleanup container
       try {
-        await dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/kill`);
-      } catch {
-        // already dead
+        await dockerRequest("DELETE", `/${API_VERSION}/containers/${containerId}?force=true`);
+      } catch (err) {
+        logError("sandbox_error", err, { action: "container_delete", containerId });
       }
     }
-
-    // Read logs — Docker multiplexed stream format
-    const logsRes = await dockerRequest(
-      "GET",
-      `/${API_VERSION}/containers/${containerId}/logs?stdout=1&stderr=1&timestamps=0`
-    );
-    const { stdout, stderr } = demuxDockerLogs(logsRes.body);
-
-    // Check OOM
-    const inspectRes = await dockerRequest("GET", `/${API_VERSION}/containers/${containerId}/json`);
-    let exitCode = -1;
-    let oomKilled = false;
-    if (inspectRes.status === 200) {
-      const info = JSON.parse(inspectRes.body.toString());
-      exitCode = info.State?.ExitCode ?? -1;
-      oomKilled = info.State?.OOMKilled ?? false;
-    }
-
-    if (timedOut) exitCode = 124; // conventional timeout exit code
-
-    const truncNote = (orig: string) =>
-      orig.length > MAX_OUTPUT_BYTES
-        ? orig.slice(0, MAX_OUTPUT_BYTES) + `\n[truncated: ${orig.length} bytes total, showing first ${MAX_OUTPUT_BYTES}]`
-        : orig;
-
-    return {
-      stdout: truncNote(stdout),
-      stderr: truncNote(stderr),
-      exitCode,
-      durationMs: Date.now() - startTime,
-      timedOut,
-      oomKilled,
-    };
+  } catch (err) {
+    // Only release rate-limit slot on failure — successful runs should count
+    const idx = executionTimestamps.indexOf(now);
+    if (idx !== -1) executionTimestamps.splice(idx, 1);
+    throw err;
   } finally {
     activeContainers--;
-    // Always cleanup container
-    try {
-      await dockerRequest("DELETE", `/${API_VERSION}/containers/${containerId}?force=true`);
-    } catch (err) {
-      logError("sandbox_error", err, { action: "container_delete", containerId });
-    }
   }
 }
 
@@ -287,7 +294,7 @@ function decodeChunked(buf: Buffer): Buffer {
   while (offset < buf.length) {
     const lineEnd = buf.indexOf("\r\n", offset);
     if (lineEnd === -1) break;
-    const sizeStr = buf.subarray(offset, lineEnd).toString().trim();
+    const sizeStr = buf.subarray(offset, lineEnd).toString().split(";")[0]!.trim();
     const chunkSize = parseInt(sizeStr, 16);
     if (isNaN(chunkSize) || chunkSize === 0) break; // 0 = final chunk
     offset = lineEnd + 2; // skip \r\n after size
