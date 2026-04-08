@@ -17,7 +17,7 @@ export default function ProviderSelector({ onSelect, initialProvider }: Props) {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
 
-  const selected = PROVIDERS.find((p) => p.id === provider)!;
+  const selected = PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -65,6 +65,7 @@ export default function ProviderSelector({ onSelect, initialProvider }: Props) {
             type="button"
             onClick={() => setShowKey(!showKey)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label={showKey ? "Hide API key" : "Show API key"}
           >
             {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>

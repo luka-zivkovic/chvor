@@ -27,7 +27,9 @@ export function useServerStatus(pollMs = 3000) {
     refresh();
     const interval = setInterval(refresh, pollMs);
     return () => clearInterval(interval);
-  }, [refresh, pollMs]);
+    // refresh is stable (empty useCallback deps), safe to omit from deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollMs]);
 
   return { ...status, refresh };
 }

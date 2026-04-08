@@ -1,11 +1,10 @@
 use serde::Serialize;
-use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
 
 use crate::platform::silent_command;
 
-use super::config::{chvor_home, read_config};
+use super::config::{app_dir, chvor_home, read_config, validate_port};
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -29,22 +28,62 @@ impl Default for ServerState {
     }
 }
 
-fn app_dir() -> PathBuf {
-    dirs::home_dir().expect("home dir").join(".chvor").join("app")
+/// Check if a PID looks like a chvor server process (i.e., is a node process).
+/// This prevents killing unrelated processes if the PID file is stale.
+pub fn is_server_process(pid: u32) -> bool {
+    if !is_process_alive(pid) {
+        return false;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let output = silent_command("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
+            .output();
+        if let Ok(out) = output {
+            let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+            return text.contains("node");
+        }
+        false
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Check /proc/<pid>/cmdline on Linux, or just check process exists on macOS
+        if let Ok(cmdline) = std::fs::read_to_string(format!("/proc/{}/cmdline", pid)) {
+            return cmdline.contains("node");
+        }
+        // On macOS, /proc doesn't exist — use ps
+        if let Ok(output) = silent_command("ps")
+            .args(["-p", &pid.to_string(), "-o", "comm="])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            return text.contains("node");
+        }
+        // If we can't determine, assume it's ours (fail open for cleanup)
+        true
+    }
 }
 
 fn is_process_alive(pid: u32) -> bool {
     #[cfg(target_os = "windows")]
     {
-        let output = silent_command("tasklist")
-            .args(["/FI", &format!("PID eq {}", pid)])
-            .output();
-        match output {
-            Ok(out) => {
-                let text = String::from_utf8_lossy(&out.stdout);
-                text.contains(&pid.to_string())
+        // Use OpenProcess instead of shelling out to tasklist every 3s
+        unsafe {
+            let handle = windows_sys::Win32::System::Threading::OpenProcess(
+                0x1000, // PROCESS_QUERY_LIMITED_INFORMATION
+                0,      // bInheritHandle = FALSE
+                pid,
+            );
+            if handle.is_null() {
+                return false;
             }
-            Err(_) => false,
+            let mut exit_code: u32 = 0;
+            let ok = windows_sys::Win32::System::Threading::GetExitCodeProcess(
+                handle,
+                &mut exit_code,
+            );
+            windows_sys::Win32::Foundation::CloseHandle(handle);
+            ok != 0 && exit_code == 259 // STILL_ACTIVE
         }
     }
     #[cfg(not(target_os = "windows"))]
@@ -124,20 +163,7 @@ pub async fn start_server(
     let port = port.unwrap_or(config.port.clone());
 
     // Validate port
-    let port_num: u16 = port
-        .parse()
-        .map_err(|_| format!("Invalid port: {}", port))?;
-    if port_num < 1024 {
-        return Err(format!("Port {} is in the privileged range (< 1024)", port));
-    }
-
-    // Check if port is available before attempting to start server
-    if std::net::TcpListener::bind(("127.0.0.1", port_num)).is_err() {
-        return Err(format!(
-            "Port {} is already in use. Another instance may be running, or another application is using this port.",
-            port
-        ));
-    }
+    validate_port(&port)?;
 
     let token = config.token.clone();
 
@@ -229,7 +255,8 @@ pub async fn start_server(
 
     // Write PID file for CLI compatibility
     let pid_path = home.join("chvor.pid");
-    let _ = std::fs::write(&pid_path, pid.to_string());
+    std::fs::write(&pid_path, pid.to_string())
+        .map_err(|e| format!("Failed to write PID file: {}", e))?;
 
     // Store in managed state
     *state.pid.lock().unwrap_or_else(|e| e.into_inner()) = Some(pid);
@@ -296,13 +323,27 @@ pub fn kill_server_process(pid: u32) {
         unsafe {
             libc::kill(pid as i32, libc::SIGTERM);
         }
+        // Wait up to 5 seconds for graceful exit, then SIGKILL
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if !is_process_alive(pid) {
+                return;
+            }
+        }
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
     }
 }
 
 #[tauri::command]
 pub async fn poll_health(port: String, token: Option<String>) -> Result<bool, String> {
+    validate_port(&port)?;
     let url = format!("http://localhost:{}/api/health", port);
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     let timeout = std::time::Duration::from_secs(30);
     let interval = std::time::Duration::from_millis(500);
     let start = std::time::Instant::now();

@@ -11,11 +11,14 @@ use std::path::PathBuf;
 use crate::platform::silent_command;
 use tauri::{AppHandle, Emitter};
 
-use super::config::{read_config, write_config};
+use super::config::{app_dir, read_config, write_config};
 use super::system::get_asset_name;
 
 const GITHUB_API: &str = "https://api.github.com";
 const REPO: &str = "luka-zivkovic/chvor";
+
+/// Maximum reasonable download size (1 GB) to prevent runaway downloads
+const MAX_DOWNLOAD_SIZE: u64 = 1_073_741_824;
 
 #[derive(Debug, Deserialize)]
 struct GitHubAsset {
@@ -35,10 +38,6 @@ pub struct DownloadProgress {
     pub stage: String,
     pub percent: f64,
     pub message: String,
-}
-
-fn app_dir() -> PathBuf {
-    dirs::home_dir().expect("home dir").join(".chvor").join("app")
 }
 
 fn downloads_dir() -> PathBuf {
@@ -222,6 +221,12 @@ pub async fn download_release(version: String, app: AppHandle) -> Result<(), Str
     }
 
     let total_size = resp.content_length().unwrap_or(0);
+    if total_size > MAX_DOWNLOAD_SIZE {
+        return Err(format!(
+            "Download size ({} bytes) exceeds maximum allowed ({} bytes)",
+            total_size, MAX_DOWNLOAD_SIZE
+        ));
+    }
     let mut file = fs::File::create(&tarball_path).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
     let mut stream = resp.bytes_stream();
@@ -231,8 +236,14 @@ pub async fn download_release(version: String, app: AppHandle) -> Result<(), Str
         file.write_all(&chunk).map_err(|e| e.to_string())?;
         downloaded += chunk.len() as u64;
 
+        if downloaded > MAX_DOWNLOAD_SIZE {
+            drop(file);
+            let _ = fs::remove_file(&tarball_path);
+            return Err("Download exceeded maximum allowed size".to_string());
+        }
+
         if total_size > 0 {
-            let pct = 5.0 + (downloaded as f64 / total_size as f64) * 50.0;
+            let pct = (5.0 + (downloaded as f64 / total_size as f64) * 50.0).min(55.0);
             emit("download", pct, &format!("Downloading {}...", asset_name));
         }
     }
@@ -282,6 +293,9 @@ pub async fn download_release(version: String, app: AppHandle) -> Result<(), Str
         }
     }
 
+    // Clean up the downloaded tarball now that extraction succeeded
+    let _ = fs::remove_file(&tarball_path);
+
     emit("extract", 80.0, "Extraction complete");
 
     // Step 5: Install Playwright Chromium
@@ -293,7 +307,7 @@ pub async fn download_release(version: String, app: AppHandle) -> Result<(), Str
         .join("cli.js");
 
     if playwright_cli.exists() {
-        let _ = silent_command("node")
+        let pw_status = silent_command("node")
             .args([
                 playwright_cli.to_string_lossy().as_ref(),
                 "install",
@@ -301,9 +315,23 @@ pub async fn download_release(version: String, app: AppHandle) -> Result<(), Str
             ])
             .current_dir(&app_path)
             .status();
-    }
 
-    emit("browser", 95.0, "Browser engine installed");
+        match pw_status {
+            Ok(s) if s.success() => {
+                emit("browser", 95.0, "Browser engine installed");
+            }
+            Ok(s) => {
+                eprintln!("[download] Playwright install exited with status {}", s);
+                emit("browser", 95.0, "Browser install failed (non-fatal) — web scraping may not work");
+            }
+            Err(e) => {
+                eprintln!("[download] Playwright install error: {}", e);
+                emit("browser", 95.0, "Browser install failed (non-fatal) — web scraping may not work");
+            }
+        }
+    } else {
+        emit("browser", 95.0, "Browser engine skipped (not bundled)");
+    }
 
     // Step 6: Update config
     let mut config = read_config(None);

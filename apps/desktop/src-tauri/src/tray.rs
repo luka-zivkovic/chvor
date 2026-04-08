@@ -3,8 +3,7 @@ use tauri::{
     App, Emitter, Manager,
 };
 
-use crate::commands::config::chvor_home;
-use crate::commands::server::kill_server_process;
+use crate::cleanup_server;
 
 pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let open_item = MenuItem::with_id(app, "open", "Open Chvor", true, None::<&str>)?;
@@ -82,16 +81,11 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
             });
         }
         "quit" => {
-            // Stop the server before exiting to avoid orphaned processes
-            let pid_path = chvor_home(None).join("chvor.pid");
-            if let Ok(raw) = std::fs::read_to_string(&pid_path) {
-                if let Ok(pid) = raw.trim().parse::<u32>() {
-                    kill_server_process(pid);
-                }
-                let _ = std::fs::remove_file(&pid_path);
-            }
+            cleanup_server();
             app.exit(0);
         }
-        _ => {}
+        id => {
+            eprintln!("[tray] Unknown menu event: {}", id);
+        }
     }
 }

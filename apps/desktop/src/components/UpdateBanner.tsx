@@ -24,6 +24,7 @@ export function UpdateBanner() {
 
   const handleUpdate = async () => {
     setInstalling(true);
+    setProgress(0);
     try {
       const u = await check();
       if (!u?.available) return;

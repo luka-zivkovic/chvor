@@ -86,8 +86,8 @@ export default function SetupWizard({ onComplete }: Props) {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       try {
         await invoke("configure_persona", { port, token, timezone });
-      } catch {
-        // Non-fatal
+      } catch (e) {
+        console.warn("[setup] Persona configuration failed (non-fatal):", e);
       }
 
       // Now mark as onboarded — only after full success
