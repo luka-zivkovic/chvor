@@ -146,6 +146,7 @@ async function readResponseBody(response: Response, maxLength: number): Promise<
       totalLength += chunk.length;
     }
   } finally {
+    if (totalLength >= maxLength) await reader.cancel();
     reader.releaseLock();
   }
   let result = chunks.join("");
@@ -221,6 +222,7 @@ async function handleFetch(
     // Handle redirects safely — validate each redirect target against the same blocklist
     const MAX_REDIRECTS = 5;
     let currentResponse = response;
+    let currentUrl = url;
     let redirectCount = 0;
     while (currentResponse.status >= 300 && currentResponse.status < 400 && redirectCount < MAX_REDIRECTS) {
       if (remainingMs() <= 0) {
@@ -231,7 +233,7 @@ async function handleFetch(
         return { content: [{ type: "text", text: `Redirect with no Location header (HTTP ${currentResponse.status})` }] };
       }
       try {
-        const redirectUrl = new URL(location, url);
+        const redirectUrl = new URL(location, currentUrl);
         await validateFetchUrl(redirectUrl.href);
         // Strip sensitive headers on cross-origin redirects (browser standard behaviour)
         const isCrossOrigin = redirectUrl.host !== originHost;
@@ -246,6 +248,7 @@ async function handleFetch(
           signal: controller.signal,
           redirect: "manual",
         });
+        currentUrl = redirectUrl.href;
         redirectCount++;
       } catch (err) {
         return { content: [{ type: "text", text: `Redirect blocked: ${err instanceof Error ? err.message : String(err)}` }] };
@@ -326,8 +329,6 @@ function stripHtmlTags(html: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, " ")
     .replace(/&ndash;/g, "\u2013")
@@ -377,7 +378,7 @@ function parseDuckDuckGoHTML(
   for (let i = 0; i < links.length && results.length < maxResults; i++) {
     const url = extractRealUrl(links[i].rawHref);
     // Skip DuckDuckGo internal links (ads, redirects, etc.)
-    if (url.includes("duckduckgo.com")) continue;
+    try { if (new URL(url).hostname.endsWith("duckduckgo.com")) continue; } catch { /* keep non-parseable URLs */ }
     results.push({
       title: links[i].title,
       url,
