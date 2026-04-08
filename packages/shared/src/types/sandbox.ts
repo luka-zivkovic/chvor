@@ -8,7 +8,6 @@ export interface SandboxConfig {
   cpuQuota: number;
   timeoutMs: number;
   networkDisabled: boolean;
-  workspaceMountEnabled: boolean;
 }
 
 export interface UpdateSandboxConfigRequest {
@@ -17,7 +16,6 @@ export interface UpdateSandboxConfigRequest {
   cpuQuota?: number;
   timeoutMs?: number;
   networkDisabled?: boolean;
-  workspaceMountEnabled?: boolean;
 }
 
 export interface SandboxStatus {

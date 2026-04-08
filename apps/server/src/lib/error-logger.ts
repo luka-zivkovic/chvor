@@ -18,7 +18,8 @@ export type ErrorCategory =
   | "browser_error"
   | "scheduler_error"
   | "webhook_error"
-  | "system_error";
+  | "system_error"
+  | "sandbox_error";
 
 export interface ErrorLogEntry {
   id: string;

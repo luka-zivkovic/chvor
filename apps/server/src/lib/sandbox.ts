@@ -13,7 +13,7 @@ const DOCKER_SOCKET = process.platform === "win32"
 const LANGUAGE_IMAGES: Record<SandboxLanguage, string> = {
   python: "python:3.12-slim",
   node: "node:20-slim",
-  bash: "bash:5",
+  bash: "bash:5.2",
 };
 
 const CONTAINER_LABEL = "chvor.sandbox";
@@ -97,6 +97,18 @@ export async function pullImage(language: SandboxLanguage): Promise<void> {
   if (res.status !== 200) {
     throw new Error(`Failed to pull ${image}: HTTP ${res.status}`);
   }
+  // Docker pull streams JSON progress objects — check last line for errors
+  const body = res.body.toString().trim();
+  if (body) {
+    const lines = body.split("\n");
+    try {
+      const last = JSON.parse(lines[lines.length - 1]);
+      if (last.error) throw new Error(`Pull failed for ${image}: ${last.error}`);
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Pull failed")) throw err;
+      // non-JSON response — pull likely succeeded
+    }
+  }
 }
 
 export async function executeInSandbox(opts: {
@@ -126,110 +138,129 @@ export async function executeInSandbox(opts: {
   if (executionTimestamps.length >= MAX_EXECUTIONS_PER_WINDOW) {
     throw new Error(`Rate limit exceeded: max ${MAX_EXECUTIONS_PER_WINDOW} executions per minute`);
   }
+
+  // Claim slot immediately to prevent TOCTOU race across the async gap below
   executionTimestamps.push(now);
-
-  // Verify image exists locally before creating container
-  const available = await listAvailableImages();
-  if (!available.includes(language)) {
-    throw new Error(`Docker image for "${language}" is not pulled. Pull it first in Settings → Permissions → Code Sandbox.`);
-  }
-
   activeContainers++;
 
-  // Build command based on language
-  const cmd =
-    language === "python" ? ["python3", "-c", code] :
-    language === "node" ? ["node", "-e", code] :
-    ["bash", "-c", code];
-
-  // Create container — no host mounts, no network by default
-  const createBody = {
-    Image: image,
-    Cmd: cmd,
-    Labels: { [CONTAINER_LABEL]: "true" },
-    HostConfig: {
-      Memory: config.memoryLimitMb * 1024 * 1024,
-      CpuQuota: config.cpuQuota,
-      NetworkMode: config.networkDisabled ? "none" : "bridge",
-      ReadonlyRootfs: false,
-      Binds: [] as string[],   // no host mounts — code runs in ephemeral /workspace
-    },
-    WorkingDir: "/workspace",
-    Tty: false,
-  };
-
-  const createRes = await dockerRequest(
-    "POST",
-    `/${API_VERSION}/containers/create?name=${containerName}`,
-    createBody
-  );
-  if (createRes.status !== 201) {
-    const errBody = createRes.body.toString();
-    throw new Error(`Container create failed (${createRes.status}): ${errBody}`);
-  }
-  const { Id: containerId } = JSON.parse(createRes.body.toString());
-
   try {
-    // Start container
-    const startRes = await dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/start`);
-    if (startRes.status !== 204 && startRes.status !== 304) {
-      throw new Error(`Container start failed: HTTP ${startRes.status}`);
+    // Verify image exists locally before creating container
+    const available = await listAvailableImages();
+    if (!available.includes(language)) {
+      throw new Error(`Docker image for "${language}" is not pulled. Pull it first in Settings → Permissions → Code Sandbox.`);
     }
 
-    // Wait for completion with timeout
-    const timeoutMs = config.timeoutMs;
-    let timedOut = false;
+    // Build command based on language
+    const cmd =
+      language === "python" ? ["python3", "-c", code] :
+      language === "node" ? ["node", "-e", code] :
+      ["bash", "-c", code];
 
-    const waitPromise = dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/wait`);
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
+    // Create container — no host mounts, no network by default
+    const createBody = {
+      Image: image,
+      Cmd: cmd,
+      Labels: { [CONTAINER_LABEL]: "true" },
+      HostConfig: {
+        Memory: config.memoryLimitMb * 1024 * 1024,
+        CpuQuota: config.cpuQuota,
+        NetworkMode: config.networkDisabled ? "none" : "bridge",
+        PidsLimit: 256,
+        Ulimits: [
+          { Name: "nofile", Soft: 1024, Hard: 2048 },
+          { Name: "nproc", Soft: 256, Hard: 512 },
+        ],
+        ReadonlyRootfs: false,
+        Binds: [] as string[],   // no host mounts — code runs in ephemeral /workspace
+      },
+      WorkingDir: "/workspace",
+      Tty: false,
+    };
 
-    const waitResult = await Promise.race([waitPromise, timeoutPromise]);
+    const createRes = await dockerRequest(
+      "POST",
+      `/${API_VERSION}/containers/create?name=${containerName}`,
+      createBody
+    );
+    if (createRes.status !== 201) {
+      const errBody = createRes.body.toString();
+      throw new Error(`Container create failed (${createRes.status}): ${errBody}`);
+    }
+    const { Id: containerId } = JSON.parse(createRes.body.toString());
 
-    if (waitResult === null) {
-      timedOut = true;
-      // Kill the container
+    try {
+      // Start container
+      const startRes = await dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/start`);
+      if (startRes.status !== 204 && startRes.status !== 304) {
+        throw new Error(`Container start failed: HTTP ${startRes.status}`);
+      }
+
+      // Wait for completion with timeout
+      const timeoutMs = config.timeoutMs;
+      let timedOut = false;
+
+      const waitPromise = dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/wait`);
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
+
+      const waitResult = await Promise.race([waitPromise, timeoutPromise]);
+
+      if (waitResult === null) {
+        timedOut = true;
+        // Kill the container
+        try {
+          await dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/kill`);
+        } catch {
+          // already dead
+        }
+      }
+
+      // Read logs — Docker multiplexed stream format
+      const logsRes = await dockerRequest(
+        "GET",
+        `/${API_VERSION}/containers/${containerId}/logs?stdout=1&stderr=1&timestamps=0`
+      );
+      const { stdout, stderr } = demuxDockerLogs(logsRes.body);
+
+      // Check OOM
+      const inspectRes = await dockerRequest("GET", `/${API_VERSION}/containers/${containerId}/json`);
+      let exitCode = -1;
+      let oomKilled = false;
+      if (inspectRes.status === 200) {
+        const info = JSON.parse(inspectRes.body.toString());
+        exitCode = info.State?.ExitCode ?? -1;
+        oomKilled = info.State?.OOMKilled ?? false;
+      }
+
+      if (timedOut) exitCode = 124; // conventional timeout exit code
+
+      const truncNote = (orig: string) =>
+        orig.length > MAX_OUTPUT_BYTES
+          ? orig.slice(0, MAX_OUTPUT_BYTES) + `\n[truncated: ${orig.length} bytes total, showing first ${MAX_OUTPUT_BYTES}]`
+          : orig;
+
+      return {
+        stdout: truncNote(stdout),
+        stderr: truncNote(stderr),
+        exitCode,
+        durationMs: Date.now() - startTime,
+        timedOut,
+        oomKilled,
+      };
+    } finally {
+      // Always cleanup container
       try {
-        await dockerRequest("POST", `/${API_VERSION}/containers/${containerId}/kill`);
-      } catch {
-        // already dead
+        await dockerRequest("DELETE", `/${API_VERSION}/containers/${containerId}?force=true`);
+      } catch (err) {
+        logError("sandbox_error", err, { action: "container_delete", containerId });
       }
     }
-
-    // Read logs — Docker multiplexed stream format
-    const logsRes = await dockerRequest(
-      "GET",
-      `/${API_VERSION}/containers/${containerId}/logs?stdout=1&stderr=1&timestamps=0`
-    );
-    const { stdout, stderr } = demuxDockerLogs(logsRes.body);
-
-    // Check OOM
-    const inspectRes = await dockerRequest("GET", `/${API_VERSION}/containers/${containerId}/json`);
-    let exitCode = -1;
-    let oomKilled = false;
-    if (inspectRes.status === 200) {
-      const info = JSON.parse(inspectRes.body.toString());
-      exitCode = info.State?.ExitCode ?? -1;
-      oomKilled = info.State?.OOMKilled ?? false;
-    }
-
-    if (timedOut) exitCode = 124; // conventional timeout exit code
-
-    return {
-      stdout: stdout.slice(0, MAX_OUTPUT_BYTES),
-      stderr: stderr.slice(0, MAX_OUTPUT_BYTES),
-      exitCode,
-      durationMs: Date.now() - startTime,
-      timedOut,
-      oomKilled,
-    };
+  } catch (err) {
+    // Only release rate-limit slot on failure — successful runs should count
+    const idx = executionTimestamps.indexOf(now);
+    if (idx !== -1) executionTimestamps.splice(idx, 1);
+    throw err;
   } finally {
     activeContainers--;
-    // Always cleanup container
-    try {
-      await dockerRequest("DELETE", `/${API_VERSION}/containers/${containerId}?force=true`);
-    } catch {
-      // best effort
-    }
   }
 }
 
@@ -247,13 +278,31 @@ async function cleanupOrphans(): Promise<void> {
       try {
         await dockerRequest("DELETE", `/${API_VERSION}/containers/${c.Id}?force=true`);
         console.log(`[sandbox] Cleaned up orphaned container ${c.Id.slice(0, 12)}`);
-      } catch {
-        // best effort
+      } catch (err) {
+        logError("sandbox_error", err, { action: "orphan_cleanup", containerId: c.Id });
       }
     }
-  } catch {
-    // silent
+  } catch (err) {
+    logError("sandbox_error", err, { action: "orphan_list" });
   }
+}
+
+/** Decode HTTP chunked transfer encoding into a single buffer. */
+function decodeChunked(buf: Buffer): Buffer {
+  const parts: Buffer[] = [];
+  let offset = 0;
+  while (offset < buf.length) {
+    const lineEnd = buf.indexOf("\r\n", offset);
+    if (lineEnd === -1) break;
+    const sizeStr = buf.subarray(offset, lineEnd).toString().split(";")[0]!.trim();
+    const chunkSize = parseInt(sizeStr, 16);
+    if (isNaN(chunkSize) || chunkSize === 0) break; // 0 = final chunk
+    offset = lineEnd + 2; // skip \r\n after size
+    if (offset + chunkSize > buf.length) break;
+    parts.push(buf.subarray(offset, offset + chunkSize));
+    offset += chunkSize + 2; // skip chunk data + trailing \r\n
+  }
+  return Buffer.concat(parts);
 }
 
 /** Demux Docker's multiplexed stdout/stderr stream format.
@@ -365,7 +414,13 @@ function dockerRequest(
         const headerStr = raw.subarray(0, headerEnd).toString();
         const statusMatch = headerStr.match(/HTTP\/\d\.\d (\d+)/);
         const status = statusMatch ? parseInt(statusMatch[1], 10) : 500;
-        const responseBody = raw.subarray(headerEnd + 4);
+        const rawBody = raw.subarray(headerEnd + 4);
+
+        // Decode chunked transfer encoding if present
+        const responseBody = /transfer-encoding:\s*chunked/i.test(headerStr)
+          ? decodeChunked(rawBody)
+          : rawBody;
+
         resolve({ status, body: responseBody });
       });
       socket.on("error", reject);

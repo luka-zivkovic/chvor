@@ -204,6 +204,10 @@ export function PermissionsContent() {
     try {
       const result = await api.sandboxConfig.update(updates);
       setSandboxConfig(result);
+      // Refresh Docker status when toggling enabled
+      if (updates.enabled !== undefined) {
+        api.sandboxConfig.status().then(setSandboxStatus).catch(() => {});
+      }
     } catch {
       setSandboxConfig(prev);
       toast.error("Failed to update sandbox config");
@@ -607,7 +611,6 @@ export function PermissionsContent() {
                         <SelectOption value="30">30s</SelectOption>
                         <SelectOption value="60">60s</SelectOption>
                         <SelectOption value="120">120s</SelectOption>
-                        <SelectOption value="300">300s</SelectOption>
                       </Select>
                     </div>
                   </div>
@@ -630,7 +633,6 @@ export function PermissionsContent() {
                   </div>
                 </div>
 
-                {/* Workspace mount — hidden until safely implemented with path validation */}
               </>
             )}
           </div>

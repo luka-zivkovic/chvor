@@ -12,7 +12,11 @@ sandboxRoute.get("/", (c) => {
 
 sandboxRoute.patch("/", async (c) => {
   try {
-    const body = (await c.req.json()) as UpdateSandboxConfigRequest;
+    const raw = await c.req.json();
+    const ALLOWED_KEYS = ["enabled", "memoryLimitMb", "cpuQuota", "timeoutMs", "networkDisabled"];
+    const body: UpdateSandboxConfigRequest = Object.fromEntries(
+      Object.entries(raw).filter(([k]) => ALLOWED_KEYS.includes(k))
+    );
     const updated = updateSandboxConfig(body);
     invalidateToolCache();
     return c.json({ data: updated });
@@ -41,8 +45,12 @@ sandboxRoute.get("/status", async (c) => {
 
 sandboxRoute.post("/pull", async (c) => {
   try {
-    const { language } = (await c.req.json()) as { language?: SandboxLanguage };
-    const langs: SandboxLanguage[] = language ? [language] : ["python", "node", "bash"];
+    const { language } = (await c.req.json()) as { language?: string };
+    const VALID_LANGUAGES: SandboxLanguage[] = ["python", "node", "bash"];
+    if (language && !VALID_LANGUAGES.includes(language as SandboxLanguage)) {
+      return c.json({ error: `Invalid language: "${language}". Supported: python, node, bash.` }, 400);
+    }
+    const langs: SandboxLanguage[] = language ? [language as SandboxLanguage] : VALID_LANGUAGES;
     const results: Record<string, string> = {};
     for (const lang of langs) {
       try {
