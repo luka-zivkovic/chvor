@@ -810,7 +810,6 @@ const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   cpuQuota: 50000,
   timeoutMs: 30000,
   networkDisabled: true,
-  workspaceMountEnabled: false,
 };
 
 export function getSandboxConfig(): SandboxConfig {
@@ -830,7 +829,6 @@ export function updateSandboxConfig(updates: UpdateSandboxConfigRequest): Sandbo
   if (updates.cpuQuota !== undefined) current.cpuQuota = Math.max(10000, Math.min(200000, updates.cpuQuota));
   if (updates.timeoutMs !== undefined) current.timeoutMs = Math.max(5000, Math.min(120000, updates.timeoutMs));
   if (updates.networkDisabled !== undefined) current.networkDisabled = updates.networkDisabled;
-  if (updates.workspaceMountEnabled !== undefined) current.workspaceMountEnabled = updates.workspaceMountEnabled;
   setConfig("sandbox.config", JSON.stringify(current));
   return current;
 }

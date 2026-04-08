@@ -4540,7 +4540,12 @@ async function handleSandboxExecute(
     return { content: [{ type: "text", text: "Docker is not available. Install Docker Desktop (https://docker.com/get-started) and ensure the daemon is running." }] };
   }
 
-  const language = String(args.language) as import("@chvor/shared").SandboxLanguage;
+  const VALID_SANDBOX_LANGUAGES = ["python", "node", "bash"] as const;
+  const rawLang = String(args.language);
+  if (!(VALID_SANDBOX_LANGUAGES as readonly string[]).includes(rawLang)) {
+    return { content: [{ type: "text", text: `Unsupported sandbox language: "${rawLang}". Supported: python, node, bash.` }] };
+  }
+  const language = rawLang as import("@chvor/shared").SandboxLanguage;
   const code = String(args.code);
   const config = getSandboxConfig();
   const timeoutMs = Math.min(Number(args.timeoutMs ?? config.timeoutMs), 120000);

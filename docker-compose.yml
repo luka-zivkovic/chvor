@@ -6,6 +6,7 @@ services:
       - "${PORT:-9147}:9147"
     volumes:
       - chvor-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock  # required for sandbox code execution
     env_file:
       - path: .env
         required: false
