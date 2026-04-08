@@ -818,7 +818,7 @@ export async function executeConversation(
   emit({ type: "brain.thinking", data: { thought: "Processing..." } });
 
   // Tool severity mapping for emotion signals
-  const HIGH_SEVERITY_TOOLS = new Set(["native__execute_code", "native__shell", "native__web_search"]);
+  const HIGH_SEVERITY_TOOLS = new Set(["native__sandbox_execute", "native__shell_execute", "native__web_search"]);
   const LOW_SEVERITY_TOOLS = new Set(["native__read_file", "native__memory_query", "native__memory_store"]);
   function toolSeverity(toolName: string): "low" | "medium" | "high" {
     if (HIGH_SEVERITY_TOOLS.has(toolName)) return "high";

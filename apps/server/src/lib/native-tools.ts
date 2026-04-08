@@ -10,7 +10,7 @@ import type { ExecutionEvent, GatewayServerEvent, A2UIComponentEntry } from "@ch
 import { upsertSurface, updateBindings as updateSurfaceBindings, deleteSurface as deleteSurfaceFromDb, deleteAllSurfaces, surfaceExists } from "../db/a2ui-store.ts";
 import { logError, formatUptime } from "./error-logger.ts";
 import type { ErrorCategory } from "./error-logger.ts";
-import { getSelfHealingEnabled, getPcControlEnabled, setConfig, getShellConfig as getShellApprovalConfig, isCapabilityEnabled, isTrustedCommand, addTrustedCommand } from "../db/config-store.ts";
+import { getSelfHealingEnabled, getPcControlEnabled, setConfig, getShellConfig as getShellApprovalConfig, isCapabilityEnabled, isTrustedCommand, addTrustedCommand, getAllowLocalhost } from "../db/config-store.ts";
 import { fetchRegistryIndex, readCachedIndex } from "./registry-client.ts";
 import { installEntry, uninstallEntry, readLock } from "./registry-manager.ts";
 import type { RegistryEntryKind } from "@chvor/shared";
@@ -60,7 +60,6 @@ export async function validateFetchUrl(rawUrl: string): Promise<URL> {
     throw new Error(`Blocked protocol: ${parsed.protocol}`);
   }
   const { address } = await lookup(parsed.hostname);
-  const { getAllowLocalhost } = await import("../db/config-store.ts");
   if (!getAllowLocalhost() && isPrivateIp(address)) {
     throw new Error(`Blocked private/internal address: ${parsed.hostname}. Enable "Allow localhost" in Settings → Permissions to access local services.`);
   }
@@ -128,6 +127,34 @@ export function resolveWorkflowParams(
 const FETCH_TOOL_NAME = "native__web_request";
 const MAX_RESPONSE_LENGTH = 50_000;
 
+/**
+ * Read a response body with a byte limit to prevent OOM on large responses.
+ * Stops reading once the limit is reached and appends a truncation marker.
+ */
+async function readResponseBody(response: Response, maxLength: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let totalLength = 0;
+  try {
+    while (totalLength < maxLength) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      chunks.push(chunk);
+      totalLength += chunk.length;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  let result = chunks.join("");
+  if (result.length > maxLength) {
+    result = result.slice(0, maxLength) + "\n\n[...truncated]";
+  }
+  return result;
+}
+
 const fetchToolDef = tool({
   description:
     "[Web Browse] Make HTTP requests to URLs and APIs. Supports GET, POST, PUT, PATCH, DELETE with custom headers and request body.",
@@ -166,8 +193,21 @@ async function handleFetch(
 
   const hasBody = method !== "GET" && method !== "HEAD" && method !== "DELETE";
 
+  const SENSITIVE_HEADERS = new Set(["authorization", "cookie", "proxy-authorization"]);
+  const originHost = new URL(url).host;
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const deadline = Date.now() + 10_000;
+
+  function remainingMs(): number {
+    return Math.max(deadline - Date.now(), 0);
+  }
+
+  function scheduleAbort(): ReturnType<typeof setTimeout> {
+    return setTimeout(() => controller.abort(), remainingMs());
+  }
+
+  let timeout = scheduleAbort();
 
   try {
     const response = await fetch(url, {
@@ -183,6 +223,9 @@ async function handleFetch(
     let currentResponse = response;
     let redirectCount = 0;
     while (currentResponse.status >= 300 && currentResponse.status < 400 && redirectCount < MAX_REDIRECTS) {
+      if (remainingMs() <= 0) {
+        return { content: [{ type: "text", text: `Fetch timed out during redirect chain (followed ${redirectCount} redirects)` }] };
+      }
       const location = currentResponse.headers.get("location");
       if (!location) {
         return { content: [{ type: "text", text: `Redirect with no Location header (HTTP ${currentResponse.status})` }] };
@@ -190,9 +233,16 @@ async function handleFetch(
       try {
         const redirectUrl = new URL(location, url);
         await validateFetchUrl(redirectUrl.href);
+        // Strip sensitive headers on cross-origin redirects (browser standard behaviour)
+        const isCrossOrigin = redirectUrl.host !== originHost;
+        const redirectHeaders = isCrossOrigin
+          ? Object.fromEntries(Object.entries(headers).filter(([k]) => !SENSITIVE_HEADERS.has(k.toLowerCase())))
+          : headers;
+        clearTimeout(timeout);
+        timeout = scheduleAbort();
         currentResponse = await fetch(redirectUrl.href, {
           method: "GET",
-          headers,
+          headers: redirectHeaders,
           signal: controller.signal,
           redirect: "manual",
         });
@@ -206,9 +256,10 @@ async function handleFetch(
     }
     if (redirectCount > 0) {
       clearTimeout(timeout);
-      const redirectText = await currentResponse.text();
+      timeout = scheduleAbort();
+      const redirectText = await readResponseBody(currentResponse, MAX_RESPONSE_LENGTH);
       return {
-        content: [{ type: "text", text: `HTTP ${currentResponse.status} (after ${redirectCount} redirect${redirectCount > 1 ? "s" : ""})\n\n${redirectText.slice(0, 50_000)}` }],
+        content: [{ type: "text", text: `HTTP ${currentResponse.status} (after ${redirectCount} redirect${redirectCount > 1 ? "s" : ""})\n\n${redirectText}` }],
       };
     }
 
@@ -216,14 +267,15 @@ async function handleFetch(
     let text: string;
 
     if (contentType.includes("application/json")) {
+      const raw = await readResponseBody(response, MAX_RESPONSE_LENGTH);
       try {
-        const json = await response.json();
+        const json = JSON.parse(raw);
         text = JSON.stringify(json, null, 2);
       } catch {
-        text = await response.text();
+        text = raw;
       }
     } else {
-      text = await response.text();
+      text = await readResponseBody(response, MAX_RESPONSE_LENGTH);
     }
 
     if (text.length > MAX_RESPONSE_LENGTH) {
@@ -276,7 +328,13 @@ function stripHtmlTags(html: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#x27;/g, "'")
     .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, " ")
+    .replace(/&ndash;/g, "\u2013")
+    .replace(/&mdash;/g, "\u2014")
+    .replace(/&hellip;/g, "\u2026")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -318,8 +376,8 @@ function parseDuckDuckGoHTML(
 
   for (let i = 0; i < links.length && results.length < maxResults; i++) {
     const url = extractRealUrl(links[i].rawHref);
-    // Skip DuckDuckGo internal links
-    if (url.includes("duckduckgo.com/y.js")) continue;
+    // Skip DuckDuckGo internal links (ads, redirects, etc.)
+    if (url.includes("duckduckgo.com")) continue;
     results.push({
       title: links[i].title,
       url,
@@ -328,6 +386,10 @@ function parseDuckDuckGoHTML(
   }
   return results;
 }
+
+// Simple per-process rate limiter for web search (prevents IP bans from DDG)
+let lastSearchTimestamp = 0;
+const SEARCH_COOLDOWN_MS = 1_000;
 
 async function handleWebSearch(
   args: Record<string, unknown>
@@ -342,7 +404,15 @@ async function handleWebSearch(
     };
   }
 
-  const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  // Enforce cooldown between searches to avoid hammering DDG
+  const now = Date.now();
+  const elapsed = now - lastSearchTimestamp;
+  if (elapsed < SEARCH_COOLDOWN_MS) {
+    await new Promise((r) => setTimeout(r, SEARCH_COOLDOWN_MS - elapsed));
+  }
+  lastSearchTimestamp = Date.now();
+
+  const searchUrl = "https://html.duckduckgo.com/html/";
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -353,7 +423,7 @@ async function handleWebSearch(
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
       },
       body: `q=${encodeURIComponent(query)}`,
       signal: controller.signal,
@@ -374,6 +444,11 @@ async function handleWebSearch(
     const results = parseDuckDuckGoHTML(html, maxResults);
 
     if (results.length === 0) {
+      // Diagnostic: if DDG returned a large HTML body but we parsed 0 results,
+      // the HTML structure likely changed — log a warning for operators.
+      if (html.length > 5_000) {
+        console.warn("[web-search] DuckDuckGo returned HTML (%d bytes) but parser extracted 0 results — HTML structure may have changed", html.length);
+      }
       return {
         content: [
           {
