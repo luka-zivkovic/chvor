@@ -59,8 +59,9 @@ pub fn is_server_process(pid: u32) -> bool {
             let text = String::from_utf8_lossy(&output.stdout).to_lowercase();
             return text.contains("node");
         }
-        // If we can't determine, assume it's ours (fail open for cleanup)
-        true
+        // If we can't determine, fail closed — don't risk killing an unrelated process
+        eprintln!("[server] Could not determine if PID {} is a node process, skipping kill", pid);
+        false
     }
 }
 

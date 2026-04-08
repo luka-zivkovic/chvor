@@ -150,14 +150,25 @@ pub fn write_config(config: ChvorConfig, instance: Option<String>) -> Result<(),
     {
         let path_str = path.to_string_lossy();
         // Disable inheritance and remove all inherited ACEs
-        let _ = silent_command("icacls")
+        if let Err(e) = silent_command("icacls")
             .args([path_str.as_ref(), "/inheritance:r"])
-            .output();
+            .output()
+        {
+            eprintln!("[config] Failed to remove ACL inheritance on {}: {}", path_str, e);
+        }
         // Grant full control only to the current user
-        if let Ok(user) = std::env::var("USERNAME") {
-            let _ = silent_command("icacls")
-                .args([path_str.as_ref(), "/grant:r", &format!("{}:F", user)])
-                .output();
+        match std::env::var("USERNAME") {
+            Ok(user) => {
+                if let Err(e) = silent_command("icacls")
+                    .args([path_str.as_ref(), "/grant:r", &format!("{}:F", user)])
+                    .output()
+                {
+                    eprintln!("[config] Failed to set ACL for user {} on {}: {}", user, path_str, e);
+                }
+            }
+            Err(_) => {
+                eprintln!("[config] USERNAME env var not set, cannot restrict config file permissions");
+            }
         }
     }
 
