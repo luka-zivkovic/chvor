@@ -1,13 +1,21 @@
-import { useState, useEffect, useRef } from "react";
-import type { AnyProviderDef, CredentialSummary } from "@chvor/shared";
+import { useState, useEffect, useRef, useCallback } from "react";
+import type { AnyProviderDef, CredentialSummary, ProviderField } from "@chvor/shared";
 import { useCredentialStore } from "../../stores/credential-store";
 import { api } from "../../lib/api";
+import { CredentialForm } from "./CredentialForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
 import { WhatsAppPairingDialog } from "./WhatsAppPairingDialog";
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 interface Props {
   onClose: () => void;
@@ -19,7 +27,7 @@ interface Props {
   editCredential?: CredentialSummary;
 }
 
-type Step = "pick-provider" | "fill-fields";
+type Step = "pick-provider" | "fill-fields" | "custom-integration";
 
 export function AddCredentialDialog({ onClose, initialCredType, filter = "all", editCredential }: Props) {
   useEffect(() => {
@@ -52,6 +60,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [discovered, setDiscovered] = useState<Set<string>>(new Set());
+  const [customName, setCustomName] = useState("");
 
   // Auto-discover running local providers when picker is shown
   useEffect(() => {
@@ -202,6 +211,33 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
     .filter((f) => !f.optional)
     .every((f) => fields[f.key]?.trim()) ?? false);
 
+  const handleCustomSubmit = useCallback(
+    async (data: { name: string; fields: Record<string, string> }) => {
+      setSaving(true);
+      setError(null);
+      try {
+        const credType = slugify(customName) || "custom";
+        const summary = await api.credentials.create({
+          name: data.name,
+          type: credType,
+          data: data.fields,
+        });
+        addCredential(summary);
+        onClose();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [customName, addCredential, onClose],
+  );
+
+  const defaultCustomFields: ProviderField[] = [
+    { key: "apiKey", label: "API Key", type: "password" },
+    { key: "baseUrl", label: "Base URL", type: "text", optional: true, placeholder: "https://api.example.com" },
+  ];
+
   // WhatsApp uses QR pairing instead of field form
   if (selectedProvider?.credentialType === "whatsapp" || initialCredType === "whatsapp") {
     return <WhatsAppPairingDialog onClose={onClose} />;
@@ -249,6 +285,21 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
                     </div>
                   </Card>
                 ))}
+                {/* Custom Integration */}
+                <Card
+                  className="cursor-pointer p-3 text-left transition-colors hover:border-primary/30 hover:bg-muted border-dashed"
+                  onClick={() => setStep("custom-integration")}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="shrink-0 text-foreground/50 text-lg">+</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">Custom Integration</p>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        Any API or service
+                      </p>
+                    </div>
+                  </div>
+                </Card>
               </div>
             </div>
             <Button
@@ -389,6 +440,65 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
                   {saving ? "Saving..." : isEditMode ? "Update" : "Save"}
                 </Button>
               </div>
+            </div>
+          </>
+        )}
+
+        {step === "custom-integration" && (
+          <>
+            <div className="mb-4 shrink-0 flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setStep("pick-provider")}
+                className="h-auto px-1 py-0 text-[10px] text-muted-foreground"
+              >
+                &larr;
+              </Button>
+              <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Custom Integration
+              </h2>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
+              <div className="flex flex-col gap-3 mb-4">
+                <div className="flex flex-col gap-1">
+                  <Label className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    Integration Name
+                  </Label>
+                  <Input
+                    type="text"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    placeholder="e.g. My Cool API"
+                    autoFocus
+                  />
+                  {customName.trim() && (
+                    <p className="text-[9px] text-muted-foreground/60 font-mono">
+                      Type: {slugify(customName) || "custom"}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {customName.trim() && (
+                <CredentialForm
+                  providerName={customName.trim()}
+                  credentialType={slugify(customName) || "custom"}
+                  fields={defaultCustomFields}
+                  suggestedName={`${customName.trim()} API Key`}
+                  source="ai-research"
+                  allowFieldEditing
+                  onSubmit={handleCustomSubmit}
+                  onCancel={onClose}
+                />
+              )}
+
+              {error && (
+                <div className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-[10px] text-destructive">
+                  {error}
+                </div>
+              )}
             </div>
           </>
         )}
