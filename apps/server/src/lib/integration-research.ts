@@ -35,7 +35,8 @@ async function webSearch(query: string): Promise<string[] | null> {
     }
 
     return snippets.length > 0 ? snippets : null;
-  } catch {
+  } catch (err) {
+    console.warn("[integration-research] webSearch failed:", err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -53,6 +54,7 @@ async function extractWithLLM(
     const { text } = await generateText({
       model,
       maxTokens: 500,
+      abortSignal: AbortSignal.timeout(30_000),
       system:
         "You extract API credential information. Respond ONLY with valid JSON, no markdown.",
       prompt: `Given these web search snippets about "${serviceName}" API authentication:\n\n${snippets.join("\n\n")}\n\nExtract the following as JSON:\n{\n  "name": "human-readable service name",\n  "credentialType": "slug-style-type",\n  "fields": [{ "key": "fieldName", "label": "Field Label", "type": "password" | "text", "placeholder": "optional" }],\n  "baseUrl": "API base URL if known",\n  "authScheme": "bearer | basic | header | query-param",\n  "helpText": "Brief setup instructions"\n}`,
@@ -68,7 +70,8 @@ async function extractWithLLM(
       helpText: parsed.helpText || undefined,
       confidence: "researched",
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[integration-research] extractWithLLM failed for "${serviceName}":`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -85,6 +88,7 @@ async function inferWithLLM(
     const { text } = await generateText({
       model,
       maxTokens: 500,
+      abortSignal: AbortSignal.timeout(30_000),
       system:
         "You extract API credential information. Respond ONLY with valid JSON, no markdown.",
       prompt: `What credentials are needed to authenticate with the "${serviceName}" API?\n\nRespond as JSON:\n{\n  "name": "human-readable service name",\n  "credentialType": "slug-style-type",\n  "fields": [{ "key": "fieldName", "label": "Field Label", "type": "password" | "text", "placeholder": "optional" }],\n  "baseUrl": "API base URL if known",\n  "authScheme": "bearer | basic | header | query-param",\n  "helpText": "Brief setup instructions"\n}`,
@@ -100,7 +104,8 @@ async function inferWithLLM(
       helpText: parsed.helpText || undefined,
       confidence: "inferred",
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[integration-research] inferWithLLM failed for "${serviceName}":`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }

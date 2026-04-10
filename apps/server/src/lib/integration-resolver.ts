@@ -59,7 +59,8 @@ function findExistingCredential(credentialType: string): string | undefined {
     const creds = listCredentials();
     const match = creds.find((c) => c.type === credentialType);
     return match?.id;
-  } catch {
+  } catch (err) {
+    console.warn("[integration-resolver] findExistingCredential failed:", err instanceof Error ? err.message : String(err));
     return undefined;
   }
 }
@@ -128,7 +129,8 @@ async function getRegistryEntries(): Promise<RegistryEntryWithCredentials[]> {
   try {
     const index = await fetchRegistryIndex();
     return index.entries as RegistryEntryWithCredentials[];
-  } catch {
+  } catch (err) {
+    console.warn("[integration-resolver] fetchRegistryIndex failed, using cache:", err instanceof Error ? err.message : String(err));
     const cached = readCachedIndex();
     return (cached?.entries ?? []) as RegistryEntryWithCredentials[];
   }

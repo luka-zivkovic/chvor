@@ -21,6 +21,7 @@ export interface CredentialRequestData {
   helpText?: string;
   allowFieldEditing: boolean;
   existingCredentialId?: string;
+  redactedValues?: Record<string, string>;
   timestamp: string;
 }
 

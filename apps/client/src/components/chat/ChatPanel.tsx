@@ -379,6 +379,7 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
               helpText={request.helpText}
               allowFieldEditing={request.allowFieldEditing}
               existingCredentialId={request.existingCredentialId}
+              redactedValues={request.redactedValues}
               onSubmit={(data) => {
                 send({
                   type: "credential.respond",

@@ -1636,6 +1636,34 @@ async function handleRequestCredential(
     };
   }
 
+  // Resolve provider icon from registry
+  let providerIcon = "";
+  try {
+    const { LLM_PROVIDERS, INTEGRATION_PROVIDERS } = await import("./provider-registry.ts");
+    const llmMatch = LLM_PROVIDERS.find((p) => p.credentialType === credentialType);
+    if (llmMatch) providerIcon = llmMatch.icon;
+    else {
+      const intMatch = INTEGRATION_PROVIDERS.find((p) => p.credentialType === credentialType);
+      if (intMatch) providerIcon = intMatch.icon;
+    }
+  } catch { /* non-critical */ }
+
+  // Fetch redacted values for existing credential
+  let redactedValues: Record<string, string> | undefined;
+  if (existingCredentialId) {
+    try {
+      const { getCredentialData } = await import("../db/credential-store.ts");
+      const existing = getCredentialData(existingCredentialId);
+      if (existing) {
+        const NON_SECRET = new Set(["host", "port", "baseUrl", "domain", "homeserverUrl", "instanceUrl", "userId", "email", "vaultPath", "username"]);
+        redactedValues = {};
+        for (const [k, v] of Object.entries(existing.data)) {
+          redactedValues[k] = NON_SECRET.has(k) ? v : (v.length <= 4 ? "••••••••" : v.slice(0, 4) + "••••••••");
+        }
+      }
+    } catch { /* non-critical */ }
+  }
+
   const requestId = randomUUID();
   const allowFieldEditing = source === "ai-research";
 
@@ -1648,12 +1676,13 @@ async function handleRequestCredential(
     optional: f.optional,
   }));
 
-  ws.broadcast({
+  // Route to originating client if web, or broadcast as fallback
+  const credentialRequestEvent: import("@chvor/shared").GatewayServerEvent = {
     type: "credential.request",
     data: {
       requestId,
       providerName,
-      providerIcon: "",
+      providerIcon,
       credentialType,
       fields: normalizedFields,
       source,
@@ -1662,13 +1691,27 @@ async function handleRequestCredential(
       helpText,
       allowFieldEditing,
       existingCredentialId,
+      redactedValues,
       timestamp: new Date().toISOString(),
     },
-  });
+  };
 
-  // Wait for user response (no timeout — waits indefinitely)
+  if (context?.originClientId) {
+    ws.sendTo(context.originClientId, credentialRequestEvent);
+  } else {
+    ws.broadcast(credentialRequestEvent);
+  }
+
+  // Wait for user response with 10-minute timeout
+  const CREDENTIAL_REQUEST_TIMEOUT_MS = 10 * 60_000;
   const response = await new Promise<import("@chvor/shared").CredentialResponseData>((resolve) => {
-    pendingCredentialRequests.set(requestId, { resolve });
+    const timer = setTimeout(() => {
+      pendingCredentialRequests.delete(requestId);
+      resolve({ requestId, cancelled: true });
+    }, CREDENTIAL_REQUEST_TIMEOUT_MS);
+    pendingCredentialRequests.set(requestId, {
+      resolve: (r) => { clearTimeout(timer); resolve(r); },
+    });
   });
 
   // User cancelled
@@ -1685,6 +1728,20 @@ async function handleRequestCredential(
   const { createCredential, updateCredential } = await import("../db/credential-store.ts");
   const data = response.data ?? {};
   const credName = response.name ?? providerName;
+
+  // Validate required fields are present (skip for updates — empty means keep current)
+  if (!existingCredentialId) {
+    const requiredKeys = fields.filter((f) => !f.optional).map((f) => f.key);
+    const missingKeys = requiredKeys.filter((k) => !data[k]?.trim());
+    if (missingKeys.length > 0) {
+      return {
+        content: [{
+          type: "text",
+          text: `Credential save failed: missing required fields: ${missingKeys.join(", ")}. Please try again.`,
+        }],
+      };
+    }
+  }
 
   let savedId: string;
   let savedType: string;
@@ -1710,22 +1767,22 @@ async function handleRequestCredential(
   try {
     const { tryRestartChannel } = await import("../routes/credentials.ts");
     tryRestartChannel(savedType);
-  } catch { /* non-critical */ }
+  } catch (err) { console.warn("[request_credential] tryRestartChannel failed:", err instanceof Error ? err.message : String(err)); }
 
   try {
     const { mcpManager } = await import("./mcp-manager.ts");
     await mcpManager.closeConnectionsForCredential(savedType);
-  } catch { /* non-critical */ }
+  } catch (err) { console.warn("[request_credential] closeConnectionsForCredential failed:", err instanceof Error ? err.message : String(err)); }
 
   try {
     const { invalidateToolCache } = await import("./tool-builder.ts");
     invalidateToolCache();
-  } catch { /* non-critical */ }
+  } catch (err) { console.warn("[request_credential] invalidateToolCache failed:", err instanceof Error ? err.message : String(err)); }
 
   try {
     const { clearModelCache } = await import("./model-fetcher.ts");
     clearModelCache();
-  } catch { /* non-critical */ }
+  } catch (err) { console.warn("[request_credential] clearModelCache failed:", err instanceof Error ? err.message : String(err)); }
 
   // Auto-test
   let testMsg = "";

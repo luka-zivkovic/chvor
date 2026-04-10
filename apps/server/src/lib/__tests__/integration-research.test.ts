@@ -41,4 +41,11 @@ describe("researchIntegration", () => {
     expect(result.credentialType).not.toMatch(/^-/);
     expect(result.credentialType).not.toMatch(/-$/);
   });
+
+  it("returns generic fallback with 'inferred' confidence when LLM is unavailable", async () => {
+    const result = await researchIntegration("stripe");
+    expect(result.confidence).toBe("inferred");
+    expect(result.credentialType).toBe("stripe");
+    expect(result.name).toBeTruthy();
+  });
 });
