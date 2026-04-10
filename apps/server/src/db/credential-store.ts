@@ -4,6 +4,7 @@ import type {
   CredentialSummary,
   CredentialData,
   CredentialType,
+  ConnectionConfig,
 } from "@chvor/shared";
 import { getDb } from "./database.ts";
 import { encrypt, decrypt } from "./crypto.ts";
@@ -14,10 +15,16 @@ interface CredentialRow {
   type: string;
   encrypted_data: string;
   usage_context: string | null;
+  connection_config: string | null;
   created_at: string;
   updated_at: string;
   last_tested_at: string | null;
   test_status: string | null;
+}
+
+function parseConnectionConfig(raw: string | null): ConnectionConfig | undefined {
+  if (!raw) return undefined;
+  try { return JSON.parse(raw) as ConnectionConfig; } catch { return undefined; }
 }
 
 function rowToCredential(row: CredentialRow): Credential {
@@ -27,6 +34,7 @@ function rowToCredential(row: CredentialRow): Credential {
     type: row.type,
     encryptedData: row.encrypted_data,
     usageContext: row.usage_context ?? undefined,
+    connectionConfig: parseConnectionConfig(row.connection_config),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastTestedAt: row.last_tested_at ?? undefined,
@@ -58,6 +66,7 @@ function toSummary(cred: Credential, data: CredentialData): CredentialSummary {
     createdAt: cred.createdAt,
     redactedFields,
     usageContext: cred.usageContext,
+    connectionConfig: cred.connectionConfig,
   };
 }
 
@@ -191,4 +200,18 @@ export function updateTestStatus(
   db.prepare(
     "UPDATE credentials SET test_status = ?, last_tested_at = ?, updated_at = ? WHERE id = ?"
   ).run(status, now, now, id);
+}
+
+export function updateConnectionConfig(
+  id: string,
+  config: ConnectionConfig,
+): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const json = JSON.stringify(config);
+  // Also update usageContext with the summary for backward compatibility
+  const usageCtx = config.summary ?? null;
+  db.prepare(
+    "UPDATE credentials SET connection_config = ?, usage_context = COALESCE(usage_context, ?), updated_at = ? WHERE id = ?"
+  ).run(json, usageCtx, now, id);
 }

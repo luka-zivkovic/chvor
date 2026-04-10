@@ -116,6 +116,9 @@ interface AppState {
   pendingApprovals: CommandApprovalRequest[];
   respondToApproval: (requestId: string, approved: boolean) => void;
 
+  pendingCredentialRequests: import("@chvor/shared").CredentialRequestData[];
+  respondToCredentialRequest: (requestId: string) => void;
+
   handleServerEvent: (event: GatewayServerEvent) => void;
 }
 
@@ -124,7 +127,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   reconnecting: false,
   setConnected: (connected) => {
     const updates: Partial<AppState> = { connected };
-    if (!connected) updates.pendingApprovals = []; // clear zombie approval cards on disconnect
+    if (!connected) {
+      updates.pendingApprovals = [];
+      updates.pendingCredentialRequests = [];
+    }
     set(updates);
   },
   setReconnecting: (reconnecting) => set({ reconnecting }),
@@ -154,6 +160,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       streamingStopped: false,
       pendingModelInfo: null,
       pendingApprovals: [],
+      pendingCredentialRequests: [],
       currentEmotion: null,
       messagesLoading: false,
       messageTraces: {},
@@ -263,7 +270,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   messages: [],
-  addMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
+  addMessage: (message) => set((s) => {
+    if (s.messages.some((m) => m.id === message.id)) return s;
+    return { messages: [...s.messages, message] };
+  }),
   clearMessages: () => set({ messages: [] }),
 
   streamingContent: null,
@@ -298,6 +308,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Actual WS send is done in the component via useGateway; this just removes from state
     set((s) => ({
       pendingApprovals: s.pendingApprovals.filter((a) => a.requestId !== _requestId),
+    }));
+  },
+
+  pendingCredentialRequests: [],
+  respondToCredentialRequest: (requestId) => {
+    set((s) => ({
+      pendingCredentialRequests: s.pendingCredentialRequests.filter((r) => r.requestId !== requestId),
     }));
   },
 
@@ -494,6 +511,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       case "command.confirm":
         set((s) => ({
           pendingApprovals: [...s.pendingApprovals, event.data],
+        }));
+        break;
+      case "credential.request":
+        set((s) => ({
+          pendingCredentialRequests: [...s.pendingCredentialRequests, event.data],
         }));
         break;
       case "error":

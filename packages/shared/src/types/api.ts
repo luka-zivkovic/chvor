@@ -5,6 +5,26 @@ import type { AnyProviderDef } from "./provider.js";
 import type { CommandApprovalRequest, CommandApprovalResponse } from "./shell.js";
 import type { ActivityEntry } from "./activity.js";
 import type { A2UISurfaceUpdate, A2UIDataModelUpdate, A2UIDeleteSurface } from "./a2ui.js";
+import type { ProviderField } from "./provider.js";
+
+// ── Credential request (server-triggered modal) ────────────────
+
+export interface CredentialRequestData {
+  requestId: string;
+  providerName: string;
+  providerIcon: string;
+  credentialType: string;
+  fields: ProviderField[];
+  suggestion?: string;
+  timestamp: string;
+}
+
+export interface CredentialResponseData {
+  requestId: string;
+  cancelled: boolean;
+  data?: Record<string, string>;
+  name?: string;
+}
 
 // Credential endpoints
 export interface CreateCredentialRequest {
@@ -52,7 +72,8 @@ export type GatewayClientEvent =
   | { type: "chat.stop"; data: Record<string, never> }
   | { type: "canvas.subscribe"; data: { workspaceId: string } }
   | { type: "session.init"; data: { sessionId: string } }
-  | { type: "command.respond"; data: CommandApprovalResponse };
+  | { type: "command.respond"; data: CommandApprovalResponse }
+  | { type: "credential.respond"; data: CredentialResponseData };
 
 export type GatewayServerEvent =
   | { type: "chat.message"; data: { role: "assistant"; content: string; timestamp: string; messageId?: string; media?: import("./message.js").MediaArtifact[] } }
@@ -67,6 +88,7 @@ export type GatewayServerEvent =
   | { type: "chat.audio"; data: { audioUrl: string; duration?: number; messageId: string } }
   | { type: "voice.status"; data: { state: "transcribing" | "synthesizing" | "ready" } }
   | { type: "command.confirm"; data: CommandApprovalRequest }
+  | { type: "credential.request"; data: CredentialRequestData }
   | { type: "chat.stopped"; data: Record<string, never> }
   | { type: "chat.welcome"; data: { content: string; aiName: string } }
   | { type: "chat.modelInfo"; data: { providerId: string; model: string; wasFallback: boolean } }

@@ -76,7 +76,7 @@ import { existsSync } from "node:fs";
 import { join, basename, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
-import { resolveApproval } from "./lib/native-tools.ts";
+import { resolveApproval, resolveCredentialRequest } from "./lib/native-tools.ts";
 import { rotateOldLogs } from "./lib/error-logger.ts";
 import { initManifest, shutdownManifest } from "./lib/health-manifest.ts";
 import { initKeepAwake, shutdownKeepAwake } from "./lib/keep-awake.ts";
@@ -176,6 +176,16 @@ wsManager.onClientMessage((clientId, event) => {
         wsManager.sendTo(clientId, {
           type: "error",
           data: { message: "No pending approval with that ID (may have timed out)" },
+        });
+      }
+      break;
+    }
+    case "credential.respond": {
+      const resolved = resolveCredentialRequest(event.data.requestId, event.data);
+      if (!resolved) {
+        wsManager.sendTo(clientId, {
+          type: "error",
+          data: { message: "No pending credential request with that ID (may have timed out)" },
         });
       }
       break;

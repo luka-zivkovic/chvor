@@ -99,6 +99,9 @@ class McpManager {
         tool.mcpServer.url,
         tool.metadata.requires?.credentials
       );
+      // Log redacted URL for diagnostics
+      const redacted = resolvedUrl.replace(/\/[^/]{8,}$/, "/***");
+      console.log(`[mcp] connecting SSE for ${tool.id}: ${redacted}`);
       transport = new SSEClientTransport(new URL(resolvedUrl));
     } else {
       // Stdio transport — spawn local process
@@ -149,11 +152,13 @@ class McpManager {
 
     // Discover tools from the MCP server
     const toolsResult = await withTimeout(client.listTools(), DISCOVERY_TIMEOUT_MS, `MCP listTools for ${tool.id}`);
-    const tools: McpToolInfo[] = (toolsResult.tools ?? []).map((t) => ({
-      name: t.name,
-      description: t.description ?? "",
-      inputSchema: (t.inputSchema ?? {}) as Record<string, unknown>,
-    }));
+    const tools: McpToolInfo[] = (toolsResult.tools ?? [])
+      .filter((t) => t.name) // Drop tools with empty/missing names
+      .map((t) => ({
+        name: t.name,
+        description: t.description ?? "",
+        inputSchema: (t.inputSchema ?? {}) as Record<string, unknown>,
+      }));
 
     const connection: McpConnection = {
       client,

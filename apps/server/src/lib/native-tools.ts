@@ -1516,19 +1516,11 @@ async function handleAddCredential(
   // Auto-restart channel if applicable
   tryRestartChannel(type);
 
-  // Nudge AI to research usageContext for unknown providers
-  const isKnown = INTEGRATION_PROVIDERS.some((p) => p.credentialType === type);
-  const contextWarning = (!usageContext && !isKnown)
-    ? `\n\nWARNING: No usageContext set and "${type}" is not a known provider. ` +
-      `Research this service's API docs with native__web_request and update with native__update_credential to add usageContext. ` +
-      `Without it, you won't know how to authenticate API calls later.`
-    : "";
-
   return {
     content: [
       {
         type: "text",
-        text: `Credential "${name}" (${type}) saved (id: ${summary.id}).${testMsg}${contextWarning}`,
+        text: `Credential "${name}" (${type}) saved (id: ${summary.id}).${testMsg}`,
       },
     ],
   };
@@ -1536,6 +1528,55 @@ async function handleAddCredential(
 
 handlers.set(ADD_CREDENTIAL_NAME, handleAddCredential);
 nativeToolMapping.set(ADD_CREDENTIAL_NAME, { kind: "tool", id: "credentials" });
+
+// ---------------------------------------------------------------------------
+// Request credential (server-triggered modal / /addkey fallback)
+// ---------------------------------------------------------------------------
+
+const REQUEST_CREDENTIAL_NAME = "native__request_credential";
+const CREDENTIAL_REQUEST_TIMEOUT_MS = 120_000;
+
+const pendingCredentialRequests = new Map<
+  string,
+  { resolve: (response: import("@chvor/shared").CredentialResponseData) => void; timer: ReturnType<typeof setTimeout> }
+>();
+
+const requestCredentialToolDef = tool({
+  description:
+    "[Request Credential] Prompt the user to enter a credential via a UI modal. " +
+    "Use when a required credential is missing (e.g., user wants to connect a service but the API key is not stored). " +
+    "On web channels, opens a modal dialog. On messaging channels (Telegram, Discord, etc.), " +
+    "tells the user to use /addkey command or the web dashboard. " +
+    "Accepts any provider type — known providers show specific fields, unknown ones show a generic API Key field.",
+  parameters: z.object({
+    providerType: z.string().describe(
+      "The credential type / provider ID (e.g. 'composio', 'telegram', 'anthropic', 'nocodb'). Any string accepted.",
+    ),
+  }),
+});
+
+async function handleRequestCredential(
+  args: Record<string, unknown>,
+  context?: NativeToolContext,
+): Promise<NativeToolResult> {
+  return { content: [{ type: "text", text: "Credential request is being redesigned. Please add credentials via Settings > Integrations." }] };
+}
+
+/** Called when the client responds to a credential.request event. */
+export function resolveCredentialRequest(
+  requestId: string,
+  response: import("@chvor/shared").CredentialResponseData,
+): boolean {
+  const pending = pendingCredentialRequests.get(requestId);
+  if (!pending) return false;
+  clearTimeout(pending.timer);
+  pendingCredentialRequests.delete(requestId);
+  pending.resolve(response);
+  return true;
+}
+
+handlers.set(REQUEST_CREDENTIAL_NAME, handleRequestCredential);
+nativeToolMapping.set(REQUEST_CREDENTIAL_NAME, { kind: "tool", id: "credentials" });
 
 // ---------------------------------------------------------------------------
 // Update credential tool
@@ -1691,16 +1732,50 @@ async function handleUseCredential(
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
 
-  // Resolve usage context
-  const usage = result.cred.usageContext
-    ?? INTEGRATION_PROVIDERS.find((p) => p.credentialType === result.cred.type)?.usageContext;
-  const usageHint = usage ? `\n\nUsage: ${usage}` : "";
+  // Build connection instructions from connectionConfig (structured) or usageContext (legacy)
+  let connectionHint = "";
+  const cc = result.cred.connectionConfig;
+  if (cc) {
+    const parts: string[] = ["\n\n## Connection Config"];
+    if (cc.baseUrl) parts.push(`Base URL: ${cc.baseUrl}`);
+    if (cc.auth.headerName && cc.auth.headerTemplate) {
+      // Replace placeholder with the actual credential field value
+      let headerVal = cc.auth.headerTemplate;
+      for (const [k, v] of Object.entries(result.data)) {
+        headerVal = headerVal.replace(`{{${k}}}`, v);
+      }
+      parts.push(`Auth header: ${cc.auth.headerName}: ${headerVal}`);
+    }
+    if (cc.headers && Object.keys(cc.headers).length > 0) {
+      parts.push(`Required headers: ${JSON.stringify(cc.headers)}`);
+    }
+    if (cc.baseUrl) {
+      // Build a ready-to-use example for the LLM
+      const exHeaders: Record<string, string> = {};
+      if (cc.auth.headerName && cc.auth.headerTemplate) {
+        let hv = cc.auth.headerTemplate;
+        for (const [k, v] of Object.entries(result.data)) {
+          hv = hv.replace(`{{${k}}}`, v);
+        }
+        exHeaders[cc.auth.headerName] = hv;
+      }
+      if (cc.headers) Object.assign(exHeaders, cc.headers);
+      parts.push(`\nTo call this API, use native__web_request with:\n  url: ${cc.baseUrl}/{endpoint}\n  headers: ${JSON.stringify(exHeaders)}`);
+    }
+    parts.push(`\nConfidence: ${cc.confidence} (source: ${cc.source})`);
+    connectionHint = parts.join("\n");
+  } else {
+    // Fallback to legacy usageContext
+    const usage = result.cred.usageContext
+      ?? INTEGRATION_PROVIDERS.find((p) => p.credentialType === result.cred.type)?.usageContext;
+    connectionHint = usage ? `\n\nUsage: ${usage}` : "";
+  }
 
   return {
     content: [
       {
         type: "text",
-        text: `IMPORTANT: Use these values ONLY in tool call parameters (headers, body). Never display them in your response.\n\nCredential "${result.cred.name}" (${result.cred.type}):\n${fields}${usageHint}`,
+        text: `IMPORTANT: Use these values ONLY in tool call parameters (headers, body). Never display them in your response.\n\nCredential "${result.cred.name}" (${result.cred.type}):\n${fields}${connectionHint}`,
       },
     ],
   };
@@ -4686,6 +4761,7 @@ export function getNativeToolDefinitions(): Record<
     [LIST_WORKFLOWS_NAME]: listWorkflowsToolDef,
     [DELETE_WORKFLOW_NAME]: deleteWorkflowToolDef,
     [ADD_CREDENTIAL_NAME]: addCredentialToolDef,
+    [REQUEST_CREDENTIAL_NAME]: requestCredentialToolDef,
     [UPDATE_CREDENTIAL_NAME]: updateCredentialToolDef,
     [LIST_CREDENTIALS_NAME]: listCredentialsToolDef,
     [USE_CREDENTIAL_NAME]: useCredentialToolDef,

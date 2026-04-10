@@ -29,6 +29,10 @@ export function useGateway() {
   const intentionalCloseRef = useRef(false);
 
   const connect = useCallback(() => {
+    // Guard against duplicate connections (e.g. React StrictMode double-mount)
+    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     // Cookies are sent automatically for same-origin WebSocket connections
     const url = `${protocol}//${window.location.host}/ws`;

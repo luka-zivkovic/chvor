@@ -713,6 +713,16 @@ export function getDb(): Database.Database {
     console.log("[db] migration v18 applied: retention-cleanup job");
   }
 
+  if (currentVersion < 19) {
+    try {
+      db.exec("ALTER TABLE credentials ADD COLUMN connection_config TEXT");
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
+    }
+    db.pragma("user_version = 19");
+    console.log("[db] migrated to v19: connection_config column on credentials");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }

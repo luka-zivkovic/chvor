@@ -11,6 +11,7 @@ const VALID_CLIENT_EVENT_TYPES = new Set([
   "chat.stop",
   "approval.respond",
   "command.respond",
+  "credential.respond",
   "canvas.subscribe",
 ]);
 
@@ -32,6 +33,8 @@ function isValidClientEvent(event: unknown): event is GatewayClientEvent {
     case "approval.respond":
     case "command.respond":
       return typeof d.requestId === "string" && typeof d.approved === "boolean";
+    case "credential.respond":
+      return typeof d.requestId === "string" && typeof d.cancelled === "boolean";
     case "canvas.subscribe":
       return typeof d.workspaceId === "string";
     default:

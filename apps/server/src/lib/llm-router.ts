@@ -51,7 +51,10 @@ export function createModel(config: LLMConfig): LanguageModelV1 {
     }
     case "openai": {
       const provider = createOpenAI({ apiKey: config.apiKey });
-      return provider(config.model);
+      // structuredOutputs: false — prevents @ai-sdk/openai from setting strict: true
+      // on tool schemas for reasoning models (GPT-5+), which rejects optional params.
+      // See: https://github.com/vercel/ai/issues/7888
+      return provider(config.model, { structuredOutputs: false });
     }
     case "deepseek": {
       // Use OpenAI-compatible endpoint (DeepSeek API is OpenAI-compatible)
@@ -63,10 +66,10 @@ export function createModel(config: LLMConfig): LanguageModelV1 {
       return provider(config.model);
     }
     case "minimax": {
-      // MiniMax exposes an Anthropic-compatible endpoint
-      const provider = createAnthropic({
+      // MiniMax OpenAI-compatible endpoint (supports proper tool calling)
+      const provider = createOpenAI({
         apiKey: config.apiKey,
-        baseURL: "https://api.minimax.io/anthropic/v1",
+        baseURL: "https://api.minimax.io/v1",
       });
       return provider(config.model);
     }
