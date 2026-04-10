@@ -98,6 +98,8 @@ export class Gateway extends EventEmitter {
       return;
     }
 
+    // ── Bot commands — temporarily disabled during credential management overhaul ──
+
     // ── Session lifecycle: reset triggers ──
     const lifecycle = getSessionLifecycleConfig();
     if (lifecycle.resetTriggers.length > 0 && lifecycle.resetTriggers.includes(message.text.trim())) {

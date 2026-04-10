@@ -94,7 +94,8 @@ async function _fetchModelsForProvider(
     modelCache.set(providerId, { models: enriched, fetchedAt: Date.now() });
     return { models: enriched, source: "api" };
   } catch (err) {
-    console.warn(`[model-fetcher] Failed to fetch models for ${providerId}:`, err);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[model-fetcher] Failed to fetch models for ${providerId}: ${msg} — falling back to ${providerDef.models.length} static models`);
     // Fallback to static models
     return { models: providerDef.models, source: "static" };
   }

@@ -1447,95 +1447,382 @@ nativeToolMapping.set(DELETE_WORKFLOW_NAME, {
 // ---------------------------------------------------------------------------
 // Lazy imports to avoid circular deps (same pattern as schedule tools).
 
-const ADD_CREDENTIAL_NAME = "native__add_credential";
+// ---------------------------------------------------------------------------
+// Research integration (three-tier lookup)
+// ---------------------------------------------------------------------------
 
-const addCredentialToolDef = tool({
+const RESEARCH_INTEGRATION_NAME = "native__research_integration";
+
+const researchIntegrationToolDef = tool({
   description:
-    "[Add Credential] Save an API key, bot token, password, or other secret credential. " +
-    "Call this IMMEDIATELY when a user shares anything that looks like a secret — API keys, tokens, passwords, webhook URLs with tokens, connection strings. " +
-    "Auto-tests the credential and activates any associated channel. " +
-    "For unknown services: set usageContext with auth scheme, base URL, and example request. " +
-    "Research the service's API docs with native__web_request if unsure how to use the credential.",
+    "[Research Integration] Look up an integration/service to determine what credentials are needed. " +
+    "Checks the built-in provider registry, then the Chvor tool registry, then falls back to AI-powered web research. " +
+    "Call this BEFORE native__request_credential to determine what fields to collect. " +
+    "Returns the integration details including required credential fields and source tier.",
   parameters: z.object({
-    name: z
-      .string()
-      .describe("Human-readable name (e.g. 'GitHub Personal Access Token', 'Acme CRM API Key')"),
-    type: z
-      .string()
-      .describe("Service identifier in lowercase kebab-case (e.g., 'github', 'notion', 'acme-crm'). Use the service name, not the key type."),
-    data: z
-      .record(z.string())
-      .describe(
-        "Key-value credential fields. Common patterns: { apiKey } for API keys, { botToken } for bots, { username, password } for basic auth, { apiKey, baseUrl } for custom services. Use field names that match the service's terminology."
-      ),
-    usageContext: z
-      .string()
-      .optional()
-      .describe("REQUIRED for non-standard services. How to authenticate API calls: auth header format, base URL, required headers. Example: 'Authorization: Bearer <apiKey>. Base URL: https://api.example.com/v1'. Auto-inferred for known provider types if omitted."),
+    service: z.string().describe(
+      "The service/integration name (e.g., 'NocoDB', 'Anthropic', 'GitHub', 'My CRM'). Any string accepted.",
+    ),
   }),
 });
 
-async function handleAddCredential(
-  args: Record<string, unknown>
+async function handleResearchIntegration(
+  args: Record<string, unknown>,
 ): Promise<NativeToolResult> {
-  const { createCredential, listCredentials, deleteCredential } = await import("../db/credential-store.ts");
-  const { testProvider } = await import("../routes/provider-tester.ts");
-  const { tryRestartChannel } = await import("../routes/credentials.ts");
-  const { INTEGRATION_PROVIDERS } = await import("./provider-registry.ts");
+  const service = String(args.service);
 
-  const name = String(args.name);
-  const type = String(args.type);
-  const data = args.data as Record<string, string>;
+  try {
+    const { resolveIntegration } = await import("./integration-resolver.ts");
+    const resolution = await resolveIntegration(service);
 
-  // Resolve usageContext: explicit > provider default
-  let usageContext = args.usageContext ? String(args.usageContext) : undefined;
-  if (!usageContext) {
-    const provider = INTEGRATION_PROVIDERS.find((p) => p.credentialType === type);
-    if (provider?.usageContext) usageContext = provider.usageContext;
+    if (resolution) {
+      const fieldList = resolution.fields
+        .map((f) => `  - ${f.key} (${f.label})${f.optional ? " [optional]" : ""}`)
+        .join("\n");
+      const existingNote = resolution.existingCredentialId
+        ? `\nExisting credential found (id: ${resolution.existingCredentialId}). You can update it or create a new one.`
+        : "";
+      const registryNote = resolution.registryEntryId
+        ? `\nRegistry entry: ${resolution.registryEntryId}${resolution.registryToolInstalled ? " (installed)" : " (not installed — will auto-install on request)"}`
+        : "";
+
+      return {
+        content: [{
+          type: "text",
+          text: `Integration found: ${resolution.name}\n` +
+            `Source: ${resolution.source}\n` +
+            `Credential type: ${resolution.credentialType}\n` +
+            `Required fields:\n${fieldList}${registryNote}${existingNote}\n\n` +
+            `Call native__request_credential with these details to prompt the user for credentials.`,
+        }],
+      };
+    }
+
+    // Tier 3: AI-powered research
+    const { researchIntegration } = await import("./integration-research.ts");
+    const proposal = await researchIntegration(service);
+
+    const fieldList = proposal.fields
+      .map((f) => `  - ${f.key} (${f.label})${f.optional ? " [optional]" : ""}`)
+      .join("\n");
+    const helpNote = proposal.helpText ? `\nHelp: ${proposal.helpText}` : "";
+    const authNote = proposal.authScheme ? `\nAuth scheme: ${proposal.authScheme}` : "";
+    const baseUrlNote = proposal.baseUrl ? `\nBase URL: ${proposal.baseUrl}` : "";
+
+    return {
+      content: [{
+        type: "text",
+        text: `Integration researched: ${proposal.name}\n` +
+          `Source: ai-research (confidence: ${proposal.confidence})\n` +
+          `Credential type: ${proposal.credentialType}\n` +
+          `Required fields:\n${fieldList}${authNote}${baseUrlNote}${helpNote}\n\n` +
+          `Note: This was ${proposal.confidence === "researched" ? "found via web search" : "inferred from AI knowledge"}. ` +
+          `Field names may need adjustment.\n` +
+          `Call native__request_credential with source "ai-research" and confidence "${proposal.confidence}".`,
+      }],
+    };
+  } catch (err) {
+    return {
+      content: [{
+        type: "text",
+        text: `Failed to research integration "${service}": ${err instanceof Error ? err.message : String(err)}. ` +
+          `The user can add credentials manually via Settings > Integrations.`,
+      }],
+    };
+  }
+}
+
+handlers.set(RESEARCH_INTEGRATION_NAME, handleResearchIntegration);
+nativeToolMapping.set(RESEARCH_INTEGRATION_NAME, { kind: "tool", id: "credentials" });
+
+// ---------------------------------------------------------------------------
+// Request credential (server-triggered modal / /addkey fallback)
+// ---------------------------------------------------------------------------
+
+const REQUEST_CREDENTIAL_NAME = "native__request_credential";
+
+const pendingCredentialRequests = new Map<
+  string,
+  { resolve: (response: import("@chvor/shared").CredentialResponseData) => void }
+>();
+
+const requestCredentialToolDef = tool({
+  description:
+    "[Request Credential] Prompt the user to enter a credential via a UI modal. " +
+    "Call native__research_integration FIRST to determine the fields, then call this tool with the results. " +
+    "On web channels, opens a modal dialog. On messaging channels (Telegram, Discord, etc.), " +
+    "tells the user to use the web dashboard. " +
+    "Supports all three integration sources: provider-registry, chvor-registry, and ai-research.",
+  parameters: z.object({
+    credentialType: z.string().describe(
+      "The credential type / provider ID (e.g. 'anthropic', 'github', 'nocodb'). Use the value from research_integration.",
+    ),
+    providerName: z.string().describe(
+      "Human-readable service name (e.g. 'Anthropic', 'GitHub', 'NocoDB').",
+    ),
+    fields: z.array(z.object({
+      key: z.string().describe("Field key (e.g. 'apiKey', 'botToken')"),
+      label: z.string().describe("Human-readable label (e.g. 'API Key')"),
+      type: z.enum(["password", "text"]).default("password"),
+      placeholder: z.string().optional(),
+      helpText: z.string().optional(),
+      optional: z.boolean().optional(),
+    })).describe("Credential fields the user needs to fill in."),
+    source: z.enum(["provider-registry", "chvor-registry", "ai-research"]).describe(
+      "Where this integration was resolved from.",
+    ),
+    registryEntryId: z.string().optional().describe(
+      "Registry entry ID if source is chvor-registry.",
+    ),
+    confidence: z.enum(["researched", "inferred"]).optional().describe(
+      "Confidence level for ai-research results.",
+    ),
+    helpText: z.string().optional().describe(
+      "Optional help text shown in the modal.",
+    ),
+    existingCredentialId: z.string().optional().describe(
+      "If updating an existing credential, pass its ID.",
+    ),
+  }),
+});
+
+async function handleRequestCredential(
+  args: Record<string, unknown>,
+  context?: NativeToolContext,
+): Promise<NativeToolResult> {
+  const credentialType = String(args.credentialType);
+  const providerName = String(args.providerName);
+  const fields = args.fields as Array<{ key: string; label: string; type?: string; placeholder?: string; helpText?: string; optional?: boolean }>;
+  const source = String(args.source) as "provider-registry" | "chvor-registry" | "ai-research";
+  const registryEntryId = args.registryEntryId ? String(args.registryEntryId) : undefined;
+  const confidence = args.confidence ? String(args.confidence) as "researched" | "inferred" : undefined;
+  const helpText = args.helpText ? String(args.helpText) : undefined;
+  const existingCredentialId = args.existingCredentialId ? String(args.existingCredentialId) : undefined;
+
+  // Non-web channels → direct to web dashboard
+  const channelType = context?.channelType;
+  if (channelType && channelType !== "web") {
+    return {
+      content: [{
+        type: "text",
+        text: `I need your ${providerName} credentials but can't collect them on this channel. ` +
+          `Please open the Chvor web dashboard and go to Settings > Integrations to add your ${providerName} credential.`,
+      }],
+    };
   }
 
-  // Dedup: if same name+type already exists, replace it (create first to avoid data loss)
-  const existing = listCredentials().find(
-    (c) => c.name.toLowerCase() === name.toLowerCase() && c.type === type
-  );
+  // If source is chvor-registry with a registry entry, ensure it's installed
+  if (source === "chvor-registry" && registryEntryId) {
+    try {
+      const { readLock, installEntry } = await import("./registry-manager.ts");
+      const lock = readLock();
+      if (!lock.installed[registryEntryId]) {
+        await installEntry(registryEntryId, "tool");
+      }
+    } catch (err) {
+      console.error(`[request_credential] Failed to install registry entry ${registryEntryId}:`, err);
+    }
+  }
 
-  const summary = createCredential(name, type, data, usageContext);
-  if (existing) deleteCredential(existing.id);
+  // Send credential.request WebSocket event
+  const { getWSInstance } = await import("../gateway/ws-instance.ts");
+  const ws = getWSInstance();
+  if (!ws) {
+    return {
+      content: [{
+        type: "text",
+        text: `Cannot request credentials — no active WebSocket connection. Please add your ${providerName} credential via Settings > Integrations.`,
+      }],
+    };
+  }
+
+  // Resolve provider icon from registry
+  let providerIcon = "";
+  try {
+    const { LLM_PROVIDERS, INTEGRATION_PROVIDERS } = await import("./provider-registry.ts");
+    const llmMatch = LLM_PROVIDERS.find((p) => p.credentialType === credentialType);
+    if (llmMatch) providerIcon = llmMatch.icon;
+    else {
+      const intMatch = INTEGRATION_PROVIDERS.find((p) => p.credentialType === credentialType);
+      if (intMatch) providerIcon = intMatch.icon;
+    }
+  } catch { /* non-critical */ }
+
+  // Fetch redacted values for existing credential
+  let redactedValues: Record<string, string> | undefined;
+  if (existingCredentialId) {
+    try {
+      const { getCredentialData } = await import("../db/credential-store.ts");
+      const existing = getCredentialData(existingCredentialId);
+      if (existing) {
+        const NON_SECRET = new Set(["host", "port", "baseUrl", "domain", "homeserverUrl", "instanceUrl", "userId", "email", "vaultPath", "username"]);
+        redactedValues = {};
+        for (const [k, v] of Object.entries(existing.data)) {
+          redactedValues[k] = NON_SECRET.has(k) ? v : (v.length <= 4 ? "••••••••" : v.slice(0, 4) + "••••••••");
+        }
+      }
+    } catch { /* non-critical */ }
+  }
+
+  const requestId = randomUUID();
+  const allowFieldEditing = source === "ai-research";
+
+  const normalizedFields = fields.map((f) => ({
+    key: f.key,
+    label: f.label,
+    type: (f.type ?? "password") as "password" | "text",
+    placeholder: f.placeholder,
+    helpText: f.helpText,
+    optional: f.optional,
+  }));
+
+  // Route to originating client if web, or broadcast as fallback
+  const credentialRequestEvent: import("@chvor/shared").GatewayServerEvent = {
+    type: "credential.request",
+    data: {
+      requestId,
+      providerName,
+      providerIcon,
+      credentialType,
+      fields: normalizedFields,
+      source,
+      registryEntryId,
+      confidence,
+      helpText,
+      allowFieldEditing,
+      existingCredentialId,
+      redactedValues,
+      timestamp: new Date().toISOString(),
+    },
+  };
+
+  if (context?.originClientId) {
+    ws.sendTo(context.originClientId, credentialRequestEvent);
+  } else {
+    ws.broadcast(credentialRequestEvent);
+  }
+
+  // Wait for user response with 10-minute timeout
+  const CREDENTIAL_REQUEST_TIMEOUT_MS = 10 * 60_000;
+  const response = await new Promise<import("@chvor/shared").CredentialResponseData>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingCredentialRequests.delete(requestId);
+      resolve({ requestId, cancelled: true });
+    }, CREDENTIAL_REQUEST_TIMEOUT_MS);
+    pendingCredentialRequests.set(requestId, {
+      resolve: (r) => { clearTimeout(timer); resolve(r); },
+    });
+  });
+
+  // User cancelled
+  if (response.cancelled) {
+    return {
+      content: [{
+        type: "text",
+        text: `Credential request for ${providerName} was cancelled. You can add it later via Settings > Integrations.`,
+      }],
+    };
+  }
+
+  // Save credential
+  const { createCredential, updateCredential } = await import("../db/credential-store.ts");
+  const data = response.data ?? {};
+  const credName = response.name ?? providerName;
+
+  // Validate required fields are present (skip for updates — empty means keep current)
+  if (!existingCredentialId) {
+    const requiredKeys = fields.filter((f) => !f.optional).map((f) => f.key);
+    const missingKeys = requiredKeys.filter((k) => !data[k]?.trim());
+    if (missingKeys.length > 0) {
+      return {
+        content: [{
+          type: "text",
+          text: `Credential save failed: missing required fields: ${missingKeys.join(", ")}. Please try again.`,
+        }],
+      };
+    }
+  }
+
+  let savedId: string;
+  let savedType: string;
+
+  if (existingCredentialId) {
+    const updated = updateCredential(existingCredentialId, credName, data);
+    if (!updated) {
+      // Fallback: create new if update target doesn't exist
+      const created = createCredential(credName, credentialType, data);
+      savedId = created.id;
+      savedType = created.type;
+    } else {
+      savedId = updated.id;
+      savedType = updated.type;
+    }
+  } else {
+    const created = createCredential(credName, credentialType, data);
+    savedId = created.id;
+    savedType = created.type;
+  }
+
+  // Post-save actions
+  try {
+    const { tryRestartChannel } = await import("../routes/credentials.ts");
+    tryRestartChannel(savedType);
+  } catch (err) { console.warn("[request_credential] tryRestartChannel failed:", err instanceof Error ? err.message : String(err)); }
+
+  try {
+    const { mcpManager } = await import("./mcp-manager.ts");
+    await mcpManager.closeConnectionsForCredential(savedType);
+  } catch (err) { console.warn("[request_credential] closeConnectionsForCredential failed:", err instanceof Error ? err.message : String(err)); }
+
+  try {
+    const { invalidateToolCache } = await import("./tool-builder.ts");
+    invalidateToolCache();
+  } catch (err) { console.warn("[request_credential] invalidateToolCache failed:", err instanceof Error ? err.message : String(err)); }
+
+  try {
+    const { clearModelCache } = await import("./model-fetcher.ts");
+    clearModelCache();
+  } catch (err) { console.warn("[request_credential] clearModelCache failed:", err instanceof Error ? err.message : String(err)); }
 
   // Auto-test
   let testMsg = "";
   try {
-    const result = await testProvider(type, data);
-    testMsg = result.success
-      ? " Connection tested successfully."
-      : ` Test failed: ${result.error}.`;
+    const { testProvider } = await import("../routes/provider-tester.ts");
+    const { updateTestStatus } = await import("../db/credential-store.ts");
+    const result = await testProvider(credentialType, data);
+    if (result.success) {
+      updateTestStatus(savedId, "success");
+      testMsg = " Connection tested successfully.";
+    } else {
+      updateTestStatus(savedId, "failed");
+      testMsg = ` Test failed: ${result.error}.`;
+    }
   } catch {
     testMsg = " Could not auto-test.";
   }
 
-  // Auto-restart channel if applicable
-  tryRestartChannel(type);
-
-  // Nudge AI to research usageContext for unknown providers
-  const isKnown = INTEGRATION_PROVIDERS.some((p) => p.credentialType === type);
-  const contextWarning = (!usageContext && !isKnown)
-    ? `\n\nWARNING: No usageContext set and "${type}" is not a known provider. ` +
-      `Research this service's API docs with native__web_request and update with native__update_credential to add usageContext. ` +
-      `Without it, you won't know how to authenticate API calls later.`
-    : "";
-
   return {
-    content: [
-      {
-        type: "text",
-        text: `Credential "${name}" (${type}) saved (id: ${summary.id}).${testMsg}${contextWarning}`,
-      },
-    ],
+    content: [{
+      type: "text",
+      text: `Credential "${credName}" (${credentialType}) saved (id: ${savedId}).${testMsg}`,
+    }],
   };
 }
 
-handlers.set(ADD_CREDENTIAL_NAME, handleAddCredential);
-nativeToolMapping.set(ADD_CREDENTIAL_NAME, { kind: "tool", id: "credentials" });
+/** Called when the client responds to a credential.request event. */
+export function resolveCredentialRequest(
+  requestId: string,
+  response: import("@chvor/shared").CredentialResponseData,
+): boolean {
+  const pending = pendingCredentialRequests.get(requestId);
+  if (!pending) return false;
+  pendingCredentialRequests.delete(requestId);
+  pending.resolve(response);
+  return true;
+}
+
+handlers.set(REQUEST_CREDENTIAL_NAME, handleRequestCredential);
+nativeToolMapping.set(REQUEST_CREDENTIAL_NAME, { kind: "tool", id: "credentials" });
 
 // ---------------------------------------------------------------------------
 // Update credential tool
@@ -1553,7 +1840,7 @@ const updateCredentialToolDef = tool({
       .record(z.string())
       .optional()
       .describe(
-        "New credential data fields. Only include fields you want to change. Same format as native__add_credential data."
+        "New credential data fields. Only include fields you want to change. Key-value pairs like { apiKey: '...' }."
       ),
   }),
 });
@@ -1691,16 +1978,50 @@ async function handleUseCredential(
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
 
-  // Resolve usage context
-  const usage = result.cred.usageContext
-    ?? INTEGRATION_PROVIDERS.find((p) => p.credentialType === result.cred.type)?.usageContext;
-  const usageHint = usage ? `\n\nUsage: ${usage}` : "";
+  // Build connection instructions from connectionConfig (structured) or usageContext (legacy)
+  let connectionHint = "";
+  const cc = result.cred.connectionConfig;
+  if (cc) {
+    const parts: string[] = ["\n\n## Connection Config"];
+    if (cc.baseUrl) parts.push(`Base URL: ${cc.baseUrl}`);
+    if (cc.auth.headerName && cc.auth.headerTemplate) {
+      // Replace placeholder with the actual credential field value
+      let headerVal = cc.auth.headerTemplate;
+      for (const [k, v] of Object.entries(result.data)) {
+        headerVal = headerVal.replace(`{{${k}}}`, v);
+      }
+      parts.push(`Auth header: ${cc.auth.headerName}: ${headerVal}`);
+    }
+    if (cc.headers && Object.keys(cc.headers).length > 0) {
+      parts.push(`Required headers: ${JSON.stringify(cc.headers)}`);
+    }
+    if (cc.baseUrl) {
+      // Build a ready-to-use example for the LLM
+      const exHeaders: Record<string, string> = {};
+      if (cc.auth.headerName && cc.auth.headerTemplate) {
+        let hv = cc.auth.headerTemplate;
+        for (const [k, v] of Object.entries(result.data)) {
+          hv = hv.replace(`{{${k}}}`, v);
+        }
+        exHeaders[cc.auth.headerName] = hv;
+      }
+      if (cc.headers) Object.assign(exHeaders, cc.headers);
+      parts.push(`\nTo call this API, use native__web_request with:\n  url: ${cc.baseUrl}/{endpoint}\n  headers: ${JSON.stringify(exHeaders)}`);
+    }
+    parts.push(`\nConfidence: ${cc.confidence} (source: ${cc.source})`);
+    connectionHint = parts.join("\n");
+  } else {
+    // Fallback to legacy usageContext
+    const usage = result.cred.usageContext
+      ?? INTEGRATION_PROVIDERS.find((p) => p.credentialType === result.cred.type)?.usageContext;
+    connectionHint = usage ? `\n\nUsage: ${usage}` : "";
+  }
 
   return {
     content: [
       {
         type: "text",
-        text: `IMPORTANT: Use these values ONLY in tool call parameters (headers, body). Never display them in your response.\n\nCredential "${result.cred.name}" (${result.cred.type}):\n${fields}${usageHint}`,
+        text: `IMPORTANT: Use these values ONLY in tool call parameters (headers, body). Never display them in your response.\n\nCredential "${result.cred.name}" (${result.cred.type}):\n${fields}${connectionHint}`,
       },
     ],
   };
@@ -4685,7 +5006,8 @@ export function getNativeToolDefinitions(): Record<
     [RUN_WORKFLOW_NAME]: runWorkflowToolDef,
     [LIST_WORKFLOWS_NAME]: listWorkflowsToolDef,
     [DELETE_WORKFLOW_NAME]: deleteWorkflowToolDef,
-    [ADD_CREDENTIAL_NAME]: addCredentialToolDef,
+    [RESEARCH_INTEGRATION_NAME]: researchIntegrationToolDef,
+    [REQUEST_CREDENTIAL_NAME]: requestCredentialToolDef,
     [UPDATE_CREDENTIAL_NAME]: updateCredentialToolDef,
     [LIST_CREDENTIALS_NAME]: listCredentialsToolDef,
     [USE_CREDENTIAL_NAME]: useCredentialToolDef,

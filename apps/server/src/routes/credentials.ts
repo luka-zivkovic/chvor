@@ -66,6 +66,7 @@ credentials.post("/", async (c) => {
     clearModelCache();
     tryRestartChannel(body.type);
     await refreshToolsForCredential(body.type);
+
     return c.json({ data: summary }, 201);
   } catch (err) {
     console.error("[api] POST /credentials error:", err);

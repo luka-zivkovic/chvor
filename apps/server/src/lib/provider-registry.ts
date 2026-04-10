@@ -44,9 +44,14 @@ export const LLM_PROVIDERS: readonly LLMProviderDef[] = Object.freeze([
       },
     ],
     models: [
+      { id: "gpt-4.1", name: "GPT-4.1", contextWindow: 1047576, supportsStreaming: true, maxTokens: 32768, cost: { input: 2, output: 8 }, capabilities: ["vision", "toolUse", "code"] },
+      { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", contextWindow: 1047576, supportsStreaming: true, maxTokens: 32768, cost: { input: 0.4, output: 1.6 }, capabilities: ["vision", "toolUse", "code"] },
+      { id: "gpt-4.1-nano", name: "GPT-4.1 Nano", contextWindow: 1047576, supportsStreaming: true, maxTokens: 32768, cost: { input: 0.1, output: 0.4 }, capabilities: ["vision", "toolUse", "code"] },
       { id: "gpt-4o", name: "GPT-4o", contextWindow: 128000, supportsStreaming: true, maxTokens: 16384, cost: { input: 2.5, output: 10 }, capabilities: ["vision", "toolUse", "code"] },
       { id: "gpt-4o-mini", name: "GPT-4o Mini", contextWindow: 128000, supportsStreaming: true, maxTokens: 16384, cost: { input: 0.15, output: 0.6 }, capabilities: ["vision", "toolUse", "code"] },
+      { id: "o3", name: "o3", contextWindow: 200000, supportsStreaming: true, maxTokens: 100000, cost: { input: 2, output: 8 }, capabilities: ["reasoning", "toolUse", "code"] },
       { id: "o3-mini", name: "o3-mini", contextWindow: 200000, supportsStreaming: true, maxTokens: 100000, cost: { input: 1.1, output: 4.4 }, capabilities: ["reasoning", "toolUse", "code"] },
+      { id: "o4-mini", name: "o4-mini", contextWindow: 200000, supportsStreaming: true, maxTokens: 100000, cost: { input: 1.1, output: 4.4 }, capabilities: ["reasoning", "toolUse", "code"] },
     ],
   },
   {

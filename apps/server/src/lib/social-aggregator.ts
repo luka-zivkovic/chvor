@@ -1,14 +1,15 @@
 /**
- * Aggregates social connections from all providers (Composio OAuth + custom MCP tools).
+ * Aggregates social connections from all providers (Composio OAuth + direct OAuth + custom MCP tools).
  * Provides a unified view for the social:list capability.
  */
 
 import { getCapabilityRegistry } from "./capability-resolver.ts";
+import { listCredentials, getCredentialData } from "../db/credential-store.ts";
 
 export interface AggregatedConnection {
   platform: string;
   provider: string;
-  providerType: "composio" | "mcp";
+  providerType: "composio" | "direct" | "mcp";
   status: string;
   connectedAt?: string;
   id?: string;
@@ -53,7 +54,40 @@ export async function listAllSocialConnections(
     }
   }
 
-  // 2. Custom MCP tool connections (non-Composio providers)
+  // 2. Direct OAuth connections (e.g. Reddit, Google)
+  try {
+    const creds = listCredentials();
+    for (const cred of creds) {
+      if (!cred.type.startsWith("oauth-token-")) continue;
+      const oauthPlatform = cred.type.replace("oauth-token-", "");
+      if (!SOCIAL_PLATFORMS.has(oauthPlatform)) continue;
+      if (platform && oauthPlatform !== platform) continue;
+      // Skip if already found via Composio
+      if (connections.some((c) => c.platform === oauthPlatform)) continue;
+
+      let status = "active";
+      try {
+        const data = getCredentialData(cred.id);
+        const d = (data?.data ?? {}) as Record<string, string>;
+        if (d.expiresAt && new Date(d.expiresAt) < new Date()) {
+          status = d.refreshToken ? "expired" : "failed";
+        }
+      } catch { /* use default status */ }
+
+      connections.push({
+        platform: oauthPlatform,
+        provider: "Direct OAuth",
+        providerType: "direct",
+        status,
+        connectedAt: cred.createdAt,
+        id: cred.id,
+      });
+    }
+  } catch (err) {
+    console.warn("[social-aggregator] Direct OAuth error:", err instanceof Error ? err.message : String(err));
+  }
+
+  // 3. Custom MCP tool connections (non-Composio providers)
   const registry = getCapabilityRegistry();
   const mcpPlatforms = new Map<string, { toolId: string; capabilities: string[] }>();
 
