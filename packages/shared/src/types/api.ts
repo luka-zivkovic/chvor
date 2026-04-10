@@ -15,7 +15,12 @@ export interface CredentialRequestData {
   providerIcon: string;
   credentialType: string;
   fields: ProviderField[];
-  suggestion?: string;
+  source: "provider-registry" | "chvor-registry" | "ai-research";
+  registryEntryId?: string;
+  confidence?: "researched" | "inferred";
+  helpText?: string;
+  allowFieldEditing: boolean;
+  existingCredentialId?: string;
   timestamp: string;
 }
 

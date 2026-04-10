@@ -53,3 +53,33 @@ export interface CredentialSummary {
   usageContext?: string;
   connectionConfig?: ConnectionConfig;
 }
+
+/** Schema for credential fields — embedded in registry tool definitions or from AI research. */
+export interface CredentialSchema {
+  type: string;
+  name: string;
+  fields: import("./provider.js").ProviderField[];
+}
+
+/** Result of the three-tier integration resolution. */
+export interface IntegrationResolution {
+  source: "provider-registry" | "chvor-registry" | "ai-research";
+  name: string;
+  credentialType: string;
+  fields: import("./provider.js").ProviderField[];
+  registryEntryId?: string;
+  registryToolInstalled?: boolean;
+  proposal?: ProviderProposal;
+  existingCredentialId?: string;
+}
+
+/** AI-researched integration proposal (Tier 3). */
+export interface ProviderProposal {
+  name: string;
+  credentialType: string;
+  fields: import("./provider.js").ProviderField[];
+  baseUrl?: string;
+  authScheme?: string;
+  helpText?: string;
+  confidence: "researched" | "inferred";
+}
