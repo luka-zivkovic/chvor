@@ -55,7 +55,7 @@ describe("GET /research", () => {
     });
     const res = await request("/research?q=anthropic");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as Record<string, unknown>;
     expect(body.source).toBe("provider-registry");
     expect(mockResearch).not.toHaveBeenCalled();
   });
@@ -63,7 +63,7 @@ describe("GET /research", () => {
   it("falls back to AI research when not in registry", async () => {
     const res = await request("/research?q=unknown-service");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as Record<string, unknown>;
     expect(body.source).toBe("ai-research");
     expect(mockResearch).toHaveBeenCalledWith("unknown-service");
   });
