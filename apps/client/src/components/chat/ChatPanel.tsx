@@ -9,6 +9,7 @@ import { TalkMode } from "./TalkMode";
 import { AudioPlayback } from "./AudioPlayback";
 import { useVoiceStore } from "@/stores/voice-store";
 import { CommandApproval } from "./CommandApproval";
+import { CredentialForm } from "../credentials/CredentialForm";
 import { ConversationSwitcher } from "./ConversationSwitcher";
 import { usePersonaStore } from "@/stores/persona-store";
 import { useCredentialStore } from "@/stores/credential-store";
@@ -195,6 +196,8 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   const connected = useAppStore((s) => s.connected);
   const isStreaming = useAppStore((s) => s.streamingContent !== null);
   const pendingApprovals = useAppStore((s) => s.pendingApprovals);
+  const pendingCredentialRequests = useAppStore((s) => s.pendingCredentialRequests);
+  const respondToCredentialRequest = useAppStore((s) => s.respondToCredentialRequest);
   const conversations = useAppStore((s) => s.conversations);
   const sessionId = useAppStore((s) => s.sessionId);
   const newConversation = useAppStore((s) => s.newConversation);
@@ -360,6 +363,45 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
           </button>
         )}
       </div>
+
+      {/* Pending credential requests */}
+      {pendingCredentialRequests.length > 0 && (
+        <div className="shrink-0 px-3 py-2 space-y-2">
+          {pendingCredentialRequests.map((request) => (
+            <CredentialForm
+              key={request.requestId}
+              providerName={request.providerName}
+              credentialType={request.credentialType}
+              fields={request.fields}
+              suggestedName={`${request.providerName} API Key`}
+              source={request.source}
+              confidence={request.confidence}
+              helpText={request.helpText}
+              allowFieldEditing={request.allowFieldEditing}
+              existingCredentialId={request.existingCredentialId}
+              onSubmit={(data) => {
+                send({
+                  type: "credential.respond",
+                  data: {
+                    requestId: request.requestId,
+                    cancelled: false,
+                    data: data.fields,
+                    name: data.name,
+                  },
+                });
+                respondToCredentialRequest(request.requestId);
+              }}
+              onCancel={() => {
+                send({
+                  type: "credential.respond",
+                  data: { requestId: request.requestId, cancelled: true },
+                });
+                respondToCredentialRequest(request.requestId);
+              }}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Pending command approvals */}
       {pendingApprovals.length > 0 && (
