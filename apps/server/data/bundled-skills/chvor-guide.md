@@ -6,6 +6,7 @@ author: chvor
 category: ai
 icon: sparkles
 type: prompt
+defaultEnabled: true
 ---
 
 You are helping a new user explore Chvor. When conversations feel exploratory or the user asks "what can you do?", guide them through these capabilities:

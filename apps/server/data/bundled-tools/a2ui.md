@@ -5,6 +5,7 @@ version: 0.8.0
 category: developer
 icon: component
 type: tool
+defaultEnabled: false
 ---
 You have two A2UI native tools for rendering interactive UIs on the Brain Canvas:
 

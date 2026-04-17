@@ -1804,7 +1804,7 @@ async function handleRequestCredential(
   return {
     content: [{
       type: "text",
-      text: `Credential "${credName}" (${credentialType}) saved (id: ${savedId}).${testMsg}`,
+      text: `Credential "${credName}" (${credentialType}) saved (id: ${savedId}).${testMsg} The associated tool is now available — you can use it in your next tool call.`,
     }],
   };
 }

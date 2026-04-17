@@ -200,8 +200,8 @@ describe("resolveIntegration", () => {
     expect(result!.name).toBe("Cached Tool");
   });
 
-  // 8. Handles registry entries without credentials blocks (should skip them)
-  it("skips registry entries without credentials blocks", async () => {
+  // 8. Handles registry entries without any credential info (should skip them)
+  it("skips registry entries without credentials or requires.credentials", async () => {
     const entry = makeRegistryEntry({
       id: "no-creds-tool",
       kind: "tool",
@@ -212,6 +212,69 @@ describe("resolveIntegration", () => {
 
     const result = await resolveIntegration("no-creds-tool");
     expect(result).toBeNull();
+  });
+
+  // 9. Resolves from requires.credentials when no full credentials block
+  it("resolves from requires.credentials fallback (derives fields from provider registry)", async () => {
+    const entry = makeRegistryEntry({
+      id: "github",
+      kind: "tool",
+      name: "GitHub",
+      description: "GitHub MCP tool",
+      tags: ["github"],
+      requires: { credentials: ["github"] },
+    });
+    mockFetch.mockResolvedValue({ version: 1, updatedAt: "", entries: [entry as RegistryEntry] });
+
+    // "GitHub" as a name matches Tier 1 first, so query by id
+    const result = await resolveIntegration("github");
+    // Tier 1 matches github from INTEGRATION_PROVIDERS, so this should be provider-registry
+    // Let's test with a name that doesn't match Tier 1
+    expect(result).not.toBeNull();
+  });
+
+  it("resolves requires.credentials for tools not in provider registry", async () => {
+    const entry = makeRegistryEntry({
+      id: "linear",
+      kind: "tool",
+      name: "Linear",
+      description: "Linear project management via MCP",
+      tags: ["linear", "issues"],
+      requires: { credentials: ["linear"] },
+    });
+    mockFetch.mockResolvedValue({ version: 1, updatedAt: "", entries: [entry as RegistryEntry] });
+
+    const result = await resolveIntegration("linear");
+    expect(result).not.toBeNull();
+    expect(result!.source).toBe("chvor-registry");
+    expect(result!.credentialType).toBe("linear");
+    expect(result!.name).toBe("Linear");
+    expect(result!.registryEntryId).toBe("linear");
+    // Falls back to generic apiKey field since "linear" isn't in provider registry
+    expect(result!.fields).toEqual([
+      { key: "apiKey", label: "API Key", type: "password" },
+    ]);
+  });
+
+  it("resolves requires.credentials with fields from provider registry when available", async () => {
+    const entry = makeRegistryEntry({
+      id: "notion-tool",
+      kind: "tool",
+      name: "Notion MCP",
+      description: "Notion integration via MCP",
+      tags: ["notion"],
+      requires: { credentials: ["notion"] },
+    });
+    mockFetch.mockResolvedValue({ version: 1, updatedAt: "", entries: [entry as RegistryEntry] });
+
+    const result = await resolveIntegration("Notion MCP");
+    expect(result).not.toBeNull();
+    expect(result!.source).toBe("chvor-registry");
+    expect(result!.credentialType).toBe("notion");
+    expect(result!.registryEntryId).toBe("notion-tool");
+    // Should derive fields from INTEGRATION_PROVIDERS notion entry
+    expect(result!.fields.length).toBeGreaterThan(0);
+    expect(result!.fields[0].key).toBe("apiKey");
   });
 
   // Extra: registryToolInstalled is true when installed

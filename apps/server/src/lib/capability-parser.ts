@@ -10,6 +10,7 @@ import type {
   SkillCategory,
   SkillType,
   McpServerConfig,
+  CredentialFieldSchema,
 } from "@chvor/shared";
 
 const VALID_CATEGORIES: SkillCategory[] = [
@@ -72,6 +73,23 @@ function parseDependencies(raw: unknown): string[] | undefined {
   return raw.filter((d) => typeof d === "string" && d.length > 0) as string[];
 }
 
+function parseCredentialSchema(raw: unknown): CredentialFieldSchema | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const c = raw as Record<string, unknown>;
+  if (typeof c.type !== "string" || typeof c.name !== "string" || !Array.isArray(c.fields)) return undefined;
+  const fields = c.fields
+    .filter((f): f is Record<string, unknown> => typeof f === "object" && f !== null)
+    .map((f) => ({
+      key: String(f.key ?? ""),
+      label: String(f.label ?? ""),
+      required: typeof f.required === "boolean" ? f.required : undefined,
+      secret: typeof f.secret === "boolean" ? f.secret : undefined,
+      helpText: typeof f.helpText === "string" ? f.helpText : undefined,
+    }));
+  if (fields.length === 0) return undefined;
+  return { type: String(c.type), name: String(c.name), fields };
+}
+
 function parseProvides(raw: unknown): Record<string, string> | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
   const result: Record<string, string> = {};
@@ -122,12 +140,16 @@ export function parseCapabilityMd(
       provides: parseProvides(fm.provides),
       needs: parseDependencies(fm.needs),
       defaultEnabled: typeof fm.defaultEnabled === "boolean" ? fm.defaultEnabled : undefined,
+      credentialSchema: parseCredentialSchema(fm.credentials),
     };
 
     const instructions = body.trim();
 
     // If MCP server config is present or type is explicitly "tool", return a Tool
     if (mcpServer || fm.type === "tool") {
+      if (metadata.needs?.length) {
+        console.warn(`[capability-parser] ${filePath}: "needs" has no effect on tools (only skills)`);
+      }
       return {
         kind: "tool",
         id,
@@ -141,6 +163,10 @@ export function parseCapabilityMd(
     }
 
     // Otherwise return a Skill
+    if (metadata.provides && Object.keys(metadata.provides).length > 0) {
+      console.warn(`[capability-parser] ${filePath}: "provides" has no effect on skills (only tools)`);
+    }
+
     const skillType: SkillType = VALID_SKILL_TYPES.includes(fm.type) ? fm.type : "prompt";
 
     return {

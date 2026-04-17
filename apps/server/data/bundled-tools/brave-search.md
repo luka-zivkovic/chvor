@@ -20,6 +20,15 @@ mcp:
 requires:
   credentials:
     - brave
+credentials:
+  type: brave
+  name: Brave Search
+  fields:
+    - key: apiKey
+      label: API Key
+      required: true
+      secret: true
+      helpText: "Get at brave.com/search/api"
 ---
 Search the web using Brave Search API. This provides higher quality results and better throughput than the default native search.
 

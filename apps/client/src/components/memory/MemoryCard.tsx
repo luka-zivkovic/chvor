@@ -1,7 +1,6 @@
 import { useState, useRef } from "react";
 import type { Memory } from "@chvor/shared";
 import { useMemoryStore } from "../../stores/memory-store";
-import { api } from "../../lib/api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,12 +38,7 @@ export function MemoryCard({ memory }: Props) {
       setEditing(false);
       return;
     }
-    try {
-      await api.memories.update(memory.id, { content: trimmed });
-      updateMemory(memory.id, trimmed);
-    } catch {
-      setEditValue(memory.content);
-    }
+    await updateMemory(memory.id, trimmed);
     setEditing(false);
   };
 
@@ -53,12 +47,7 @@ export function MemoryCard({ memory }: Props) {
       setConfirmDelete(true);
       return;
     }
-    try {
-      await api.memories.delete(memory.id);
-      removeMemory(memory.id);
-    } catch {
-      setConfirmDelete(false);
-    }
+    await removeMemory(memory.id);
   };
 
   const strengthPercent = Math.round((memory.strength ?? 1) * 100);

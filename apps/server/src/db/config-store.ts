@@ -273,16 +273,10 @@ export function setEmbeddingPreference(pref: EmbeddingConfig): EmbeddingConfig {
 
 // --- Capability enabled/disabled ---
 
-// Bundled skills that ship disabled by default (user must opt-in).
-// Used as fallback for skills that don't declare defaultEnabled in frontmatter.
-const LEGACY_DEFAULT_DISABLED = new Set(["brainstorming", "code-review", "writing-helper", "claude-code", "a2ui"]);
-
 export function isCapabilityEnabled(kind: "skill" | "tool", id: string, defaultEnabled?: boolean): boolean {
   const val = getConfig(`${kind}.enabled.${id}`);
   if (val === undefined || val === null) {
-    // Prefer metadata-declared default, fall back to legacy hardcoded set
-    if (defaultEnabled !== undefined) return defaultEnabled;
-    return !LEGACY_DEFAULT_DISABLED.has(id);
+    return defaultEnabled !== false;
   }
   return val !== "false";
 }

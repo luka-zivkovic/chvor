@@ -6,6 +6,7 @@ author: chvor
 category: developer
 icon: monitor
 type: prompt
+defaultEnabled: false
 ---
 
 You can control PCs using the PC control tools. The system uses a 3-layer pipeline that automatically selects the fastest approach:

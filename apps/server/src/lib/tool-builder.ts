@@ -100,6 +100,19 @@ let cachedToolDefs: Record<string, ReturnType<typeof tool>> | null = null;
 // Dedup: return in-flight build promise to concurrent callers (only when hash matches)
 let inflightBuild: { hash: string; promise: Promise<Record<string, ReturnType<typeof tool>>> } | null = null;
 
+/** Tools that failed MCP discovery on last build — surfaced to LLM via system prompt. */
+export interface FailedTool {
+  id: string;
+  name: string;
+  reason: string;
+}
+let lastFailedTools: FailedTool[] = [];
+
+/** Get the list of tools that failed to discover on the last build. */
+export function getFailedTools(): FailedTool[] {
+  return lastFailedTools;
+}
+
 /**
  * Build Vercel AI SDK tool definitions from loaded tools.
  * Tool names are prefixed: "toolId__mcpToolName" to avoid collisions.
@@ -138,6 +151,7 @@ async function doBuild(
 ): Promise<Record<string, ReturnType<typeof tool>>> {
   const toolDefs: Record<string, ReturnType<typeof tool>> = {};
   const discoveredMcpTools = new Map<string, Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>>();
+  const failedTools: FailedTool[] = [];
   let hadErrors = false;
 
   // Discover MCP tools in parallel — each server is independent
@@ -164,13 +178,19 @@ async function doBuild(
     } else {
       hadErrors = true;
       const failedTool = eligibleTools[results.indexOf(result)];
+      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
       logError("mcp_crash", result.reason, { toolId: failedTool?.id });
       console.warn(
         `[tool-builder] failed to discover tools for ${failedTool?.id}:`,
         result.reason
       );
+      if (failedTool) {
+        failedTools.push({ id: failedTool.id, name: failedTool.metadata.name, reason });
+      }
     }
   }
+
+  lastFailedTools = failedTools;
 
   // Build capability registry from discovered MCP tools + native tools
   buildCapabilityRegistry(eligibleTools, discoveredMcpTools);

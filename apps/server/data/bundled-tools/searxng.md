@@ -22,6 +22,15 @@ mcp:
 requires:
   credentials:
     - searxng
+credentials:
+  type: searxng
+  name: SearXNG
+  fields:
+    - key: apiKey
+      label: Instance URL
+      required: true
+      secret: false
+      helpText: "Your self-hosted SearXNG instance URL (e.g. http://localhost:8080)"
 ---
 Search the web using your self-hosted SearXNG instance. SearXNG is a free, privacy-respecting meta search engine that aggregates results from multiple sources.
 

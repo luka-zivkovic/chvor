@@ -6,6 +6,7 @@ author: chvor
 type: workflow
 category: communication
 icon: twitter
+defaultEnabled: false
 tags:
   - twitter
   - x

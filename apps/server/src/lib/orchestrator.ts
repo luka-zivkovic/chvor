@@ -19,7 +19,7 @@ import { createModel, getContextWindow, getMaxTokens, resolveRoleConfig, resolve
 import type { ResolvedConfig } from "./llm-router.ts";
 import { estimateTokens, fitMessagesToBudget } from "./token-counter.ts";
 import { mcpManager } from "./mcp-manager.ts";
-import { buildToolDefinitions } from "./tool-builder.ts";
+import { buildToolDefinitions, getFailedTools } from "./tool-builder.ts";
 import { isNativeTool, callNativeTool, getNativeToolTarget } from "./native-tools.ts";
 import { listConnectedAgents as listPcAgents, localBackendAvailable as localPcAvailable } from "./pc-control.ts";
 import { loadSkills, loadTools, reloadAll } from "./capability-loader.ts";
@@ -37,6 +37,27 @@ import { getPersona, isCapabilityEnabled, getExtendedThinking, getBrainConfig, g
 import { storeMediaFromBase64 } from "./media-store.ts";
 
 export type EventEmitter = (event: ExecutionEvent) => void;
+
+/**
+ * Lightweight relevance check for workflow skills.
+ * Matches user query against skill name, tags, description, and needs.
+ * Returns true if any keyword overlaps — no LLM call needed.
+ */
+function isWorkflowRelevant(skill: Skill, query: string): boolean {
+  if (!query) return false;
+  const keywords: string[] = [];
+  const { name, description, tags, needs } = skill.metadata;
+  keywords.push(...name.toLowerCase().split(/\s+/));
+  keywords.push(...description.toLowerCase().split(/\s+/));
+  if (tags) keywords.push(...tags.map((t) => t.toLowerCase()));
+  if (needs) keywords.push(...needs.map((n) => n.split(":")[0].toLowerCase()));
+
+  // Filter out noise words
+  const noise = new Set(["a", "an", "the", "and", "or", "to", "in", "on", "for", "with", "via", "of", "is", "by"]);
+  const meaningful = keywords.filter((k) => k.length > 2 && !noise.has(k));
+
+  return meaningful.some((kw) => query.includes(kw));
+}
 
 /** PC control tools whose media (screenshots) should not be shown in the chat UI */
 const PC_INTERNAL_MEDIA_TOOLS = new Set(["native__pc_do", "native__pc_observe"]);
@@ -62,11 +83,13 @@ You have channels (Web, Telegram, Discord, Slack), a cron scheduler, persistent 
 
 ## Credential Management
 
-### Requesting credentials from users
-When you need a credential that doesn't exist yet (e.g., user wants to connect a service, use an API, or integrate a tool):
-1. ALWAYS use native__request_credential with the provider type — this opens a secure UI modal for the user to enter their credentials.
-2. NEVER ask the user to paste credentials in the chat. Always use the modal.
-3. If the modal fails or times out, direct the user to Settings > Integrations to add the credential manually.
+### Connecting a new service or integration
+When a user wants to connect a service, use an API, or integrate a tool:
+1. FIRST call native__research_integration with the service name — this discovers credential fields from the provider registry, Chvor tool registry, or AI research.
+2. THEN call native__request_credential with the fields, source, and registryEntryId returned by native__research_integration.
+3. NEVER guess credential fields yourself. Always research first.
+4. NEVER ask the user to paste credentials in chat. Always use the modal.
+5. If the modal fails or times out, direct the user to Settings > Integrations.
 
 ### When a user shares a credential in chat
 If a user shares an API key, token, password, or secret directly in chat:
@@ -313,6 +336,15 @@ function buildSystemPrompt(
     const credLines = integrationCreds.map((c) => `- ${c.name} (${c.type})`).join("\n");
     volatileSections.push(
       `## Existing Integrations\n\nDo NOT create connections for these — already connected:\n${credLines}`
+    );
+  }
+
+  // Broken tools — surface so LLM doesn't silently fish with wrong tools
+  const failedTools = getFailedTools();
+  if (failedTools.length > 0) {
+    const lines = failedTools.map((f) => `- **${f.name}** (${f.id}): ${f.reason}`).join("\n");
+    volatileSections.push(
+      `## Unavailable Tools\n\nThese tools are configured but failed to load. Do NOT use other tools as substitutes — tell the user the tool is broken and suggest they reconnect it in Settings > Credentials:\n${lines}`
     );
   }
 
@@ -576,7 +608,15 @@ export async function executeConversation(
   console.log(`[orchestrator] using ${config.providerId}/${config.model}${configChain.length > 1 ? ` (+${configChain.length - 1} fallback${configChain.length > 2 ? "s" : ""})` : ""}`);
 
   const allSkills = loadSkills();
-  const skills = allSkills.filter((s) => isCapabilityEnabled("skill", s.id, s.metadata.defaultEnabled));
+  const enabledSkills = allSkills.filter((s) => isCapabilityEnabled("skill", s.id, s.metadata.defaultEnabled));
+
+  // Prompt-type skills are always included (lightweight behavioral presets).
+  // Workflow skills are only included when the user's message is relevant.
+  const userQuery = (lastUserMsg?.content ?? "").toLowerCase();
+  const skills = enabledSkills.filter((s) => {
+    if (s.skillType === "prompt") return true;
+    return isWorkflowRelevant(s, userQuery);
+  });
 
   const allTools = loadTools();
   const enabledTools = allTools.filter((t) => isCapabilityEnabled("tool", t.id, t.metadata.defaultEnabled));
@@ -1211,6 +1251,23 @@ export async function executeConversation(
         timestamp: new Date().toISOString(),
         ...(tr.media?.length ? { media: tr.media } : {}),
       });
+    }
+
+    // Rebuild tool definitions if credentials were added/changed this round
+    const CREDENTIAL_MUTATING_TOOLS = new Set(["native__request_credential", "native__add_credential"]);
+    const credentialChanged = toolResults.some((tr) =>
+      CREDENTIAL_MUTATING_TOOLS.has(tr.toolName) &&
+      !(tr.result && typeof tr.result === "object" && "error" in (tr.result as Record<string, unknown>))
+    );
+    if (credentialChanged) {
+      const refreshed = loadTools().filter((t) => isCapabilityEnabled("tool", t.id, t.metadata.defaultEnabled));
+      const newDefs = await buildToolDefinitions(refreshed);
+      for (const key of Object.keys(toolDefs)) delete toolDefs[key];
+      Object.assign(toolDefs, newDefs);
+      if (options?.excludeTools) {
+        for (const name of options.excludeTools) delete toolDefs[name];
+      }
+      console.log(`[orchestrator] rebuilt tool defs after credential change — ${Object.keys(toolDefs).length} tools`);
     }
 
     // No-progress detection: break early if LLM is spinning on failing tools

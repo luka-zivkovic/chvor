@@ -6,6 +6,7 @@ author: chvor
 type: workflow
 category: communication
 icon: linkedin
+defaultEnabled: false
 tags:
   - linkedin
   - professional

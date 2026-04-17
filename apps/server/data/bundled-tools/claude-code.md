@@ -6,6 +6,7 @@ author: chvor
 type: tool
 category: developer
 icon: terminal
+defaultEnabled: false
 tags:
   - coding
   - refactoring

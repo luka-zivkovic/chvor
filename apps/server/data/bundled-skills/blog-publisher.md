@@ -6,6 +6,7 @@ author: chvor
 type: workflow
 category: communication
 icon: file-text
+defaultEnabled: false
 tags:
   - blog
   - wordpress

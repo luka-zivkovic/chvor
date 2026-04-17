@@ -6,6 +6,7 @@ author: chvor
 type: workflow
 category: communication
 icon: calendar
+defaultEnabled: false
 tags:
   - scheduling
   - social-media

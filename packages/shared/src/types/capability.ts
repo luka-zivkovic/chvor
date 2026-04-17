@@ -58,6 +58,23 @@ export interface CapabilityMetadata {
    * Defaults to true if not specified. Set to false for opt-in skills.
    */
   defaultEnabled?: boolean;
+  /**
+   * Credential schema describing what fields the user must fill in to connect.
+   * Only meaningful for tools with requires.credentials.
+   */
+  credentialSchema?: CredentialFieldSchema;
+}
+
+export interface CredentialFieldSchema {
+  type: string;
+  name: string;
+  fields: Array<{
+    key: string;
+    label: string;
+    required?: boolean;
+    secret?: boolean;
+    helpText?: string;
+  }>;
 }
 
 export interface McpServerConfig {
@@ -106,6 +123,17 @@ export interface RegistryEntry {
   downloads?: number;
   sha256: string;
   requires?: { env?: string[]; credentials?: string[] };
+  credentials?: {
+    type: string;
+    name: string;
+    fields: Array<{
+      key: string;
+      label: string;
+      required?: boolean;
+      secret?: boolean;
+      helpText?: string;
+    }>;
+  };
   dependencies?: string[];
   /** For templates: IDs of skills/tools included in the template */
   includes?: string[];

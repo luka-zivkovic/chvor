@@ -31,6 +31,15 @@ mcp:
 requires:
   credentials:
     - notion
+credentials:
+  type: notion
+  name: Notion
+  fields:
+    - key: apiKey
+      label: Integration Token
+      required: true
+      secret: true
+      helpText: "Create at notion.so/my-integrations"
 ---
 You have access to Notion tools via MCP.
 

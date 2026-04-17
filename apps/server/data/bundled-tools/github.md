@@ -31,6 +31,15 @@ mcp:
 requires:
   credentials:
     - github
+credentials:
+  type: github
+  name: GitHub
+  fields:
+    - key: apiKey
+      label: Personal Access Token
+      required: true
+      secret: true
+      helpText: "Create at github.com/settings/tokens (classic or fine-grained)"
 ---
 You have access to GitHub tools via MCP.
 

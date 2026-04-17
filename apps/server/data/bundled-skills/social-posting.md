@@ -6,6 +6,7 @@ author: chvor
 type: workflow
 category: communication
 icon: share-2
+defaultEnabled: false
 tags:
   - social-media
   - cross-posting

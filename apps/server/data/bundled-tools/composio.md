@@ -22,6 +22,15 @@ mcp:
 requires:
   credentials:
     - composio
+credentials:
+  type: composio
+  name: Composio
+  fields:
+    - key: apiKey
+      label: API Key
+      required: true
+      secret: true
+      helpText: "Get your key at app.composio.dev/settings"
 ---
 You have access to Composio tools for managing and interacting with connected social media accounts and apps.
 

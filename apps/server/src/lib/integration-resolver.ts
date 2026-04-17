@@ -16,6 +16,7 @@ import {
 import { fetchRegistryIndex, readCachedIndex } from "./registry-client.ts";
 import { readLock } from "./registry-manager.ts";
 import { listCredentials } from "../db/credential-store.ts";
+import { loadTools } from "./capability-loader.ts";
 
 // ── Types for untyped registry credential blocks ───────────────
 
@@ -144,29 +145,78 @@ function hasCredentials(entry: RegistryEntryWithCredentials): entry is RegistryE
   );
 }
 
+function hasRequiresCredentials(entry: RegistryEntryWithCredentials): boolean {
+  return !!entry.requires?.credentials?.length;
+}
+
+function getRequiresCredentials(entry: RegistryEntryWithCredentials): string[] {
+  return entry.requires?.credentials ?? [];
+}
+
+/** Look up credential fields from the provider registry by credential type name. */
+function deriveFieldsFromProviderRegistry(credType: string): ProviderField[] {
+  const allProviders = [...LLM_PROVIDERS, ...INTEGRATION_PROVIDERS, ...IMAGE_GEN_PROVIDERS];
+  for (const p of allProviders) {
+    if (p.credentialType === credType) {
+      return [...(p as { requiredFields?: ProviderField[] }).requiredFields ?? []];
+    }
+  }
+  return [{ key: "apiKey", label: "API Key", type: "password" }];
+}
+
+function buildResolutionFromEntry(
+  entry: RegistryEntryWithCredentials,
+  installedIds: Set<string>,
+): IntegrationResolution | null {
+  // Prefer full credentials block when available
+  if (hasCredentials(entry)) {
+    return {
+      source: "chvor-registry",
+      name: entry.credentials.name,
+      credentialType: entry.credentials.type,
+      fields: entry.credentials.fields.map(mapRegistryField),
+      registryEntryId: entry.id,
+      registryToolInstalled: installedIds.has(entry.id),
+    };
+  }
+
+  // Fallback: derive from requires.credentials names
+  if (hasRequiresCredentials(entry)) {
+    const credType = getRequiresCredentials(entry)[0];
+    const fields = deriveFieldsFromProviderRegistry(credType);
+    return {
+      source: "chvor-registry",
+      name: entry.name,
+      credentialType: credType,
+      fields,
+      registryEntryId: entry.id,
+      registryToolInstalled: installedIds.has(entry.id),
+    };
+  }
+
+  return null;
+}
+
 function resolveFromRegistryEntries(
   entries: RegistryEntryWithCredentials[],
   query: string,
   installedIds: Set<string>,
 ): IntegrationResolution | null {
   const q = query.toLowerCase();
-  const withCreds = entries.filter(hasCredentials);
+  const withCreds = entries.filter((e) => hasCredentials(e) || hasRequiresCredentials(e));
 
-  // Exact matches: id, credentials.type, or name
+  // Exact matches: id, credentials.type, requires.credentials, or name
   for (const entry of withCreds) {
+    const credType = hasCredentials(entry)
+      ? entry.credentials.type
+      : getRequiresCredentials(entry)[0];
+
     if (
       entry.id === query ||
-      entry.credentials.type === query ||
+      credType === query ||
       entry.name.toLowerCase() === q
     ) {
-      return {
-        source: "chvor-registry",
-        name: entry.credentials.name,
-        credentialType: entry.credentials.type,
-        fields: entry.credentials.fields.map(mapRegistryField),
-        registryEntryId: entry.id,
-        registryToolInstalled: installedIds.has(entry.id),
-      };
+      return buildResolutionFromEntry(entry, installedIds);
     }
   }
 
@@ -177,14 +227,7 @@ function resolveFromRegistryEntries(
     const tagMatch = entry.tags?.some((t) => t.toLowerCase() === q) ?? false;
 
     if (tagMatch || nameMatch || descMatch) {
-      return {
-        source: "chvor-registry",
-        name: entry.credentials.name,
-        credentialType: entry.credentials.type,
-        fields: entry.credentials.fields.map(mapRegistryField),
-        registryEntryId: entry.id,
-        registryToolInstalled: installedIds.has(entry.id),
-      };
+      return buildResolutionFromEntry(entry, installedIds);
     }
   }
 
@@ -209,6 +252,30 @@ export async function resolveIntegration(query: string): Promise<IntegrationReso
   if (tier2) {
     tier2.existingCredentialId = findExistingCredential(tier2.credentialType);
     return tier2;
+  }
+
+  // Tier 2b: Check installed tools' credentialSchema from frontmatter
+  const q = query.toLowerCase();
+  for (const tool of loadTools()) {
+    const schema = tool.metadata.credentialSchema;
+    if (!schema) continue;
+    if (
+      tool.id === query ||
+      schema.type === query ||
+      tool.metadata.name.toLowerCase() === q ||
+      tool.metadata.name.toLowerCase().includes(q)
+    ) {
+      const resolution: IntegrationResolution = {
+        source: "chvor-registry",
+        name: schema.name,
+        credentialType: schema.type,
+        fields: schema.fields.map(mapRegistryField),
+        registryEntryId: tool.id,
+        registryToolInstalled: installedIds.has(tool.id),
+      };
+      resolution.existingCredentialId = findExistingCredential(schema.type);
+      return resolution;
+    }
   }
 
   // Not found — caller handles Tier 3
