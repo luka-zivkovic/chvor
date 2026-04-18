@@ -1,18 +1,13 @@
 import { memo } from "react";
-import { getBezierPath } from "@xyflow/react";
+import { getBezierPath, useInternalNode } from "@xyflow/react";
 import type { EdgeProps } from "@xyflow/react";
 import { useEmotionStore } from "../../stores/emotion-store";
+import { getFloatingEdgeParams } from "./floating-edge-utils";
 
-function AnimatedEdgeInner({
-  id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
-  data,
-}: EdgeProps) {
+function AnimatedEdgeInner({ id, source, target, data }: EdgeProps) {
+  const sourceNode = useInternalNode(source);
+  const targetNode = useInternalNode(target);
+
   const edgeData = data as { active?: boolean; ghost?: boolean } | undefined;
   const active = edgeData?.active ?? false;
   const ghost = edgeData?.ghost ?? false;
@@ -21,13 +16,21 @@ function AnimatedEdgeInner({
   const arousal = useEmotionStore((s) => s.currentSnapshot?.vad?.arousal ?? 0);
   const blendIntensity = useEmotionStore((s) => s.blendIntensity);
 
+  if (!sourceNode || !targetNode) return null;
+
+  const { sx, sy, tx, ty, sourcePosition, targetPosition } = getFloatingEdgeParams(
+    sourceNode,
+    targetNode,
+  );
+
   const [edgePath] = getBezierPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
+    sourceX: sx,
+    sourceY: sy,
+    targetX: tx,
+    targetY: ty,
     sourcePosition,
     targetPosition,
+    curvature: 0.25,
   });
 
   const gradientId = `eg-${id}`;
@@ -62,10 +65,10 @@ function AnimatedEdgeInner({
         <linearGradient
           id={gradientId}
           gradientUnits="userSpaceOnUse"
-          x1={sourceX}
-          y1={sourceY}
-          x2={targetX}
-          y2={targetY}
+          x1={sx}
+          y1={sy}
+          x2={tx}
+          y2={ty}
         >
           <stop offset="0%" stopColor={edgeColor} stopOpacity={active ? 0.7 : 0.3} />
           <stop offset="100%" stopColor={idleColor} stopOpacity={active ? 0.4 : 0.12} />
@@ -136,7 +139,7 @@ function AnimatedEdgeInner({
           opacity={0.5}
           className="energy-flow"
           style={{
-            animationDirection: sourceX > targetX ? "reverse" : "normal",
+            animationDirection: sx > tx ? "reverse" : "normal",
             animationDuration: `${flowSpeed}s`,
           }}
         />
