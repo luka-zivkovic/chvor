@@ -140,13 +140,21 @@ function buildSynthesizedToolDefs(t: Tool): Record<string, ReturnType<typeof too
 
   for (const ep of t.endpoints) {
     const shape: Record<string, z.ZodType> = {};
+    const pathNames = new Set<string>();
 
     for (const p of ep.pathParams ?? []) {
       let s: z.ZodType = zodForEndpointParam(p);
       if (p.description) s = s.describe(p.description);
       shape[p.name] = p.required ? s : s.optional();
+      pathNames.add(p.name);
     }
     for (const p of ep.queryParams ?? []) {
+      if (pathNames.has(p.name)) {
+        console.warn(
+          `[tool-builder] ${t.id}__${ep.name}: query param "${p.name}" collides with path param; query value will be ignored. Rename the query param in the tool file.`,
+        );
+        continue;
+      }
       let s: z.ZodType = zodForEndpointParam(p);
       if (p.description) s = s.describe(p.description);
       shape[p.name] = p.required ? s : s.optional();

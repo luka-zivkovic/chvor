@@ -5051,6 +5051,8 @@ const synthesizeToolDef = tool({
       bodySchema: z.record(z.unknown()).nullable().optional(),
     })).optional().describe("Drafted endpoint set (used when no OpenAPI spec is available)."),
     notes: z.string().optional().describe("Extra notes for the AI / user — becomes the body of the markdown file."),
+    credentialId: z.string().optional().describe("Optional saved-credential id to pin this tool to a specific account (when the user has multiple credentials of the same type)."),
+    timeoutMs: z.number().int().optional().describe("Optional per-tool HTTP call timeout in milliseconds (min 1000, max 600000). Defaults to 60000."),
   }),
 });
 
@@ -5065,13 +5067,29 @@ async function handleSynthesizeTool(
   const openApiSpecUrl = args.openApiSpecUrl ? String(args.openApiSpecUrl) : undefined;
   const draftedEndpoints = Array.isArray(args.endpoints) ? args.endpoints as Array<Record<string, unknown>> : undefined;
   const notes = args.notes ? String(args.notes) : undefined;
+  const credentialIdArg = typeof args.credentialId === "string" ? args.credentialId : undefined;
+  const timeoutMsArg = typeof args.timeoutMs === "number" && Number.isFinite(args.timeoutMs)
+    ? Math.min(Math.max(Math.floor(args.timeoutMs), 1_000), 600_000)
+    : undefined;
 
   try {
     const { getCredentialData, listCredentials } = await import("../db/credential-store.ts");
 
-    // Verify credential exists
-    const cred = listCredentials().find((c) => c.type === credentialType);
+    // Verify credential exists — honor credentialId pin if provided, else first-of-type.
+    const allCreds = listCredentials();
+    const cred = credentialIdArg
+      ? allCreds.find((c) => c.id === credentialIdArg && c.type === credentialType)
+      : allCreds.find((c) => c.type === credentialType);
     if (!cred) {
+      const sameType = allCreds.filter((c) => c.type === credentialType);
+      if (credentialIdArg && sameType.length > 0) {
+        return {
+          content: [{
+            type: "text",
+            text: `No credential with id "${credentialIdArg}" and type "${credentialType}". Available ids of this type: ${sameType.map((c) => c.id).join(", ")}`,
+          }],
+        };
+      }
       return {
         content: [{
           type: "text",
@@ -5184,6 +5202,8 @@ async function handleSynthesizeTool(
         specUrl: specUrlUsed,
         generatedAt: new Date().toISOString(),
         credentialType,
+        credentialId: credentialIdArg,
+        timeoutMs: timeoutMsArg,
       },
       endpoints: finalEndpoints,
       notes,

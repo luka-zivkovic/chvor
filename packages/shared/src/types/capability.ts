@@ -91,6 +91,11 @@ export interface SynthesizedToolConfig {
   specUrl?: string;
   generatedAt: string;
   credentialType: string;
+  /** If set, pins the synthesized tool to a specific saved credential by ID.
+   *  Falls back to first-of-type lookup when omitted. */
+  credentialId?: string;
+  /** Per-tool HTTP call timeout in milliseconds. Defaults to 60 s, capped at 600 s. */
+  timeoutMs?: number;
 }
 
 export interface SynthesizedEndpointParam {

@@ -4,17 +4,20 @@
  * Pipeline:
  *  1. Resolve credential + ConnectionConfig.
  *  2. Build URL from baseUrl + path + pathParams + queryParams.
- *  3. Network safety (HTTPS-only unless overridden, block private IPs after DNS resolution).
- *  4. Apply auth per connection_config.auth.scheme.
+ *  3. Network safety: HTTPS-only, block private hostnames, resolve DNS once, pin the
+ *     request to that resolved IP (prevents DNS-rebinding / TOCTOU).
+ *  4. Apply auth per connection_config.auth.scheme (CRLF-stripped).
  *  5. For non-GET, go through approval-gate.requestApproval.
- *  6. Fetch with timeout. Truncate oversized responses. Classify 4xx auth failures.
+ *  6. Fetch via https.request with pre-resolved IP + SNI, then truncate + classify.
  */
 
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import * as https from "node:https";
+import * as http from "node:http";
 import type { Tool, SynthesizedEndpoint, ConnectionConfig } from "@chvor/shared";
 import { getCredentialData, listCredentials } from "../db/credential-store.ts";
-import { isPrivateIp } from "./url-safety.ts";
+import { isPrivateIp, isPrivateHostname } from "./url-safety.ts";
 import { logError } from "./error-logger.ts";
 import {
   requestApproval,
@@ -24,8 +27,9 @@ import {
 } from "./approval-gate.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-const MAX_RESPONSE_BYTES = 200 * 1024; // 200KB
-const TRUNCATION_PREVIEW_BYTES = 4 * 1024; // 4KB
+const MAX_TIMEOUT_MS = 600_000;
+const MAX_RESPONSE_BYTES = 200 * 1024;
+const TRUNCATION_PREVIEW_BYTES = 4 * 1024;
 const ALLOW_PRIVATE = process.env.CHVOR_SYNTH_ALLOW_PRIVATE === "1";
 
 export interface CallContext {
@@ -53,9 +57,14 @@ export interface AuthDiagnosis {
 
 // ── Credential lookup ──────────────────────────────────────────
 
-function findCredentialIdByType(credentialType: string): string | null {
+function findCredentialId(credentialType: string, pinnedId?: string): string | null {
   try {
     const creds = listCredentials();
+    if (pinnedId) {
+      const pinned = creds.find((c) => c.id === pinnedId && c.type === credentialType);
+      if (pinned) return pinned.id;
+      // Fall through to type-match if the pinned id no longer exists / was replaced.
+    }
     const match = creds.find((c) => c.type === credentialType);
     return match?.id ?? null;
   } catch (err) {
@@ -99,7 +108,18 @@ function buildUrl(
 
 // ── Network safety ─────────────────────────────────────────────
 
-export async function assertSafeSynthesizedUrl(rawUrl: string): Promise<URL> {
+export interface ResolvedTarget {
+  url: URL;
+  resolvedIp: string;
+  hostname: string;
+}
+
+/**
+ * Validate the URL and resolve the hostname exactly once.
+ * The returned resolvedIp is what the HTTP request will actually connect to,
+ * preventing a second DNS lookup that could rebind to a private address.
+ */
+export async function resolveSafeSynthesizedTarget(rawUrl: string): Promise<ResolvedTarget> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -109,45 +129,141 @@ export async function assertSafeSynthesizedUrl(rawUrl: string): Promise<URL> {
   if (parsed.protocol !== "https:") {
     throw new Error(`non-HTTPS blocked (got ${parsed.protocol}) — synthesized tool calls require HTTPS`);
   }
+  const hostname = parsed.hostname;
   // Block IP literals — hostname must be DNS-resolvable
-  if (/^[0-9.]+$/.test(parsed.hostname) || parsed.hostname.includes(":")) {
-    throw new Error(`IP literal hostname blocked: ${parsed.hostname}`);
+  if (/^[0-9.]+$/.test(hostname) || hostname.includes(":")) {
+    throw new Error(`IP literal hostname blocked: ${hostname}`);
   }
-  if (!ALLOW_PRIVATE) {
-    const { address } = await lookup(parsed.hostname);
-    if (isPrivateIp(address)) {
-      throw new Error(`private/link-local address blocked: ${parsed.hostname} → ${address}`);
-    }
+  if (!ALLOW_PRIVATE && isPrivateHostname(hostname)) {
+    throw new Error(`private/internal hostname blocked: ${hostname}`);
   }
-  return parsed;
+  const { address } = await lookup(hostname);
+  if (!ALLOW_PRIVATE && isPrivateIp(address)) {
+    throw new Error(`private/link-local address blocked: ${hostname} → ${address}`);
+  }
+  return { url: parsed, resolvedIp: address, hostname };
+}
+
+/** Legacy alias kept for spec-fetcher callers. */
+export async function assertSafeSynthesizedUrl(rawUrl: string): Promise<URL> {
+  const { url } = await resolveSafeSynthesizedTarget(rawUrl);
+  return url;
+}
+
+// ── Pinned-IP HTTPS request ────────────────────────────────────
+
+export interface PinnedResponse {
+  status: number;
+  statusText: string;
+  headers: Record<string, string>;
+  body: Buffer;
+  truncated: boolean;
+  size: number;
+}
+
+/**
+ * HTTPS request where the connection is pinned to `target.resolvedIp`, while
+ * SNI and the `Host:` header preserve the original hostname so TLS cert
+ * validation + virtual hosting still work. This closes the DNS-rebinding
+ * window between the safety check and the actual connection.
+ */
+export async function pinnedHttpsRequest(args: {
+  target: ResolvedTarget;
+  method: string;
+  headers: Record<string, string>;
+  body?: Buffer;
+  timeoutMs: number;
+  maxBytes: number;
+}): Promise<PinnedResponse> {
+  const { target, method, headers, body, timeoutMs, maxBytes } = args;
+  const { url, resolvedIp, hostname } = target;
+
+  return await new Promise<PinnedResponse>((resolve, reject) => {
+    const options: https.RequestOptions = {
+      method,
+      host: resolvedIp,
+      servername: hostname,
+      port: url.port ? Number(url.port) : 443,
+      path: `${url.pathname}${url.search}`,
+      headers: { ...headers, Host: hostname },
+      timeout: timeoutMs,
+    };
+    const req = https.request(options, (res: http.IncomingMessage) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      let truncated = false;
+      res.on("data", (chunk: Buffer) => {
+        if (truncated) return;
+        const c = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        if (size + c.byteLength > maxBytes) {
+          const remaining = maxBytes - size;
+          if (remaining > 0) chunks.push(c.subarray(0, remaining));
+          size = maxBytes;
+          truncated = true;
+          req.destroy();
+          return;
+        }
+        chunks.push(c);
+        size += c.byteLength;
+      });
+      res.on("end", () => {
+        const headersOut: Record<string, string> = {};
+        for (const [k, v] of Object.entries(res.headers)) {
+          if (typeof v === "string") headersOut[k.toLowerCase()] = v;
+          else if (Array.isArray(v)) headersOut[k.toLowerCase()] = v.join(", ");
+        }
+        resolve({
+          status: res.statusCode ?? 0,
+          statusText: res.statusMessage ?? "",
+          headers: headersOut,
+          body: Buffer.concat(chunks),
+          truncated,
+          size,
+        });
+      });
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy(new Error(`request timed out after ${timeoutMs}ms`));
+    });
+    if (body !== undefined) req.write(body);
+    req.end();
+  });
 }
 
 // ── Auth application ───────────────────────────────────────────
 
+/** Strip CR/LF to prevent header injection via credential values or templates. */
+function stripCrlf(input: string): string {
+  return input.replace(/[\r\n]+/g, "");
+}
+
 function applyAuth(
-  headers: Headers,
+  headers: Record<string, string>,
   url: URL,
   auth: ConnectionConfig["auth"],
   data: Record<string, string>,
-): { url: URL; headers: Headers } {
+): void {
   const apiKey = data.apiKey ?? data.token ?? data.accessToken ?? "";
 
   const renderTemplate = (template: string | undefined, fallback: string): string => {
     const t = template ?? fallback;
-    return t.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => data[k] ?? "");
+    const rendered = t.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => data[k] ?? "");
+    return stripCrlf(rendered);
   };
 
   switch (auth.scheme) {
     case "bearer":
-      headers.set("Authorization", renderTemplate(auth.headerTemplate, `Bearer ${apiKey}`));
+      headers["Authorization"] = renderTemplate(auth.headerTemplate, `Bearer ${apiKey}`);
       break;
     case "api-key-header":
-      headers.set(auth.headerName ?? "x-api-key", renderTemplate(auth.headerTemplate, apiKey));
+      headers[stripCrlf(auth.headerName ?? "x-api-key")] = renderTemplate(auth.headerTemplate, apiKey);
       break;
     case "basic": {
       const user = data.username ?? "";
       const pass = data.password ?? apiKey;
-      headers.set("Authorization", `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`);
+      headers["Authorization"] = `Basic ${Buffer.from(`${stripCrlf(user)}:${stripCrlf(pass)}`).toString("base64")}`;
       break;
     }
     case "query-param":
@@ -155,12 +271,10 @@ function applyAuth(
       break;
     case "custom":
       if (auth.headerName && auth.headerTemplate) {
-        headers.set(auth.headerName, renderTemplate(auth.headerTemplate, apiKey));
+        headers[stripCrlf(auth.headerName)] = renderTemplate(auth.headerTemplate, apiKey);
       }
       break;
   }
-
-  return { url, headers };
 }
 
 // ── Auth diagnostics ───────────────────────────────────────────
@@ -206,7 +320,6 @@ function diagnoseAuthError(args: {
     };
   }
 
-  // All endpoints on this tool have failed and none have succeeded → wrong auth scheme
   if (status === 401 && stats.toolSuccessCount === 0 && stats.toolFailureCount >= 1) {
     return {
       error: "auth_failed",
@@ -217,7 +330,6 @@ function diagnoseAuthError(args: {
     };
   }
 
-  // Some other endpoint on this tool has succeeded → scope issue, not cred issue
   if (stats.toolSuccessCount > 0) {
     return {
       error: "auth_failed",
@@ -238,6 +350,14 @@ function diagnoseAuthError(args: {
 }
 
 // ── Main entry ─────────────────────────────────────────────────
+
+function resolveTimeoutMs(tool: Tool): number {
+  const configured = tool.synthesized?.timeoutMs;
+  if (typeof configured !== "number" || !Number.isFinite(configured) || configured <= 0) {
+    return DEFAULT_TIMEOUT_MS;
+  }
+  return Math.min(Math.max(Math.floor(configured), 1_000), MAX_TIMEOUT_MS);
+}
 
 export async function callSynthesizedEndpoint(
   tool: Tool,
@@ -260,9 +380,9 @@ export async function callSynthesizedEndpoint(
     };
   }
 
-  // Resolve credential
+  // Resolve credential (optionally pinned by id)
   const credType = tool.synthesized.credentialType;
-  const credId = findCredentialIdByType(credType);
+  const credId = findCredentialId(credType, tool.synthesized.credentialId);
   if (!credId) {
     return {
       ok: false,
@@ -321,11 +441,11 @@ export async function callSynthesizedEndpoint(
     if (bodyArg && typeof bodyArg === "object") bodyValue = bodyArg;
   }
 
-  // Build URL + safety check
-  let resolvedUrl: URL;
+  // Build + resolve target (DNS lookup happens once here)
+  let target: ResolvedTarget;
   try {
     const urlStr = buildUrl(connection.baseUrl, endpoint.path, pathParams, queryParams);
-    resolvedUrl = await assertSafeSynthesizedUrl(urlStr);
+    target = await resolveSafeSynthesizedTarget(urlStr);
   } catch (err) {
     return {
       ok: false,
@@ -334,14 +454,17 @@ export async function callSynthesizedEndpoint(
     };
   }
 
-  // Apply auth
-  const headers = new Headers();
-  headers.set("Accept", "application/json");
-  if (bodyValue !== undefined) headers.set("Content-Type", "application/json");
+  // Apply auth + headers
+  const headersObj: Record<string, string> = {
+    "Accept": "application/json",
+  };
+  if (bodyValue !== undefined) headersObj["Content-Type"] = "application/json";
   if (connection.headers) {
-    for (const [k, v] of Object.entries(connection.headers)) headers.set(k, v);
+    for (const [k, v] of Object.entries(connection.headers)) {
+      headersObj[stripCrlf(k)] = stripCrlf(v);
+    }
   }
-  applyAuth(headers, resolvedUrl, connection.auth, cred.data);
+  applyAuth(headersObj, target.url, connection.auth, cred.data);
 
   // Non-GET approval gate
   if (endpoint.method !== "GET") {
@@ -359,7 +482,7 @@ export async function callSynthesizedEndpoint(
       endpointName: endpoint.name,
       method: endpoint.method,
       path: endpoint.path,
-      resolvedUrl: resolvedUrl.toString(),
+      resolvedUrl: target.url.toString(),
       argsPreview,
       verified: tool.synthesized.verified,
       source: tool.synthesized.source,
@@ -378,15 +501,18 @@ export async function callSynthesizedEndpoint(
     }
   }
 
-  // Execute
+  // Execute via pinned-IP HTTPS request
   const callId = randomUUID();
-  let response: Response;
+  const timeoutMs = resolveTimeoutMs(tool);
+  let response: PinnedResponse;
   try {
-    response = await fetch(resolvedUrl.toString(), {
+    response = await pinnedHttpsRequest({
+      target,
       method: endpoint.method,
-      headers,
-      body: bodyValue !== undefined ? JSON.stringify(bodyValue) : undefined,
-      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      headers: headersObj,
+      body: bodyValue !== undefined ? Buffer.from(JSON.stringify(bodyValue), "utf-8") : undefined,
+      timeoutMs,
+      maxBytes: MAX_RESPONSE_BYTES,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -395,36 +521,15 @@ export async function callSynthesizedEndpoint(
       callId,
       toolId: tool.id,
       endpoint: endpoint.name,
-      host: resolvedUrl.hostname,
+      host: target.hostname,
     });
     recordFailure(context.sessionId, tool.id, endpoint.name);
     return { ok: false, error: `network error: ${msg}`, durationMs: Date.now() - started };
   }
 
-  // Read with cap
-  const reader = response.body?.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  let truncated = false;
-  if (reader) {
-    try {
-      while (size < MAX_RESPONSE_BYTES) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          chunks.push(value);
-          size += value.byteLength;
-        }
-      }
-      if (size >= MAX_RESPONSE_BYTES) {
-        truncated = true;
-        try { await reader.cancel(); } catch { /* ignore */ }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  }
-  const rawText = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf-8");
+  const rawText = response.body.toString("utf-8");
+  const truncated = response.truncated;
+  const size = response.size;
 
   logError("mcp_crash" as const, "", {
     kind: "synthesized_call",
@@ -432,14 +537,14 @@ export async function callSynthesizedEndpoint(
     toolId: tool.id,
     endpoint: endpoint.name,
     method: endpoint.method,
-    host: resolvedUrl.hostname,
+    host: target.hostname,
     status: response.status,
     durationMs: Date.now() - started,
   });
 
   // Parse body
   let parsed: unknown;
-  const contentType = response.headers.get("content-type") ?? "";
+  const contentType = response.headers["content-type"] ?? "";
   if (contentType.includes("application/json")) {
     try { parsed = JSON.parse(rawText); } catch { parsed = rawText; }
   } else {
@@ -454,7 +559,6 @@ export async function callSynthesizedEndpoint(
       }
     : parsed;
 
-  // Auth error → classify
   if (response.status === 401 || response.status === 403 || response.status === 429) {
     recordFailure(context.sessionId, tool.id, endpoint.name);
     const diagnosis = diagnoseAuthError({
@@ -478,7 +582,7 @@ export async function callSynthesizedEndpoint(
     return {
       ok: false,
       status: response.status,
-      error: `${response.status} ${response.statusText}: ${typeof rawText === "string" ? rawText.slice(0, 500) : ""}`,
+      error: `${response.status} ${response.statusText}: ${rawText.slice(0, 500)}`,
       durationMs: Date.now() - started,
     };
   }

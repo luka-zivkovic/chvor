@@ -12,6 +12,7 @@ const VALID_CLIENT_EVENT_TYPES = new Set([
   "approval.respond",
   "command.respond",
   "credential.respond",
+  "synthesized.respond",
   "canvas.subscribe",
 ]);
 
@@ -35,6 +36,9 @@ function isValidClientEvent(event: unknown): event is GatewayClientEvent {
       return typeof d.requestId === "string" && typeof d.approved === "boolean";
     case "credential.respond":
       return typeof d.requestId === "string" && typeof d.cancelled === "boolean";
+    case "synthesized.respond":
+      return typeof d.requestId === "string" &&
+        (d.decision === "allow-once" || d.decision === "allow-session" || d.decision === "deny");
     case "canvas.subscribe":
       return typeof d.workspaceId === "string";
     default:

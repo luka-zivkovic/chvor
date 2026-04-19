@@ -84,7 +84,8 @@ function tryParseSpec(raw: string): Record<string, unknown> | null {
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     try {
-      return parseYaml(raw) as Record<string, unknown>;
+      // maxAliasCount: 0 blocks billion-laughs / anchor expansion DoS.
+      return parseYaml(raw, { maxAliasCount: 0 }) as Record<string, unknown>;
     } catch {
       return null;
     }

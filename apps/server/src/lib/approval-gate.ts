@@ -57,18 +57,32 @@ function key(toolId: string, endpointName: string): string {
 
 const MAX_PENDING = 5 * 60_000;
 
-const pendingApprovals = new Map<
-  string,
-  { resolve: (r: SynthesizedResponseData) => void }
->();
+interface PendingApproval {
+  resolve: (r: SynthesizedResponseData) => void;
+  /** WS clientId that originated the tool call — only this client may respond. */
+  targetClientId?: string;
+}
 
-/** Called by the WS handler when the client responds. */
+const pendingApprovals = new Map<string, PendingApproval>();
+
+/**
+ * Called by the WS handler when a client responds. Rejects the response if it
+ * comes from a WS client other than the one that originated the tool call
+ * (prevents another logged-in client from answering your confirm prompt).
+ */
 export function resolveSynthesizedApproval(
   requestId: string,
   response: SynthesizedResponseData,
+  responderClientId?: string,
 ): boolean {
   const pending = pendingApprovals.get(requestId);
   if (!pending) return false;
+  if (pending.targetClientId && responderClientId && pending.targetClientId !== responderClientId) {
+    console.warn(
+      `[approval-gate] rejected mismatched responder: expected ${pending.targetClientId}, got ${responderClientId}`,
+    );
+    return false;
+  }
   pendingApprovals.delete(requestId);
   pending.resolve(response);
   return true;
@@ -131,6 +145,7 @@ export async function requestApproval(args: RequestApprovalArgs): Promise<
         ? ["allow-once", "allow-session", "deny"]
         : ["allow-once", "deny"],
       timestamp: new Date().toISOString(),
+      timeoutMs: MAX_PENDING,
     } satisfies SynthesizedConfirmData,
   };
 
@@ -146,6 +161,7 @@ export async function requestApproval(args: RequestApprovalArgs): Promise<
       resolve({ requestId, decision: "deny" });
     }, MAX_PENDING);
     pendingApprovals.set(requestId, {
+      targetClientId: args.originClientId,
       resolve: (r) => { clearTimeout(timer); resolve(r); },
     });
   });

@@ -65,6 +65,27 @@ export function validateSpec(spec: SynthToolSpec): void {
       throw new Error(`endpoint path must start with /: ${ep.name}`);
     }
   }
+  if (spec.synthesized.timeoutMs !== undefined) {
+    const t = spec.synthesized.timeoutMs;
+    if (!Number.isFinite(t) || t < 1_000 || t > 600_000) {
+      throw new Error(`synthesized.timeoutMs must be between 1000 and 600000 ms`);
+    }
+  }
+  if (spec.synthesized.credentialId !== undefined && typeof spec.synthesized.credentialId !== "string") {
+    throw new Error(`synthesized.credentialId must be a string when set`);
+  }
+}
+
+/**
+ * Redact any line that starts with `---` (optionally followed by whitespace/text)
+ * so user-supplied notes can't close the frontmatter fence and inject YAML that
+ * gets loaded on the next capability reload.
+ */
+function sanitizeNotes(raw: string): string {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => (/^\s*---\s*$/.test(line) || /^---\s+/.test(line) ? `  ${line}` : line))
+    .join("\n");
 }
 
 function buildMarkdown(spec: SynthToolSpec): string {
@@ -85,9 +106,10 @@ function buildMarkdown(spec: SynthToolSpec): string {
   };
 
   const yaml = yamlStringify(frontmatter, { lineWidth: 0 });
-  const notes = spec.notes?.trim() ||
+  const rawNotes = spec.notes?.trim() ||
     `Synthesized ${spec.synthesized.source} tool for ${spec.name}.` +
     (spec.synthesized.specUrl ? ` Spec: ${spec.synthesized.specUrl}` : "");
+  const notes = sanitizeNotes(rawNotes);
 
   return `---\n${yaml}---\n${notes}\n`;
 }

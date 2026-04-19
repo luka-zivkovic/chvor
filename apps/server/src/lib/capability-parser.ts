@@ -88,12 +88,18 @@ function parseSynthesizedConfig(raw: unknown): SynthesizedToolConfig | undefined
   const source = s.source === "ai-draft" ? "ai-draft" : s.source === "openapi" ? "openapi" : null;
   if (!source) return undefined;
   if (typeof s.credentialType !== "string") return undefined;
+  let timeoutMs: number | undefined;
+  if (typeof s.timeoutMs === "number" && Number.isFinite(s.timeoutMs)) {
+    timeoutMs = Math.min(Math.max(Math.floor(s.timeoutMs), 1_000), 600_000);
+  }
   return {
     source,
     verified: s.verified === true,
     specUrl: typeof s.specUrl === "string" ? s.specUrl : undefined,
     generatedAt: typeof s.generatedAt === "string" ? s.generatedAt : new Date().toISOString(),
     credentialType: s.credentialType,
+    credentialId: typeof s.credentialId === "string" ? s.credentialId : undefined,
+    timeoutMs,
   };
 }
 

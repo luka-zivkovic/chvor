@@ -193,11 +193,11 @@ wsManager.onClientMessage((clientId, event) => {
       break;
     }
     case "synthesized.respond": {
-      const resolved = resolveSynthesizedApproval(event.data.requestId, event.data);
+      const resolved = resolveSynthesizedApproval(event.data.requestId, event.data, clientId);
       if (!resolved) {
         wsManager.sendTo(clientId, {
           type: "error",
-          data: { message: "No pending synthesized-tool confirmation with that ID (may have timed out)" },
+          data: { message: "No pending synthesized-tool confirmation with that ID (may have timed out, or another client originated it)" },
         });
       }
       break;
@@ -614,6 +614,12 @@ startMemoryDecay();
 startConsolidation();
 initManifest();
 initKeepAwake();
+
+if (process.env.CHVOR_SYNTH_ALLOW_PRIVATE === "1") {
+  console.warn(
+    "[synth] CHVOR_SYNTH_ALLOW_PRIVATE=1 is set — synthesized tool calls may reach private/internal networks. Only use this in trusted local dev.",
+  );
+}
 
 // Hot-reload: watch skill/tool directories for .md file changes
 const skillsDir = process.env.CHVOR_SKILLS_DIR || join(homedir(), ".chvor", "skills");

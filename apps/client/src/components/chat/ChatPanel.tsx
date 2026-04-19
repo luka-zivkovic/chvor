@@ -9,6 +9,7 @@ import { TalkMode } from "./TalkMode";
 import { AudioPlayback } from "./AudioPlayback";
 import { useVoiceStore } from "@/stores/voice-store";
 import { CommandApproval } from "./CommandApproval";
+import { SynthesizedConfirm } from "./SynthesizedConfirm";
 import { CredentialForm } from "../credentials/CredentialForm";
 import { ConversationSwitcher } from "./ConversationSwitcher";
 import { usePersonaStore } from "@/stores/persona-store";
@@ -199,7 +200,6 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   const pendingCredentialRequests = useAppStore((s) => s.pendingCredentialRequests);
   const respondToCredentialRequest = useAppStore((s) => s.respondToCredentialRequest);
   const pendingSynthesizedConfirms = useAppStore((s) => s.pendingSynthesizedConfirms);
-  const respondToSynthesizedConfirm = useAppStore((s) => s.respondToSynthesizedConfirm);
   const conversations = useAppStore((s) => s.conversations);
   const sessionId = useAppStore((s) => s.sessionId);
   const newConversation = useAppStore((s) => s.newConversation);
@@ -409,82 +409,9 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
       {/* Pending synthesized-tool confirmations */}
       {pendingSynthesizedConfirms.length > 0 && (
         <div className="shrink-0 px-3 py-2 space-y-2">
-          {pendingSynthesizedConfirms.map((confirm) => {
-            const methodColor =
-              confirm.method === "GET"
-                ? "text-emerald-500"
-                : confirm.method === "DELETE"
-                ? "text-red-500"
-                : "text-amber-500";
-            const sendDecision = (decision: "allow-once" | "allow-session" | "deny") => {
-              send({
-                type: "synthesized.respond",
-                data: { requestId: confirm.requestId, decision },
-              });
-              respondToSynthesizedConfirm(confirm.requestId);
-            };
-            return (
-              <div
-                key={confirm.requestId}
-                className="rounded-md border border-border/50 bg-background/80 p-3 text-xs space-y-2"
-                style={{ backdropFilter: "blur(8px)" }}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold">{confirm.toolName}</span>
-                    <span className="text-muted-foreground/60">·</span>
-                    <span className={`font-mono font-semibold ${methodColor}`}>
-                      {confirm.method}
-                    </span>
-                    <span className="font-mono text-muted-foreground truncate max-w-[280px]">
-                      {confirm.path}
-                    </span>
-                  </div>
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                      confirm.verified
-                        ? "bg-emerald-500/10 text-emerald-500"
-                        : "bg-amber-500/10 text-amber-500"
-                    }`}
-                  >
-                    {confirm.verified ? "verified" : "unverified"}
-                  </span>
-                </div>
-                <div className="text-muted-foreground break-all font-mono text-[10px]">
-                  {confirm.resolvedUrl}
-                </div>
-                {confirm.argsPreview && confirm.argsPreview !== "{}" && (
-                  <pre className="overflow-x-auto rounded bg-muted/40 p-2 text-[10px] font-mono">
-                    {confirm.argsPreview}
-                  </pre>
-                )}
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {confirm.options.includes("allow-once") && (
-                    <button
-                      onClick={() => sendDecision("allow-once")}
-                      className="rounded border border-border/50 bg-background px-3 py-1 text-xs font-medium hover:bg-muted/50"
-                    >
-                      Allow once
-                    </button>
-                  )}
-                  {confirm.options.includes("allow-session") && (
-                    <button
-                      onClick={() => sendDecision("allow-session")}
-                      className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-500 hover:bg-emerald-500/20"
-                    >
-                      Allow for session
-                    </button>
-                  )}
-                  <button
-                    onClick={() => sendDecision("deny")}
-                    className="rounded border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-500 hover:bg-red-500/20"
-                  >
-                    Deny
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          {pendingSynthesizedConfirms.map((confirm) => (
+            <SynthesizedConfirm key={confirm.requestId} confirm={confirm} onSend={send} />
+          ))}
         </div>
       )}
 

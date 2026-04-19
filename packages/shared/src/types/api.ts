@@ -47,6 +47,8 @@ export interface SynthesizedConfirmData {
   source: "openapi" | "ai-draft";
   options: Array<"allow-once" | "allow-session" | "deny">;
   timestamp: string;
+  /** Server timeout in milliseconds — client can display a matching countdown. */
+  timeoutMs: number;
 }
 
 export interface SynthesizedResponseData {
