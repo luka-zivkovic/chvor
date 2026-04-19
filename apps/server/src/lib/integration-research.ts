@@ -57,7 +57,7 @@ async function extractWithLLM(
       abortSignal: AbortSignal.timeout(30_000),
       system:
         "You extract API credential information. Respond ONLY with valid JSON, no markdown.",
-      prompt: `Given these web search snippets about "${serviceName}" API authentication:\n\n${snippets.join("\n\n")}\n\nExtract the following as JSON:\n{\n  "name": "human-readable service name",\n  "credentialType": "slug-style-type",\n  "fields": [{ "key": "fieldName", "label": "Field Label", "type": "password" | "text", "placeholder": "optional" }],\n  "baseUrl": "API base URL if known",\n  "authScheme": "bearer | basic | header | query-param",\n  "helpText": "Brief setup instructions"\n}`,
+      prompt: `Given these web search snippets about "${serviceName}" API authentication:\n\n${snippets.join("\n\n")}\n\nExtract the following as JSON:\n{\n  "name": "human-readable service name",\n  "credentialType": "slug-style-type",\n  "fields": [{ "key": "fieldName", "label": "Field Label", "type": "password" | "text", "placeholder": "optional" }],\n  "baseUrl": "API base URL if known",\n  "authScheme": "bearer | basic | header | query-param",\n  "helpText": "Brief setup instructions",\n  "specUrl": "URL to an OpenAPI/Swagger spec if the service publishes one (e.g. https://api.example.com/openapi.json), otherwise omit"\n}`,
     });
 
     const parsed = JSON.parse(text);
@@ -68,6 +68,7 @@ async function extractWithLLM(
       baseUrl: parsed.baseUrl || undefined,
       authScheme: parsed.authScheme || undefined,
       helpText: parsed.helpText || undefined,
+      specUrl: typeof parsed.specUrl === "string" && parsed.specUrl.startsWith("http") ? parsed.specUrl : undefined,
       confidence: "researched",
     };
   } catch (err) {
@@ -91,7 +92,7 @@ async function inferWithLLM(
       abortSignal: AbortSignal.timeout(30_000),
       system:
         "You extract API credential information. Respond ONLY with valid JSON, no markdown.",
-      prompt: `What credentials are needed to authenticate with the "${serviceName}" API?\n\nRespond as JSON:\n{\n  "name": "human-readable service name",\n  "credentialType": "slug-style-type",\n  "fields": [{ "key": "fieldName", "label": "Field Label", "type": "password" | "text", "placeholder": "optional" }],\n  "baseUrl": "API base URL if known",\n  "authScheme": "bearer | basic | header | query-param",\n  "helpText": "Brief setup instructions"\n}`,
+      prompt: `What credentials are needed to authenticate with the "${serviceName}" API?\n\nRespond as JSON:\n{\n  "name": "human-readable service name",\n  "credentialType": "slug-style-type",\n  "fields": [{ "key": "fieldName", "label": "Field Label", "type": "password" | "text", "placeholder": "optional" }],\n  "baseUrl": "API base URL if known",\n  "authScheme": "bearer | basic | header | query-param",\n  "helpText": "Brief setup instructions",\n  "specUrl": "URL to an OpenAPI/Swagger spec if the service publishes one, otherwise omit"\n}`,
     });
 
     const parsed = JSON.parse(text);
@@ -102,6 +103,7 @@ async function inferWithLLM(
       baseUrl: parsed.baseUrl || undefined,
       authScheme: parsed.authScheme || undefined,
       helpText: parsed.helpText || undefined,
+      specUrl: typeof parsed.specUrl === "string" && parsed.specUrl.startsWith("http") ? parsed.specUrl : undefined,
       confidence: "inferred",
     };
   } catch (err) {

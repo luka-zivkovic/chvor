@@ -119,6 +119,9 @@ interface AppState {
   pendingCredentialRequests: import("@chvor/shared").CredentialRequestData[];
   respondToCredentialRequest: (requestId: string) => void;
 
+  pendingSynthesizedConfirms: import("@chvor/shared").SynthesizedConfirmData[];
+  respondToSynthesizedConfirm: (requestId: string) => void;
+
   handleServerEvent: (event: GatewayServerEvent) => void;
 }
 
@@ -130,6 +133,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!connected) {
       updates.pendingApprovals = [];
       updates.pendingCredentialRequests = [];
+      updates.pendingSynthesizedConfirms = [];
     }
     set(updates);
   },
@@ -161,6 +165,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pendingModelInfo: null,
       pendingApprovals: [],
       pendingCredentialRequests: [],
+      pendingSynthesizedConfirms: [],
       currentEmotion: null,
       messagesLoading: false,
       messageTraces: {},
@@ -315,6 +320,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   respondToCredentialRequest: (requestId) => {
     set((s) => ({
       pendingCredentialRequests: s.pendingCredentialRequests.filter((r) => r.requestId !== requestId),
+    }));
+  },
+
+  pendingSynthesizedConfirms: [],
+  respondToSynthesizedConfirm: (requestId) => {
+    set((s) => ({
+      pendingSynthesizedConfirms: s.pendingSynthesizedConfirms.filter((r) => r.requestId !== requestId),
     }));
   },
 
@@ -516,6 +528,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       case "credential.request":
         set((s) => ({
           pendingCredentialRequests: [...s.pendingCredentialRequests, event.data],
+        }));
+        break;
+      case "synthesized.confirm":
+        set((s) => ({
+          pendingSynthesizedConfirms: [...s.pendingSynthesizedConfirms, event.data],
         }));
         break;
       case "error":
