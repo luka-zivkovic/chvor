@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import type { Tool } from "@chvor/shared";
+import type { Tool, SynthesizedEndpoint, SynthesizedEndpointParam } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
 import { mcpManager } from "./mcp-manager.ts";
 import { hasRequiredCredentials } from "./credential-resolver.ts";
@@ -120,6 +120,58 @@ export function getFailedTools(): FailedTool[] {
  * Results are memoized by tool IDs to improve prompt cache hit rates.
  * Concurrent calls are deduplicated.
  */
+function zodForEndpointParam(p: SynthesizedEndpointParam): z.ZodType {
+  switch (p.type) {
+    case "integer":
+    case "number":
+      return z.number();
+    case "boolean":
+      return z.boolean();
+    default:
+      return z.string();
+  }
+}
+
+function buildSynthesizedToolDefs(t: Tool): Record<string, ReturnType<typeof tool>> {
+  const defs: Record<string, ReturnType<typeof tool>> = {};
+  if (!t.endpoints || !t.synthesized) return defs;
+
+  const verifiedTag = t.synthesized.verified ? "" : " [unverified]";
+
+  for (const ep of t.endpoints) {
+    const shape: Record<string, z.ZodType> = {};
+    const pathNames = new Set<string>();
+
+    for (const p of ep.pathParams ?? []) {
+      let s: z.ZodType = zodForEndpointParam(p);
+      if (p.description) s = s.describe(p.description);
+      shape[p.name] = p.required ? s : s.optional();
+      pathNames.add(p.name);
+    }
+    for (const p of ep.queryParams ?? []) {
+      if (pathNames.has(p.name)) {
+        console.warn(
+          `[tool-builder] ${t.id}__${ep.name}: query param "${p.name}" collides with path param; query value will be ignored. Rename the query param in the tool file.`,
+        );
+        continue;
+      }
+      let s: z.ZodType = zodForEndpointParam(p);
+      if (p.description) s = s.describe(p.description);
+      shape[p.name] = p.required ? s : s.optional();
+    }
+    if (ep.bodySchema && ep.method !== "GET") {
+      shape.body = z.record(z.unknown()).optional().describe("Request body (JSON).");
+    }
+
+    const qualifiedName = `${t.id}__${ep.name}`;
+    defs[qualifiedName] = tool({
+      description: `[${t.metadata.name}${verifiedTag}] ${ep.description} — ${ep.method} ${ep.path}`,
+      parameters: z.object(shape),
+    });
+  }
+  return defs;
+}
+
 export async function buildToolDefinitions(
   tools: Tool[]
 ): Promise<Record<string, ReturnType<typeof tool>>> {
@@ -154,9 +206,28 @@ async function doBuild(
   const failedTools: FailedTool[] = [];
   let hadErrors = false;
 
+  // Synthesized tools — no external discovery; build directly from endpoints frontmatter.
+  const synthesizedTools = eligibleTools.filter((t) => t.mcpServer?.transport === "synthesized");
+  const externalTools = eligibleTools.filter((t) => t.mcpServer?.transport !== "synthesized");
+
+  for (const t of synthesizedTools) {
+    if (!t.endpoints || t.endpoints.length === 0) {
+      console.warn(`[tool-builder] synthesized tool ${t.id} has no endpoints — skipping`);
+      continue;
+    }
+    const defs = buildSynthesizedToolDefs(t);
+    Object.assign(toolDefs, defs);
+    const fakeMcpTools = (t.endpoints ?? []).map((ep: SynthesizedEndpoint) => ({
+      name: ep.name,
+      description: ep.description,
+      inputSchema: {},
+    }));
+    discoveredMcpTools.set(t.id, fakeMcpTools);
+  }
+
   // Discover MCP tools in parallel — each server is independent
   const results = await Promise.allSettled(
-    eligibleTools.map(async (t) => {
+    externalTools.map(async (t) => {
       const mcpTools = await mcpManager.discoverTools(t);
       return { tool: t, mcpTools };
     })
@@ -177,7 +248,7 @@ async function doBuild(
       }
     } else {
       hadErrors = true;
-      const failedTool = eligibleTools[results.indexOf(result)];
+      const failedTool = externalTools[results.indexOf(result)];
       const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
       logError("mcp_crash", result.reason, { toolId: failedTool?.id });
       console.warn(

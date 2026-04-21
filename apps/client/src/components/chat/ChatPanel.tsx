@@ -9,6 +9,7 @@ import { TalkMode } from "./TalkMode";
 import { AudioPlayback } from "./AudioPlayback";
 import { useVoiceStore } from "@/stores/voice-store";
 import { CommandApproval } from "./CommandApproval";
+import { SynthesizedConfirm } from "./SynthesizedConfirm";
 import { CredentialForm } from "../credentials/CredentialForm";
 import { ConversationSwitcher } from "./ConversationSwitcher";
 import { usePersonaStore } from "@/stores/persona-store";
@@ -198,6 +199,7 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   const pendingApprovals = useAppStore((s) => s.pendingApprovals);
   const pendingCredentialRequests = useAppStore((s) => s.pendingCredentialRequests);
   const respondToCredentialRequest = useAppStore((s) => s.respondToCredentialRequest);
+  const pendingSynthesizedConfirms = useAppStore((s) => s.pendingSynthesizedConfirms);
   const conversations = useAppStore((s) => s.conversations);
   const sessionId = useAppStore((s) => s.sessionId);
   const newConversation = useAppStore((s) => s.newConversation);
@@ -400,6 +402,15 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
                 respondToCredentialRequest(request.requestId);
               }}
             />
+          ))}
+        </div>
+      )}
+
+      {/* Pending synthesized-tool confirmations */}
+      {pendingSynthesizedConfirms.length > 0 && (
+        <div className="shrink-0 px-3 py-2 space-y-2">
+          {pendingSynthesizedConfirms.map((confirm) => (
+            <SynthesizedConfirm key={confirm.requestId} confirm={confirm} onSend={send} />
           ))}
         </div>
       )}

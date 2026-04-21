@@ -219,6 +219,12 @@ function buildSystemPrompt(
     "- When the user asks to install, find, browse, or list skills, tools, or templates from the registry, use native__registry_search to search and native__registry_install to install them."
   );
 
+  toolUsageLines.push(
+    "- Tier-3 integrations (unknown services): after native__research_integration and native__request_credential with source=ai-research return a saved credential, IMMEDIATELY call native__synthesize_tool to create callable endpoints. Prefer passing the openApiSpecUrl returned in the proposal; otherwise draft a minimal endpoint set. Without this step the user will see 'credential saved' but no tool will be callable.",
+    "- When a synthesized tool returns {error: 'auth_failed'}, relay the `userFacingHint` verbatim to the user before suggesting any fix. Do NOT prompt for credential re-entry unless `likelyCause === 'expired_token'`. For `missing_scope` / `endpoint_requires_oauth`, suggest a different endpoint or scope adjustment; for `rate_limited`, wait or reduce request volume.",
+    "- Synthesized tools marked unverified (AI-drafted, no OpenAPI spec) will always prompt the user for approval on non-GET calls. Do not call non-GET endpoints speculatively; describe the action you intend to take first."
+  );
+
   stableSections.push(`## Tool Usage\n\n${toolUsageLines.join("\n")}`);
 
   // Group skills by type for clearer system prompt sections
@@ -1179,6 +1185,75 @@ export async function executeConversation(
         continue;
       }
 
+      // Check for synthesized tool first — these live in tool frontmatter, not mcpManager connections
+      const sepIndex = tc.toolName.indexOf("__");
+      const maybeToolId = sepIndex !== -1 ? tc.toolName.slice(0, sepIndex) : "";
+      const maybeEndpointName = sepIndex !== -1 ? tc.toolName.slice(sepIndex + 2) : "";
+      const synthesizedTool = maybeToolId
+        ? loadTools().find((t) => t.id === maybeToolId && t.mcpServer?.transport === "synthesized")
+        : undefined;
+
+      if (synthesizedTool) {
+        const toolId = synthesizedTool.id;
+        emit({
+          type: "brain.decision",
+          data: { toolId, capabilityKind: "tool", reason: `Calling synthesized ${maybeEndpointName}` },
+        });
+        emit({
+          type: "tool.invoked",
+          data: { nodeId: `tool-${toolId}`, toolId },
+        });
+
+        try {
+          const { callSynthesizedEndpoint } = await import("./synthesized-caller.ts");
+          const callResult = await callSynthesizedEndpoint(synthesizedTool, maybeEndpointName, tc.args, {
+            sessionId: options?.sessionId,
+            originClientId: options?.originClientId,
+          });
+
+          if (callResult.ok) {
+            emit({
+              type: "tool.completed",
+              data: { nodeId: `tool-${toolId}`, output: callResult },
+            });
+            toolResults.push({
+              toolCallId: tc.toolCallId,
+              toolName: tc.toolName,
+              result: { status: callResult.status, body: callResult.body, truncated: callResult.truncated },
+            });
+            if (emotionEngine) toolOutcomeResults.push({ success: true, severity: toolSeverity(tc.toolName) });
+          } else {
+            const errorPayload = callResult.diagnosis
+              ? { error: callResult.error, diagnosis: callResult.diagnosis }
+              : { error: callResult.error };
+            emit({
+              type: "tool.failed",
+              data: { nodeId: `tool-${toolId}`, error: callResult.error },
+            });
+            toolResults.push({
+              toolCallId: tc.toolCallId,
+              toolName: tc.toolName,
+              result: errorPayload,
+            });
+            if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
+          }
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          logError("tool_failure", err, { toolName: tc.toolName, toolId, sessionId: options?.sessionId });
+          emit({
+            type: "tool.failed",
+            data: { nodeId: `tool-${toolId}`, error: errorMsg },
+          });
+          toolResults.push({
+            toolCallId: tc.toolCallId,
+            toolName: tc.toolName,
+            result: { error: errorMsg },
+          });
+          if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
+        }
+        continue;
+      }
+
       const parsed = mcpManager.findToolForQualifiedName(tc.toolName);
       if (!parsed) {
         emit({
@@ -1254,7 +1329,12 @@ export async function executeConversation(
     }
 
     // Rebuild tool definitions if credentials were added/changed this round
-    const CREDENTIAL_MUTATING_TOOLS = new Set(["native__request_credential", "native__add_credential"]);
+    const CREDENTIAL_MUTATING_TOOLS = new Set([
+      "native__request_credential",
+      "native__add_credential",
+      "native__synthesize_tool",
+      "native__repair_synthesized_tool",
+    ]);
     const credentialChanged = toolResults.some((tr) =>
       CREDENTIAL_MUTATING_TOOLS.has(tr.toolName) &&
       !(tr.result && typeof tr.result === "object" && "error" in (tr.result as Record<string, unknown>))
@@ -1268,6 +1348,29 @@ export async function executeConversation(
         for (const name of options.excludeTools) delete toolDefs[name];
       }
       console.log(`[orchestrator] rebuilt tool defs after credential change — ${Object.keys(toolDefs).length} tools`);
+    }
+
+    // Auth-failure early-out: if every tool call failed with the same auth_failed cause, bail with the hint.
+    const authDiagnoses = toolResults
+      .map((tr) => (tr.result && typeof tr.result === "object" && "diagnosis" in (tr.result as Record<string, unknown>))
+        ? (tr.result as { diagnosis?: { likelyCause?: string; userFacingHint?: string } }).diagnosis
+        : undefined)
+      .filter((d): d is { likelyCause?: string; userFacingHint?: string } => !!d);
+    if (authDiagnoses.length > 0 && authDiagnoses.length === toolResults.length) {
+      const causes = new Set(authDiagnoses.map((d) => d.likelyCause));
+      if (causes.size === 1) {
+        const hint = authDiagnoses[0].userFacingHint ?? "An auth error is blocking these calls.";
+        if (onChunk) onChunk(hint);
+        const activeConfig = configChain[activeConfigIndex];
+        return {
+          text: lastFullText.trim() ? lastFullText + "\n\n" + hint : hint,
+          actions: allActions,
+          totalMessages: messages.length,
+          fittedMessages: budgetedMessages.length,
+          emotion: detectedEmotion ?? undefined,
+          modelUsed: { providerId: activeConfig.providerId, model: activeConfig.model, wasFallback: activeConfigIndex > 0 },
+        };
+      }
     }
 
     // No-progress detection: break early if LLM is spinning on failing tools

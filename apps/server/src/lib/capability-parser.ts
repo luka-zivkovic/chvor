@@ -11,6 +11,9 @@ import type {
   SkillType,
   McpServerConfig,
   CredentialFieldSchema,
+  SynthesizedToolConfig,
+  SynthesizedEndpoint,
+  SynthesizedEndpointParam,
 } from "@chvor/shared";
 
 const VALID_CATEGORIES: SkillCategory[] = [
@@ -37,6 +40,10 @@ function parseParams(raw: unknown): CapabilityParam[] | undefined {
 function parseMcp(raw: unknown): McpServerConfig | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const m = raw as Record<string, unknown>;
+  // Synthesized transport needs no command/url — the caller drives HTTP directly.
+  if (m.transport === "synthesized") {
+    return { transport: "synthesized" };
+  }
   // Require either a command (stdio) or a url (sse/http)
   if (!m.command && !m.url) return undefined;
   const transport = m.transport === "http" ? "http" : m.transport === "sse" ? "sse" : "stdio";
@@ -49,6 +56,79 @@ function parseMcp(raw: unknown): McpServerConfig | undefined {
     transport,
     url: typeof m.url === "string" ? m.url : undefined,
   };
+}
+
+const VALID_ENDPOINT_METHODS: SynthesizedEndpoint["method"][] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+const ENDPOINT_NAME_RE = /^[a-z][a-z0-9_]{0,48}$/;
+
+function parseEndpointParams(raw: unknown): SynthesizedEndpointParam[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: SynthesizedEndpointParam[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const p = item as Record<string, unknown>;
+    const name = typeof p.name === "string" ? p.name : "";
+    if (!name) continue;
+    const rawType = typeof p.type === "string" ? p.type : "string";
+    const type: SynthesizedEndpointParam["type"] =
+      rawType === "integer" || rawType === "number" || rawType === "boolean" ? rawType : "string";
+    out.push({
+      name,
+      type,
+      required: p.required === true,
+      description: typeof p.description === "string" ? p.description : undefined,
+    });
+  }
+  return out;
+}
+
+function parseSynthesizedConfig(raw: unknown): SynthesizedToolConfig | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const s = raw as Record<string, unknown>;
+  const source = s.source === "ai-draft" ? "ai-draft" : s.source === "openapi" ? "openapi" : null;
+  if (!source) return undefined;
+  if (typeof s.credentialType !== "string") return undefined;
+  let timeoutMs: number | undefined;
+  if (typeof s.timeoutMs === "number" && Number.isFinite(s.timeoutMs)) {
+    timeoutMs = Math.min(Math.max(Math.floor(s.timeoutMs), 1_000), 600_000);
+  }
+  return {
+    source,
+    verified: s.verified === true,
+    specUrl: typeof s.specUrl === "string" ? s.specUrl : undefined,
+    generatedAt: typeof s.generatedAt === "string" ? s.generatedAt : new Date().toISOString(),
+    credentialType: s.credentialType,
+    credentialId: typeof s.credentialId === "string" ? s.credentialId : undefined,
+    timeoutMs,
+  };
+}
+
+function parseEndpoints(raw: unknown): SynthesizedEndpoint[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: SynthesizedEndpoint[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const e = item as Record<string, unknown>;
+    const name = typeof e.name === "string" ? e.name : "";
+    if (!ENDPOINT_NAME_RE.test(name) || seen.has(name)) continue;
+    const method = typeof e.method === "string" ? e.method.toUpperCase() : "";
+    if (!VALID_ENDPOINT_METHODS.includes(method as SynthesizedEndpoint["method"])) continue;
+    const path = typeof e.path === "string" && e.path.startsWith("/") ? e.path : null;
+    if (!path) continue;
+    seen.add(name);
+    out.push({
+      name,
+      description: typeof e.description === "string" ? e.description : `${method} ${path}`,
+      method: method as SynthesizedEndpoint["method"],
+      path,
+      pathParams: parseEndpointParams(e.pathParams),
+      queryParams: parseEndpointParams(e.queryParams),
+      bodySchema: e.bodySchema && typeof e.bodySchema === "object" ? (e.bodySchema as Record<string, unknown>) : null,
+    });
+    if (out.length >= 50) break;
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function parseTags(raw: unknown): string[] | undefined {
@@ -150,6 +230,8 @@ export function parseCapabilityMd(
       if (metadata.needs?.length) {
         console.warn(`[capability-parser] ${filePath}: "needs" has no effect on tools (only skills)`);
       }
+      const synthesized = parseSynthesizedConfig(fm.synthesized);
+      const endpoints = parseEndpoints(fm.endpoints);
       return {
         kind: "tool",
         id,
@@ -159,6 +241,8 @@ export function parseCapabilityMd(
         path: filePath,
         mcpServer,
         builtIn: source === "bundled",
+        synthesized,
+        endpoints,
       };
     }
 

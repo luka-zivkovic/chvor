@@ -82,4 +82,6 @@ export interface ProviderProposal {
   authScheme?: string;
   helpText?: string;
   confidence: "researched" | "inferred";
+  /** URL to an OpenAPI/Swagger spec if the service publishes one. */
+  specUrl?: string;
 }

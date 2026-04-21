@@ -81,8 +81,38 @@ export interface McpServerConfig {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
-  transport: "stdio" | "sse" | "http";
+  transport: "stdio" | "sse" | "http" | "synthesized";
   url?: string;
+}
+
+export interface SynthesizedToolConfig {
+  source: "openapi" | "ai-draft";
+  verified: boolean;
+  specUrl?: string;
+  generatedAt: string;
+  credentialType: string;
+  /** If set, pins the synthesized tool to a specific saved credential by ID.
+   *  Falls back to first-of-type lookup when omitted. */
+  credentialId?: string;
+  /** Per-tool HTTP call timeout in milliseconds. Defaults to 60 s, capped at 600 s. */
+  timeoutMs?: number;
+}
+
+export interface SynthesizedEndpointParam {
+  name: string;
+  type: "string" | "integer" | "boolean" | "number";
+  required: boolean;
+  description?: string;
+}
+
+export interface SynthesizedEndpoint {
+  name: string;
+  description: string;
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  path: string;
+  pathParams?: SynthesizedEndpointParam[];
+  queryParams?: SynthesizedEndpointParam[];
+  bodySchema?: Record<string, unknown> | null;
 }
 
 interface BaseCapability {
@@ -102,6 +132,8 @@ export interface Tool extends BaseCapability {
   kind: "tool";
   mcpServer?: McpServerConfig;
   builtIn: boolean;
+  synthesized?: SynthesizedToolConfig;
+  endpoints?: SynthesizedEndpoint[];
 }
 
 export type Capability = Skill | Tool;

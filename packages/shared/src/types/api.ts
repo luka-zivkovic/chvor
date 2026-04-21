@@ -32,6 +32,30 @@ export interface CredentialResponseData {
   name?: string;
 }
 
+// ── Synthesized tool call confirmation (server-triggered modal) ─
+
+export interface SynthesizedConfirmData {
+  requestId: string;
+  toolId: string;
+  toolName: string;
+  endpointName: string;
+  method: string;
+  path: string;
+  resolvedUrl: string;
+  argsPreview: string;
+  verified: boolean;
+  source: "openapi" | "ai-draft";
+  options: Array<"allow-once" | "allow-session" | "deny">;
+  timestamp: string;
+  /** Server timeout in milliseconds — client can display a matching countdown. */
+  timeoutMs: number;
+}
+
+export interface SynthesizedResponseData {
+  requestId: string;
+  decision: "allow-once" | "allow-session" | "deny";
+}
+
 // Credential endpoints
 export interface CreateCredentialRequest {
   name: string;
@@ -79,7 +103,8 @@ export type GatewayClientEvent =
   | { type: "canvas.subscribe"; data: { workspaceId: string } }
   | { type: "session.init"; data: { sessionId: string } }
   | { type: "command.respond"; data: CommandApprovalResponse }
-  | { type: "credential.respond"; data: CredentialResponseData };
+  | { type: "credential.respond"; data: CredentialResponseData }
+  | { type: "synthesized.respond"; data: SynthesizedResponseData };
 
 export type GatewayServerEvent =
   | { type: "chat.message"; data: { role: "assistant"; content: string; timestamp: string; messageId?: string; media?: import("./message.js").MediaArtifact[] } }
@@ -95,6 +120,7 @@ export type GatewayServerEvent =
   | { type: "voice.status"; data: { state: "transcribing" | "synthesizing" | "ready" } }
   | { type: "command.confirm"; data: CommandApprovalRequest }
   | { type: "credential.request"; data: CredentialRequestData }
+  | { type: "synthesized.confirm"; data: SynthesizedConfirmData }
   | { type: "chat.stopped"; data: Record<string, never> }
   | { type: "chat.welcome"; data: { content: string; aiName: string } }
   | { type: "chat.modelInfo"; data: { providerId: string; model: string; wasFallback: boolean } }
