@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "start": "node --import tsx src/index.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:evals": "EVAL=1 vitest run src/evals"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1",

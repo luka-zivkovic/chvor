@@ -12,5 +12,6 @@
       "@chvor/pc-agent/a11y": ["../../packages/pc-agent/src/lib/a11y/index.ts"]
     }
   },
-  "include": ["src", "../../packages/pc-agent/src/types.d.ts"]
+  "include": ["src", "../../packages/pc-agent/src/types.d.ts"],
+  "exclude": ["src/evals"]
 }
