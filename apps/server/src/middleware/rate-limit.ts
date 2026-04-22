@@ -65,6 +65,13 @@ function clientKey(c: Context): string {
   if (cookie) return `c:${cookie.slice(0, 32)}`;
   // IP as last resort — Hono node-server doesn't expose it directly; pull from
   // x-forwarded-for or cf-connecting-ip when present.
+  //
+  // NOTE: these headers are trivially spoofable by any client. Chvor is a
+  // localhost-only single-user desktop app, so the "IP" bucket is really a
+  // coarse fallback for unauthenticated local traffic — it has no security
+  // role. If Chvor is ever fronted by a reverse proxy / exposed publicly,
+  // the operator must terminate these headers at the proxy and gate this
+  // branch behind a TRUST_PROXY env var before trusting them.
   const xff = c.req.header("x-forwarded-for");
   if (xff) return `ip:${xff.split(",")[0]?.trim() ?? "unknown"}`;
   const cf = c.req.header("cf-connecting-ip");

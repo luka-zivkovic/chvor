@@ -15,6 +15,7 @@ import { cacheDiscoveredSpec, loadCachedSpec } from "../db/synthesized-store.ts"
 
 const SPEC_FETCH_TIMEOUT_MS = 8000;
 const MAX_SPEC_BYTES = 2 * 1024 * 1024; // 2MB
+const MAX_REDIRECTS = 3;
 const APIS_GURU_LIST = "https://api.apis.guru/v2/list.json";
 
 const WELL_KNOWN_PATHS = [
@@ -49,9 +50,35 @@ export interface DiscoveredSpec {
 // ── Fetch helpers ──────────────────────────────────────────────
 
 async function safeFetchText(rawUrl: string): Promise<string | null> {
-  try {
-    await assertSafeSynthesizedUrl(rawUrl);
-    const res = await fetch(rawUrl, { signal: AbortSignal.timeout(SPEC_FETCH_TIMEOUT_MS) });
+  // Manual redirect loop: re-gate every hop through assertSafeSynthesizedUrl so
+  // a public host can't bounce us to 127.0.0.1, 169.254.169.254, etc. Default
+  // fetch() follows redirects silently — we opt out with `redirect: "manual"`.
+  let currentUrl = rawUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    let res: Response;
+    try {
+      await assertSafeSynthesizedUrl(currentUrl);
+      res = await fetch(currentUrl, {
+        signal: AbortSignal.timeout(SPEC_FETCH_TIMEOUT_MS),
+        redirect: "manual",
+      });
+    } catch {
+      return null;
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      if (hop >= MAX_REDIRECTS) return null;
+      const location = res.headers.get("location");
+      if (!location) return null;
+      try {
+        currentUrl = new URL(location, currentUrl).toString();
+      } catch {
+        return null;
+      }
+      try { res.body?.cancel(); } catch { /* ignore */ }
+      continue;
+    }
+
     if (!res.ok) return null;
 
     const reader = res.body?.getReader();
@@ -75,9 +102,8 @@ async function safeFetchText(rawUrl: string): Promise<string | null> {
       reader.releaseLock();
     }
     return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf-8");
-  } catch {
-    return null;
   }
+  return null;
 }
 
 function tryParseSpec(raw: string): Record<string, unknown> | null {
