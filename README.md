@@ -185,6 +185,7 @@ API keys and credentials stored with AES-256-GCM encryption. Zero plaintext stor
 
 | Doc | Description |
 |-----|-------------|
+| **[Architecture](docs/ARCHITECTURE.md)** | How the codebase fits together (start here for contributors) |
 | **[Installation](docs/INSTALL.md)** | CLI, desktop app, Docker, npm, source |
 | **[Memory System](docs/MEMORY.md)** | Graph-based cognitive memory with decay & consolidation |
 | **[Channels](docs/CHANNELS.md)** | Telegram, Discord, Slack, WhatsApp integration |

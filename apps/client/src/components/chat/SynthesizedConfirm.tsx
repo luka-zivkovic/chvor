@@ -70,6 +70,16 @@ export function SynthesizedConfirm({ confirm, onSend }: Props) {
   const secs = seconds % 60;
   const timeStr = `${minutes}:${secs.toString().padStart(2, "0")}`;
 
+  const hasPathParams = confirm.pathParams && Object.keys(confirm.pathParams).length > 0;
+  const hasQueryParams = confirm.queryParams && Object.keys(confirm.queryParams).length > 0;
+  const hasBody = confirm.body !== undefined && confirm.body !== null;
+  const hasStructuredArgs = hasPathParams || hasQueryParams || hasBody;
+
+  // Legacy argsPreview fallback: only show if no structured args were provided
+  // (server may be older than client during rolling upgrades).
+  const showLegacyPreview =
+    !hasStructuredArgs && confirm.argsPreview && confirm.argsPreview !== "{}";
+
   return (
     <div
       className="rounded-md border border-border/50 bg-background/80 p-3 text-xs space-y-2"
@@ -92,19 +102,51 @@ export function SynthesizedConfirm({ confirm, onSend }: Props) {
                 ? "bg-emerald-500/10 text-emerald-500"
                 : "bg-amber-500/10 text-amber-500"
             }`}
+            title={
+              confirm.source === "openapi"
+                ? "endpoint discovered from a verified OpenAPI spec"
+                : "endpoint drafted by the AI — no spec was verified; check carefully"
+            }
           >
-            {confirm.verified ? "verified" : "unverified"}
+            {confirm.source === "openapi" ? "from openapi.json" : "ai-drafted"}
           </span>
         </div>
       </div>
+
       <div className="text-muted-foreground break-all font-mono text-[10px]">
         {confirm.resolvedUrl}
       </div>
-      {confirm.argsPreview && confirm.argsPreview !== "{}" && (
+
+      {!confirm.verified && (
+        <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-500">
+          ⚠ unverified — this tool was drafted by the AI without a confirmed spec.
+          Review the call carefully before allowing.
+        </div>
+      )}
+
+      {hasPathParams && (
+        <ParamTable label="Path" entries={confirm.pathParams as Record<string, unknown>} />
+      )}
+
+      {hasQueryParams && (
+        <ParamTable label="Query" entries={confirm.queryParams as Record<string, unknown>} />
+      )}
+
+      {hasBody && (
+        <div className="space-y-1">
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground/70">Body</div>
+          <pre className="overflow-x-auto rounded bg-muted/40 p-2 text-[10px] font-mono max-h-48">
+            {formatJson(confirm.body)}
+          </pre>
+        </div>
+      )}
+
+      {showLegacyPreview && (
         <pre className="overflow-x-auto rounded bg-muted/40 p-2 text-[10px] font-mono">
           {confirm.argsPreview}
         </pre>
       )}
+
       <div className="flex flex-wrap gap-2 pt-1">
         {confirm.options.includes("allow-once") && (
           <button
@@ -131,4 +173,43 @@ export function SynthesizedConfirm({ confirm, onSend }: Props) {
       </div>
     </div>
   );
+}
+
+function ParamTable({ label, entries }: { label: string; entries: Record<string, unknown> }) {
+  const keys = Object.keys(entries);
+  if (keys.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground/70">{label}</div>
+      <div className="rounded bg-muted/40 p-2 text-[10px] font-mono space-y-0.5">
+        {keys.map((k) => (
+          <div key={k} className="flex gap-2">
+            <span className="text-muted-foreground shrink-0">{k}</span>
+            <span className="text-muted-foreground/40">=</span>
+            <span className="break-all">{formatScalar(entries[k])}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function formatScalar(v: unknown): string {
+  if (v === null) return "null";
+  if (v === undefined) return "—";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+function formatJson(v: unknown): string {
+  try {
+    return JSON.stringify(v, null, 2).slice(0, 4000);
+  } catch {
+    return String(v);
+  }
 }

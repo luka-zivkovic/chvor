@@ -9,6 +9,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Bind the workspace dep to its built dist so vite/rollup don't depend on
+      // the (sometimes Cygwin-style) symlink target inside node_modules/@chvor.
+      "@chvor/shared": path.resolve(__dirname, "../../packages/shared/dist/index.js"),
     },
   },
   test: {

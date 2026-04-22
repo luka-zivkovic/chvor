@@ -1,4 +1,4 @@
-import { usePcStore } from "../../stores/pc-store";
+import { useSessionStore } from "../../stores/session-store";
 import type { PcSafetyLevel } from "@chvor/shared";
 
 const SAFETY_LABELS: Record<PcSafetyLevel, { label: string; description: string }> = {
@@ -23,7 +23,7 @@ const LAYER_ICONS: Record<string, { icon: string; label: string }> = {
 };
 
 export function PcConnectionPanel() {
-  const { enabled, setEnabled, localAvailable, agents, activeAgentId, setActiveAgent, safetyLevel, setSafetyLevel, disconnectAgent, pipelineActivity } = usePcStore();
+  const { enabled, setEnabled, localAvailable, agents, activeAgentId, setActiveAgent, safetyLevel, setSafetyLevel, disconnectAgent, pipelineActivity } = useSessionStore();
 
   return (
     <div className="flex flex-col gap-4">

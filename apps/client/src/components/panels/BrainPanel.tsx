@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useCanvasStore } from "../../stores/canvas-store";
-import { usePersonaStore } from "../../stores/persona-store";
-import { useModelsStore } from "../../stores/models-store";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useConfigStore } from "../../stores/config-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { useUIStore } from "../../stores/ui-store";
 import { ModelsPanel } from "./ModelsPanel";
 import { MemoryInsightsDashboard } from "../memory/MemoryInsightsDashboard";
@@ -42,9 +41,9 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: () =
 }
 
 function BrainConfigContent() {
-  const { persona, fetchPersona } = usePersonaStore();
-  const { roles, fetchConfig } = useModelsStore();
-  const { llmProviders } = useCredentialStore();
+  const { persona, fetchPersona } = useConfigStore();
+  const { roles, fetchModelsConfig } = useConfigStore();
+  const { llmProviders } = useFeatureStore();
   const nodes = useCanvasStore((s) => s.nodes);
   const [maxToolRounds, setMaxToolRounds] = useState(30);
   const [memoryBatchSize, setMemoryBatchSize] = useState(3);
@@ -56,8 +55,8 @@ function BrainConfigContent() {
   const data = brainNode?.data as unknown as BrainNodeData | undefined;
 
   useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
+    fetchModelsConfig();
+  }, [fetchModelsConfig]);
 
   useEffect(() => {
     if (!persona) fetchPersona();
@@ -228,7 +227,7 @@ function BrainConfigContent() {
               checked={persona?.emotionsEnabled ?? false}
               onChange={() => {
                 const next = !(persona?.emotionsEnabled ?? false);
-                usePersonaStore.getState().updatePersona({ emotionsEnabled: next });
+                useConfigStore.getState().updatePersona({ emotionsEnabled: next });
               }}
               label="Toggle emotions"
             />
@@ -250,7 +249,7 @@ function BrainConfigContent() {
                 checked={persona?.advancedEmotionsEnabled ?? false}
                 onChange={() => {
                   const next = !(persona?.advancedEmotionsEnabled ?? false);
-                  usePersonaStore.getState().updatePersona({ advancedEmotionsEnabled: next });
+                  useConfigStore.getState().updatePersona({ advancedEmotionsEnabled: next });
                 }}
                 label="Toggle advanced emotions"
               />

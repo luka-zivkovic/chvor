@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { CreateCredentialRequest, UpdateCredentialRequest, TestCredentialRequest } from "@chvor/shared";
+import type { CreateCredentialRequest, UpdateCredentialRequest, TestCredentialRequest, ConnectionConfig } from "@chvor/shared";
 import {
   listCredentials,
   createCredential,
@@ -13,6 +13,7 @@ import { testProvider } from "./provider-tester.ts";
 import { getGatewayInstance } from "../gateway/gateway-instance.ts";
 import { invalidateToolCache } from "../lib/tool-builder.ts";
 import { mcpManager } from "../lib/mcp-manager.ts";
+import { probeCredentialConfig } from "../lib/synthesized-caller.ts";
 
 /** Credential types that map to channel adapters. */
 const CHANNEL_CRED_MAP: Record<string, string> = {
@@ -112,6 +113,31 @@ credentials.post("/test", async (c) => {
     return c.json({ data: result });
   } catch (err) {
     console.error("[api] POST /credentials/test error:", err);
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
+// POST /api/credentials/test-generic — probe a user-supplied ConnectionConfig
+// before saving. Used by the AI-research credential flow where there is no
+// hard-coded provider tester available.
+credentials.post("/test-generic", async (c) => {
+  try {
+    const body = await c.req.json<{
+      connectionConfig: ConnectionConfig;
+      data: Record<string, string>;
+      probePath?: string;
+    }>();
+    if (!body.connectionConfig || !body.data) {
+      return c.json({ error: "connectionConfig and data are required" }, 400);
+    }
+    const result = await probeCredentialConfig({
+      connection: body.connectionConfig,
+      data: body.data,
+      probePath: body.probePath,
+    });
+    return c.json({ data: result });
+  } catch (err) {
+    console.error("[api] POST /credentials/test-generic error:", err);
     return c.json({ error: String(err) }, 500);
   }
 });

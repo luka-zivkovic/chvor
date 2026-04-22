@@ -34,6 +34,9 @@ import { WhatsAppChannel } from "./channels/whatsapp.ts";
 import { MatrixChannel } from "./channels/matrix.ts";
 import { deleteSensitiveMemories } from "./db/memory-store.ts";
 import { chvorAuth } from "./middleware/auth.ts";
+import { rateLimit, stopRateLimitPrune } from "./middleware/rate-limit.ts";
+import { requestLogger } from "./middleware/request-logger.ts";
+import { logger } from "./lib/logger.ts";
 import authRoute from "./routes/auth.ts";
 import backupRoute from "./routes/backup.ts";
 import { isAuthEnabled } from "./db/auth-store.ts";
@@ -63,6 +66,7 @@ import oauthRoute from "./routes/oauth.ts";
 import sandboxRoute from "./routes/sandbox.ts";
 import daemonRoute from "./routes/daemon.ts";
 import integrationsRoute from "./routes/integrations.ts";
+import adminRoute, { registerShutdownHandler } from "./routes/admin.ts";
 import { initDocker } from "./lib/sandbox.ts";
 import { startOAuthTokenRefresh, stopOAuthTokenRefresh } from "./lib/oauth-token-refresh.ts";
 import { handlePcAgentConnection, handlePcAgentMessage, handlePcAgentClose, onPcAgentEvent, onPcFrame, shutdownPcAgents, initLocalBackend } from "./lib/pc-control.ts";
@@ -77,7 +81,7 @@ import { existsSync } from "node:fs";
 import { join, basename, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
-import { resolveApproval, resolveCredentialRequest } from "./lib/native-tools.ts";
+import { resolveApproval, resolveCredentialRequest, resolveOAuthWizard } from "./lib/native-tools.ts";
 import { resolveSynthesizedApproval } from "./lib/approval-gate.ts";
 import { rotateOldLogs } from "./lib/error-logger.ts";
 import { initManifest, shutdownManifest } from "./lib/health-manifest.ts";
@@ -89,6 +93,8 @@ import { startConsolidation, stopConsolidation } from "./lib/memory-consolidatio
 import { initJobRunner, stopAllPeriodicJobs } from "./lib/job-runner.ts";
 import { reloadAll } from "./lib/capability-loader.ts";
 import { homedir } from "node:os";
+import { serializeError, httpStatusFor, isChvorError } from "./lib/errors.ts";
+import { logError } from "./lib/error-logger.ts";
 
 const app = new Hono();
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
@@ -202,10 +208,24 @@ wsManager.onClientMessage((clientId, event) => {
       }
       break;
     }
+    case "oauth.synthesized.respond": {
+      const resolved = resolveOAuthWizard(event.data.requestId, event.data);
+      if (!resolved) {
+        wsManager.sendTo(clientId, {
+          type: "error",
+          data: { message: "No pending OAuth wizard with that ID (may have timed out)" },
+        });
+      }
+      break;
+    }
   }
 });
 
 // --- Middleware ---
+// Request logger first so it observes every status (including those set by
+// onError). Records requestId, method, path, status, latency, sessionId.
+app.use("/*", requestLogger);
+
 app.use("/*", cors({
   origin: process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
@@ -224,6 +244,22 @@ app.use("/*", async (c, next) => {
   if (c.req.url.startsWith("https") || proto === "https") {
     c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   }
+});
+
+// Global error handler — converts thrown ChvorErrors into structured JSON
+// responses with safe redaction. Non-typed errors collapse to internal.unexpected.
+// Hono fires this for any uncaught throw inside a route handler.
+app.onError((err, c) => {
+  const status = httpStatusFor(err);
+  const serialized = serializeError(err);
+  // Mirror to the JSONL log for /api/diagnostics — keep route + method as context.
+  logError(serialized.category, err, {
+    route: c.req.path,
+    method: c.req.method,
+    code: serialized.code,
+    ...(isChvorError(err) ? err.context : {}),
+  });
+  return c.json({ error: serialized }, status as Parameters<typeof c.json>[1]);
 });
 
 // Serve media artifacts BEFORE auth — <img> tags can't send Authorization headers
@@ -258,6 +294,10 @@ app.get("/api/media/:filename", async (c) => {
 });
 
 app.use("/api/*", chvorAuth);
+
+// Per-identity rate limiting — runs after auth so the bucket key can use the
+// authenticated session/api-key id when available.
+app.use("/api/*", rateLimit);
 
 // Upload media artifacts (images, video) — returns MediaArtifact JSON
 // Placed AFTER chvorAuth so uploads require authentication
@@ -322,6 +362,7 @@ app.route("/api/oauth", oauthRoute);
 app.route("/api/config/sandbox", sandboxRoute);
 app.route("/api/daemon", daemonRoute);
 app.route("/api/integrations", integrationsRoute);
+app.route("/api/admin", adminRoute);
 
 // Serve TTS audio files (no auth — ephemeral UUIDs)
 app.get("/audio/:filename", (c) => {
@@ -634,30 +675,68 @@ startAutoUpdate((event) => wsManager.broadcast(event));
 startBackupScheduler();
 startOAuthTokenRefresh();
 
-// Graceful shutdown — clean up MCP child processes and browser sessions
-async function gracefulShutdown(): Promise<void> {
-  console.log("[chvor] shutting down...");
-  clearInterval(logRotationTimer);
-  shutdownKeepAwake();
-  shutdownScheduler();
-  shutdownManifest();
-  stopPeriodicCleanup();
-  stopDailyResetCheck();
-  stopBrowserSweep();
-  stopOAuthTokenRefresh();
-  stopAudioCleanup();
-  stopSkillWatcher();
-  stopAutoUpdate();
-  stopMediaCleanup();
-  stopAllPeriodicJobs();
-  stopBackupScheduler();
-  await shutdownAllBrowsers();
-  shutdownPcAgents();
-  shutdownDaemon();
-  await gateway.stopAll();
-  await mcpManager.shutdown();
-  process.exit(0);
+// Graceful shutdown — drain WS, stop background jobs, flush logs, then exit.
+//
+// Hardening: re-entrancy guard + a hard 8s deadline so a stuck handler (a
+// hanging child process, a browser refusing to close) never wedges the
+// daemon and forces a SIGKILL escalation from the desktop wrapper.
+let shuttingDown = false;
+async function gracefulShutdown(reason: string = "signal"): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ reason }, "[chvor] shutting down");
+
+  // Hard fallback — if any of the awaits below hangs longer than 8s, exit
+  // anyway. The desktop wrapper waits ~5s before SIGKILL, so finish before then.
+  const failsafe = setTimeout(() => {
+    logger.warn({ reason }, "graceful shutdown timed out, forcing exit");
+    process.exit(0);
+  }, 8000);
+  failsafe.unref?.();
+
+  try {
+    // Tell every connected browser the server is going away so they can
+    // suppress reconnect loops during a clean restart.
+    try { wsManager.broadcast({ type: "system.shutdown", data: { reason } }); } catch { /* ignore */ }
+
+    clearInterval(logRotationTimer);
+    shutdownKeepAwake();
+    shutdownScheduler();
+    shutdownManifest();
+    stopPeriodicCleanup();
+    stopDailyResetCheck();
+    stopBrowserSweep();
+    stopOAuthTokenRefresh();
+    stopAudioCleanup();
+    stopSkillWatcher();
+    stopAutoUpdate();
+    stopMediaCleanup();
+    stopAllPeriodicJobs();
+    stopBackupScheduler();
+    stopRateLimitPrune();
+
+    // Send a clean WS close frame to every client before tearing down sockets
+    wsManager.closeAll(1001, "server shutting down");
+    wsManager.shutdown();
+
+    await shutdownAllBrowsers();
+    shutdownPcAgents();
+    shutdownDaemon();
+    await gateway.stopAll();
+    await mcpManager.shutdown();
+  } catch (err) {
+    logger.error({ err }, "error during graceful shutdown");
+  } finally {
+    clearTimeout(failsafe);
+    // Flush pino buffers — no-op for sync transports, important for async ones.
+    try { logger.flush?.(); } catch { /* ignore */ }
+    process.exit(0);
+  }
 }
 
-process.on("SIGINT", gracefulShutdown);
-process.on("SIGTERM", gracefulShutdown);
+process.on("SIGINT", () => void gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));
+
+// Expose shutdown to the localhost-only admin route so the desktop wrapper
+// can request a clean exit on Windows, where signal delivery is unreliable.
+registerShutdownHandler(() => gracefulShutdown("admin-api"));

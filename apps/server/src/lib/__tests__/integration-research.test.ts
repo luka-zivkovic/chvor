@@ -16,7 +16,10 @@ describe("researchIntegration", () => {
   it("returns a ProviderProposal with generic fallback fields", async () => {
     const result = await researchIntegration("some-random-api");
     expect(result).toBeDefined();
-    expect(result.confidence).toBe("inferred");
+    // When both web-extraction and LLM-inference fail, the generic fallback
+    // path returns confidence="fallback" — distinct from "inferred" so the
+    // UI can flag that even the LLM never weighed in.
+    expect(result.confidence).toBe("fallback");
     expect(result.fields.length).toBeGreaterThanOrEqual(1);
     const apiKeyField = result.fields.find((f) => f.key === "apiKey");
     expect(apiKeyField).toBeDefined();
@@ -42,9 +45,9 @@ describe("researchIntegration", () => {
     expect(result.credentialType).not.toMatch(/-$/);
   });
 
-  it("returns generic fallback with 'inferred' confidence when LLM is unavailable", async () => {
+  it("returns generic fallback with 'fallback' confidence when LLM is unavailable", async () => {
     const result = await researchIntegration("stripe");
-    expect(result.confidence).toBe("inferred");
+    expect(result.confidence).toBe("fallback");
     expect(result.credentialType).toBe("stripe");
     expect(result.name).toBeTruthy();
   });

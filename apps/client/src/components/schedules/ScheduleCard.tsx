@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import type { Schedule } from "@chvor/shared";
-import { useScheduleStore } from "../../stores/schedule-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { api } from "../../lib/api";
 import { cronToHuman, getNextRun, formatRelativeTime } from "../../lib/cron-utils";
 import { ScheduleFormDialog } from "./ScheduleFormDialog";
@@ -15,7 +15,7 @@ interface Props {
 }
 
 export function ScheduleCard({ schedule }: Props) {
-  const { removeSchedule, updateSchedule } = useScheduleStore();
+  const { removeSchedule, updateSchedule } = useFeatureStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -114,7 +114,7 @@ export function ScheduleCard({ schedule }: Props) {
           {/* Row 2: Name (clickable → drill-down) */}
           <p
             className="mt-2 text-sm font-semibold cursor-pointer hover:text-primary transition-colors"
-            onClick={() => useScheduleStore.getState().selectSchedule(schedule.id)}
+            onClick={() => useFeatureStore.getState().selectSchedule(schedule.id)}
           >
             {schedule.name}
           </p>

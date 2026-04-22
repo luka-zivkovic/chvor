@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { useScheduleStore } from "../../stores/schedule-store";
-import { usePulseStore } from "../../stores/pulse-store";
+import { useFeatureStore } from "../../stores/feature-store";
+import { useConfigStore } from "../../stores/config-store";
 import { ScheduleList } from "../schedules/ScheduleList";
 import { ScheduleFormDialog } from "../schedules/ScheduleFormDialog";
 import { ScheduleDetail } from "../schedules/ScheduleDetail";
@@ -24,7 +24,7 @@ const INTERVAL_OPTIONS = [
 type Filter = "all" | "active" | "paused";
 
 function PulseSection() {
-  const { pulse, fetchPulse, updatePulse } = usePulseStore();
+  const { pulse, fetchPulse, updatePulse } = useConfigStore();
 
   useEffect(() => {
     fetchPulse();
@@ -295,7 +295,7 @@ function StatBox({
 }
 
 export function SchedulesPanel() {
-  const { fetchAll, loading, error, schedules, selectedScheduleId, selectSchedule } = useScheduleStore();
+  const { fetchSchedules: fetchAll, schedulesLoading: loading, schedulesError: error, schedules, selectedScheduleId, selectSchedule } = useFeatureStore();
   const [showAdd, setShowAdd] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
 

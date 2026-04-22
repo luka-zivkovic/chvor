@@ -9,6 +9,7 @@
     "dev:server": "pnpm --filter @chvor/server dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --workspace-concurrency=1 test",
     "lint": "eslint apps/ packages/",
     "format": "prettier --write \"apps/**/*.{ts,tsx}\" \"packages/**/*.ts\"",
     "format:check": "prettier --check \"apps/**/*.{ts,tsx}\" \"packages/**/*.ts\""

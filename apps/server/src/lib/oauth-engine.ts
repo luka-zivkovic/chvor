@@ -38,6 +38,21 @@ export interface PendingOAuthFlow {
   clientSecret?: string;
   redirectUri: string;
   createdAt: number;
+  /**
+   * Inline provider config supplied by the synthesized-OAuth wizard.
+   * When present, the callback uses this directly instead of looking up
+   * `providerId` against the built-in `OAUTH_DIRECT_PROVIDERS` registry.
+   */
+  inlineProvider?: OAuthProviderConfig;
+  /**
+   * Friendly name shown in the saved credential ("QuickBooks (OAuth)").
+   */
+  inlineProviderName?: string;
+  /**
+   * Credential type for the saved tokens. Defaults to `oauth-token-${providerId}`.
+   * For synthesized providers we want a stable type matching what the AI used.
+   */
+  credentialType?: string;
 }
 
 // ── In-memory store for pending flows (10-min TTL) ─────────────────
@@ -78,12 +93,21 @@ function generateState(): string {
 /**
  * Generate an OAuth authorization URL with PKCE.
  * Stores the pending flow in memory for callback resolution.
+ *
+ * @param opts.inlineProvider — when set, the provider config is stored on
+ *   the pending flow so the callback doesn't need to resolve it from a
+ *   built-in registry. Used by the synthesized-OAuth wizard.
  */
 export function generateAuthUrl(
   provider: OAuthProviderConfig,
   clientId: string,
   clientSecret: string | undefined,
   redirectUri: string,
+  opts?: {
+    inlineProvider?: OAuthProviderConfig;
+    inlineProviderName?: string;
+    credentialType?: string;
+  },
 ): { authUrl: string; state: string } {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
@@ -98,6 +122,9 @@ export function generateAuthUrl(
     clientSecret,
     redirectUri,
     createdAt: Date.now(),
+    inlineProvider: opts?.inlineProvider,
+    inlineProviderName: opts?.inlineProviderName,
+    credentialType: opts?.credentialType,
   });
 
   const params = new URLSearchParams({

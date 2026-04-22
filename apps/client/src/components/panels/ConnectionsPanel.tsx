@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { CredentialCard } from "../credentials/CredentialCard";
 import { AddCredentialDialog } from "../credentials/AddCredentialDialog";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
 
 export function ConnectionsPanel() {
-  const { credentials, llmProviders, fetchAll, loading } = useCredentialStore();
+  const { credentials, llmProviders, fetchCredentials: fetchAll, credentialsLoading: loading } = useFeatureStore();
   const [showAdd, setShowAdd] = useState(false);
   const [editingCredential, setEditingCredential] = useState<typeof credentials[0] | null>(null);
 

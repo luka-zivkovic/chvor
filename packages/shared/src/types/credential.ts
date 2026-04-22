@@ -73,6 +73,39 @@ export interface IntegrationResolution {
   existingCredentialId?: string;
 }
 
+// ── Catalog (browseable list of integrations Chvor can connect to) ──
+
+export type IntegrationCategory =
+  | "llm"
+  | "embedding"
+  | "integration"
+  | "image-gen"
+  | "oauth"
+  | "registry";
+
+export interface IntegrationCatalogEntry {
+  /** Stable id — for built-in providers this is the provider id, for registry entries the registry entry id. */
+  id: string;
+  source: "provider-registry" | "chvor-registry";
+  name: string;
+  description: string;
+  icon?: string;
+  category: IntegrationCategory;
+  credentialType?: string;
+  /** True iff a credential of this type already exists locally. */
+  installed: boolean;
+  /** OAuth-supported (direct or via Composio bridge). */
+  oauth?: boolean;
+  /** Tags from the chvor registry — used for client-side filtering. */
+  tags?: string[];
+}
+
+export interface IntegrationCatalogResponse {
+  entries: IntegrationCatalogEntry[];
+  /** Total entries returned, for the header counter. */
+  total: number;
+}
+
 /** AI-researched integration proposal (Tier 3). */
 export interface ProviderProposal {
   name: string;
@@ -81,7 +114,29 @@ export interface ProviderProposal {
   baseUrl?: string;
   authScheme?: string;
   helpText?: string;
-  confidence: "researched" | "inferred";
+  /**
+   * - "researched": web-scrape + LLM extraction (most reliable)
+   * - "inferred": pure LLM guess from training data (medium reliability)
+   * - "fallback": no info found, generic apiKey+baseUrl form (low reliability — manual entry)
+   */
+  confidence: "researched" | "inferred" | "fallback";
   /** URL to an OpenAPI/Swagger spec if the service publishes one. */
   specUrl?: string;
+  /**
+   * True if `specUrl` was probed and returned a valid OpenAPI document.
+   * False/absent means the URL is unverified (likely an LLM guess).
+   */
+  specVerified?: boolean;
+  /**
+   * Optional path on baseUrl that returns 2xx with a valid credential
+   * (e.g. `/v1/me`, `/account`). Used by the credential modal's "Test
+   * connection" probe to give the user immediate feedback.
+   */
+  probePath?: string;
+  /** OAuth2 authorization endpoint (when authScheme === "oauth2"). */
+  authUrl?: string;
+  /** OAuth2 token-exchange endpoint (when authScheme === "oauth2"). */
+  tokenUrl?: string;
+  /** Default OAuth2 scopes (when authScheme === "oauth2"). */
+  scopes?: string[];
 }

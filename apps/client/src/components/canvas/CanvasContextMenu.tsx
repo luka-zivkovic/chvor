@@ -1,8 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useReactFlow } from "@xyflow/react";
 import { useUIStore } from "../../stores/ui-store";
-import { useScheduleStore } from "../../stores/schedule-store";
-import { useWebhookStore } from "../../stores/webhook-store";
+import { useFeatureStore } from "../../stores/feature-store";
 
 export interface ContextMenuState {
   visible: boolean;
@@ -66,7 +65,7 @@ function getMenuItems(nodeType: string | null, nodeId: string | null, a: Actions
     case "schedule": {
       const schedId = nodeId?.startsWith("schedule-") ? nodeId.slice("schedule-".length) : null;
       return [
-        { label: "Edit Schedule", action: () => { if (schedId) useScheduleStore.getState().selectSchedule(schedId); a.openPanel("schedules"); } },
+        { label: "Edit Schedule", action: () => { if (schedId) useFeatureStore.getState().selectSchedule(schedId); a.openPanel("schedules"); } },
       ];
     }
     case "webhooks-hub":
@@ -74,7 +73,7 @@ function getMenuItems(nodeType: string | null, nodeId: string | null, a: Actions
     case "webhook": {
       const whId = nodeId?.startsWith("webhook-") ? nodeId.slice("webhook-".length) : null;
       return [
-        { label: "Edit Webhook", action: () => { if (whId) useWebhookStore.getState().selectWebhook(whId); a.openPanel("webhooks"); } },
+        { label: "Edit Webhook", action: () => { if (whId) useFeatureStore.getState().selectWebhook(whId); a.openPanel("webhooks"); } },
       ];
     }
     case "integrations-hub":

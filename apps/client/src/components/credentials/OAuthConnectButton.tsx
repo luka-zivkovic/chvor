@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { cn } from "@/lib/utils";
 import type { OAuthProviderDef } from "@chvor/shared";
 
@@ -28,7 +28,7 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
       if (e.data?.type === "chvor-oauth-callback" && (e.origin === window.location.origin || e.origin === "null")) {
         if (e.data.success) {
           setStatus("success");
-          useCredentialStore.getState().fetchOAuthState();
+          useFeatureStore.getState().fetchOAuthState();
           onConnected?.();
         } else {
           setStatus("error");
@@ -67,8 +67,8 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
           clearInterval(pollRef.current);
           // Give a moment for the callback to process, then refresh state
           timeoutRef.current = setTimeout(async () => {
-            await useCredentialStore.getState().fetchOAuthState();
-            const state = useCredentialStore.getState();
+            await useFeatureStore.getState().fetchOAuthState();
+            const state = useFeatureStore.getState();
             const conn = state.oauthConnections.find(
               (c) => c.platform === provider.id && c.status === "active",
             );
@@ -95,14 +95,14 @@ export function OAuthConnectButton({ provider, onConnected, onSetupRequired, com
   }, [provider.id, onConnected, onSetupRequired]);
 
   const handleDisconnect = useCallback(async () => {
-    const connections = useCredentialStore.getState().oauthConnections;
+    const connections = useFeatureStore.getState().oauthConnections;
     const conn = connections.find((c) => c.platform === provider.id);
     if (!conn) return;
 
     try {
       await api.oauth.disconnect(conn.id);
       setStatus("idle");
-      useCredentialStore.getState().fetchOAuthState();
+      useFeatureStore.getState().fetchOAuthState();
     } catch (err) {
       setStatus("error");
       setErrorMsg(err instanceof Error ? err.message : "Disconnect failed");

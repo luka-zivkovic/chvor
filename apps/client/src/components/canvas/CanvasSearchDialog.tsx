@@ -3,8 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import { useSkillStore } from "../../stores/skill-store";
-import { useToolStore } from "../../stores/tool-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import type { RegistryEntry, RegistryEntryKind } from "@chvor/shared";
 
 type SearchResult = RegistryEntry & { installed: boolean; installedVersion: string | null };
@@ -111,8 +110,8 @@ export function CanvasSearchDialog({ open, onClose, initialKind = null }: Props)
     try {
       await api.registry.install(entry.id, entry.kind);
       // Refresh stores so canvas re-renders
-      useSkillStore.getState().fetchSkills();
-      useToolStore.getState().fetchTools();
+      useFeatureStore.getState().fetchSkills();
+      useFeatureStore.getState().fetchTools();
       // Update local result state
       setResults((prev) =>
         prev.map((r) => r.id === entry.id ? { ...r, installed: true, installedVersion: r.version } : r),

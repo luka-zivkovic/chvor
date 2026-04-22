@@ -14,6 +14,7 @@ import type {
 import { resolveValue, resolveArray } from "./resolve";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useA2UIAction } from "./action-context";
 
 /* ─── Shared child renderer ─── */
 
@@ -225,13 +226,21 @@ export function A2UIButton({
 }) {
   const label = resolveValue(spec.label, bindings);
   const variant = VARIANT_MAP[spec.variant ?? "primary"] ?? "default";
+  const { fire, enabled } = useA2UIAction();
+  // The button is enabled only when a host dispatcher is registered AND the
+  // action string passes the allowlist. Anything else renders disabled with
+  // a hint, so the user can see something was filtered out.
+  const isNoop = !spec.action || spec.action === "noop";
 
   return (
     <Button
       variant={variant}
       size="sm"
-      disabled
-      title="Actions are not yet supported"
+      disabled={!enabled || isNoop}
+      title={!enabled ? "Actions disabled — no host dispatcher" : isNoop ? "No action bound" : undefined}
+      onClick={() => {
+        if (!isNoop) fire(spec.action);
+      }}
     >
       {label}
     </Button>
@@ -250,15 +259,27 @@ export function A2UIForm({
   renderNode: (nodeId: string, surface: A2UISurface, visited?: Set<string>, depth?: number) => React.ReactNode;
 }) {
   const children = spec.children?.explicitList ?? [];
+  const { fire, enabled } = useA2UIAction();
+  const isNoop = !spec.submitAction || spec.submitAction === "noop";
+
   return (
     <form
       className="flex flex-col gap-3 rounded-lg border border-border p-4"
-      onSubmit={(e) => e.preventDefault()}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!isNoop) fire(spec.submitAction);
+      }}
     >
       {children.map((childId) => (
         <Child key={childId} nodeId={childId} surface={surface} renderNode={renderNode} />
       ))}
-      <Button type="submit" size="sm" className="self-start mt-1" disabled title="Form submission is not yet supported">
+      <Button
+        type="submit"
+        size="sm"
+        className="self-start mt-1"
+        disabled={!enabled || isNoop}
+        title={!enabled ? "Form submission disabled — no host dispatcher" : isNoop ? "No submit action bound" : undefined}
+      >
         {spec.submitLabel ?? "Submit"}
       </Button>
     </form>

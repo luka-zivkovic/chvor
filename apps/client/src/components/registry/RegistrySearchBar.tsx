@@ -2,8 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { useSkillStore } from "../../stores/skill-store";
-import { useToolStore } from "../../stores/tool-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import type { RegistryEntry, RegistryEntryKind } from "@chvor/shared";
 
 type SearchResult = RegistryEntry & { installed: boolean; installedVersion: string | null };
@@ -67,8 +66,8 @@ export function RegistrySearchBar({ kind, onInstalled }: Props) {
     setInstalling((prev) => new Set(prev).add(entry.id));
     try {
       await api.registry.install(entry.id, entry.kind);
-      useSkillStore.getState().fetchSkills();
-      useToolStore.getState().fetchTools();
+      useFeatureStore.getState().fetchSkills();
+      useFeatureStore.getState().fetchTools();
       setResults((prev) =>
         prev.map((r) => r.id === entry.id ? { ...r, installed: true, installedVersion: r.version } : r),
       );

@@ -1,5 +1,20 @@
-import { Stagehand, AISdkClient } from "@browserbasehq/stagehand";
+// Heavy dep — pulls Playwright + Chromium tooling. Kept as a type-only import
+// so a server boot that never exercises the browser tools doesn't pay the
+// ~200MB transitive load cost. See loadStagehandModule() below for runtime use.
+import type { Stagehand } from "@browserbasehq/stagehand";
 import { lookup } from "node:dns/promises";
+
+// Cached dynamic import — first browser request pays ~1s, subsequent requests
+// hit the loader cache (~0ms).
+let stagehandModulePromise:
+  | Promise<typeof import("@browserbasehq/stagehand")>
+  | null = null;
+function loadStagehandModule(): Promise<typeof import("@browserbasehq/stagehand")> {
+  if (!stagehandModulePromise) {
+    stagehandModulePromise = import("@browserbasehq/stagehand");
+  }
+  return stagehandModulePromise;
+}
 import { resolveRoleConfig, createModel } from "./llm-router.ts";
 import { getAllowLocalhost } from "../db/config-store.ts";
 import { isPrivateHostname, isPrivateIp } from "./url-safety.ts";
@@ -187,9 +202,10 @@ async function initBrowser(sessionId: string): Promise<BrowserSession> {
   // LanguageModelV1 for any configured provider — OpenAI, Anthropic, Google,
   // Groq, DeepSeek, Mistral, Ollama, LM Studio, vLLM, OpenRouter, custom, etc.
   const model = createModel(config);
+  const { Stagehand: StagehandCtor, AISdkClient } = await loadStagehandModule();
   const llmClient = new AISdkClient({ model });
 
-  const stagehand = new Stagehand({
+  const stagehand = new StagehandCtor({
     env: "LOCAL",
     localBrowserLaunchOptions: {
       headless: isHeadless(),

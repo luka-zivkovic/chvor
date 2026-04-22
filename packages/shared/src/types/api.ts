@@ -17,8 +17,19 @@ export interface CredentialRequestData {
   fields: ProviderField[];
   source: "provider-registry" | "chvor-registry" | "ai-research";
   registryEntryId?: string;
-  confidence?: "researched" | "inferred";
+  /** AI-research confidence; "fallback" means generic apiKey+baseUrl shape (low trust). */
+  confidence?: "researched" | "inferred" | "fallback";
   helpText?: string;
+  /** OpenAPI spec URL the AI proposed (may or may not be verified). */
+  specUrl?: string;
+  /** True iff the server fetched specUrl and confirmed it parses as OpenAPI. */
+  specVerified?: boolean;
+  /** Auth scheme the AI proposed: bearer, basic, header, query-param, oauth2, etc. */
+  authScheme?: string;
+  /** Base URL the AI proposed for the API. Used by the modal's "Test connection" probe. */
+  baseUrl?: string;
+  /** Optional probe path for the test-connection check (e.g. `/me`, `/v1/account`). */
+  probePath?: string;
   allowFieldEditing: boolean;
   existingCredentialId?: string;
   redactedValues?: Record<string, string>;
@@ -32,6 +43,32 @@ export interface CredentialResponseData {
   name?: string;
 }
 
+// ── Synthesized OAuth wizard (server-triggered, for unknown OAuth services) ─
+
+export interface OAuthSynthesizedWizardData {
+  requestId: string;
+  /** Stable provider slug used as the credential type (e.g. "quickbooks"). */
+  credentialType: string;
+  providerName: string;
+  /** Discovered or AI-suggested OAuth endpoints. User can override before launch. */
+  authUrl?: string;
+  tokenUrl?: string;
+  scopes?: string[];
+  /** Help text the AI surfaces — usually "where to register your app". */
+  helpText?: string;
+  /** Where the user should register the redirect URL with the provider. */
+  redirectUriHint?: string;
+  /** ISO timestamp the request was issued. */
+  timestamp: string;
+}
+
+export interface OAuthSynthesizedWizardResponse {
+  requestId: string;
+  cancelled: boolean;
+  /** True iff the OAuth callback completed successfully and tokens were stored. */
+  connected?: boolean;
+}
+
 // ── Synthesized tool call confirmation (server-triggered modal) ─
 
 export interface SynthesizedConfirmData {
@@ -42,7 +79,17 @@ export interface SynthesizedConfirmData {
   method: string;
   path: string;
   resolvedUrl: string;
+  /**
+   * @deprecated kept for backward compat; clients should prefer pathParams/queryParams/body.
+   * Truncated JSON.stringify of {path, query, body}.
+   */
   argsPreview: string;
+  /** Resolved path-template variables (e.g. {realmId} → "1234"). */
+  pathParams?: Record<string, string | number>;
+  /** Resolved query string parameters. */
+  queryParams?: Record<string, string | number | boolean>;
+  /** Request body for non-GET calls. Already typed as `unknown` because services vary. */
+  body?: unknown;
   verified: boolean;
   source: "openapi" | "ai-draft";
   options: Array<"allow-once" | "allow-session" | "deny">;
@@ -104,7 +151,9 @@ export type GatewayClientEvent =
   | { type: "session.init"; data: { sessionId: string } }
   | { type: "command.respond"; data: CommandApprovalResponse }
   | { type: "credential.respond"; data: CredentialResponseData }
-  | { type: "synthesized.respond"; data: SynthesizedResponseData };
+  | { type: "synthesized.respond"; data: SynthesizedResponseData }
+  | { type: "oauth.synthesized.respond"; data: OAuthSynthesizedWizardResponse }
+  | { type: "heartbeat"; data: Record<string, never> };
 
 export type GatewayServerEvent =
   | { type: "chat.message"; data: { role: "assistant"; content: string; timestamp: string; messageId?: string; media?: import("./message.js").MediaArtifact[] } }
@@ -120,6 +169,7 @@ export type GatewayServerEvent =
   | { type: "voice.status"; data: { state: "transcribing" | "synthesizing" | "ready" } }
   | { type: "command.confirm"; data: CommandApprovalRequest }
   | { type: "credential.request"; data: CredentialRequestData }
+  | { type: "oauth.synthesized.wizard"; data: OAuthSynthesizedWizardData }
   | { type: "synthesized.confirm"; data: SynthesizedConfirmData }
   | { type: "chat.stopped"; data: Record<string, never> }
   | { type: "chat.welcome"; data: { content: string; aiName: string } }
@@ -145,7 +195,9 @@ export type GatewayServerEvent =
   | { type: "pc.frame"; data: { agentId: string; screenshot: string; width: number; height: number; mimeType: string } }
   | { type: "pc.localAvailable"; data: { available: boolean; hostname: string; os: string } }
   | { type: "daemon.presence"; data: import("./daemon.js").DaemonPresence }
-  | { type: "daemon.taskUpdate"; data: import("./daemon.js").DaemonTask };
+  | { type: "daemon.taskUpdate"; data: import("./daemon.js").DaemonTask }
+  | { type: "system.shutdown"; data: { reason: string } }
+  | { type: "heartbeat"; data: Record<string, never> };
 
 export interface ConversationSummary {
   id: string;

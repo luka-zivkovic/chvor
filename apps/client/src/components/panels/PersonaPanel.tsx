@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { usePersonaStore } from "../../stores/persona-store";
+import { useConfigStore } from "../../stores/config-store";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -62,8 +62,8 @@ function buildPreview(
 }
 
 export function PersonaPanel() {
-  const { persona, loading, error, fetchPersona, updatePersona } =
-    usePersonaStore();
+  const { persona, personaLoading: loading, personaError: error, fetchPersona, updatePersona } =
+    useConfigStore();
 
   const [profile, setProfile] = useState("");
   const [directives, setDirectives] = useState("");
@@ -110,7 +110,7 @@ export function PersonaPanel() {
       exampleResponses,
       ...(pendingPresetId !== undefined && { personalityPresetId: pendingPresetId }),
     });
-    const { error: saveError } = usePersonaStore.getState();
+    const { personaError: saveError } = useConfigStore.getState();
     if (!saveError) {
       setDirty(false);
       setPendingPresetId(undefined);

@@ -3,7 +3,7 @@ import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import type { IntegrationsHubNodeData } from "../../stores/canvas-store";
 import { RadiantOrb } from "./RadiantOrb";
-import { useEmotionStore } from "../../stores/emotion-store";
+import { useRuntimeStore } from "../../stores/runtime-store";
 
 const ACCENT = "var(--skill-automation)";
 
@@ -17,7 +17,7 @@ export const IntegrationsHubNode = memo(function IntegrationsHubNode({ data }: N
   else if (isCompleted) orbColor = "var(--status-completed)";
 
   const intensity = isRunning ? 0.8 : isCompleted ? 0.7 : 0.5;
-  const emotionTint = useEmotionStore((s) => s.displayColor);
+  const emotionTint = useRuntimeStore((s) => s.displayColor);
 
   return (
     <>

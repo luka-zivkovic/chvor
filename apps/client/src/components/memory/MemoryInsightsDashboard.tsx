@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { useMemoryStore } from "../../stores/memory-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { MemoryList } from "./MemoryList";
 import { MemoryStatsView } from "./MemoryStatsView";
 import { MemoryGraphButton, MemoryGraphOverlay } from "./MemoryGraphView";
@@ -16,7 +16,7 @@ const TABS: { id: InsightTab; label: string }[] = [
 
 export function MemoryInsightsDashboard() {
   const [tab, setTab] = useState<InsightTab>("overview");
-  const { memories, loading, error, fetchAll, fetchGraph, fetchStats, addMemory } = useMemoryStore();
+  const { memories, memoriesLoading: loading, memoriesError: error, fetchMemories: fetchAll, fetchGraph, fetchStats, addMemory } = useFeatureStore();
   const [newFact, setNewFact] = useState("");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");

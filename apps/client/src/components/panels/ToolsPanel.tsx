@@ -1,4 +1,4 @@
-import { useToolStore } from "../../stores/tool-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useCanvasStore } from "../../stores/canvas-store";
 import { api } from "../../lib/api";
@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { RegistrySearchBar } from "../registry/RegistrySearchBar";
 
 export function ToolsPanel() {
-  const { tools, fetchTools } = useToolStore();
+  const { tools, fetchTools } = useFeatureStore();
   const nodes = useCanvasStore((s) => s.nodes);
 
   const handleToggle = async (toolId: string, currentlyEnabled: boolean) => {
