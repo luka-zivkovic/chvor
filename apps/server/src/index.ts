@@ -63,6 +63,8 @@ import oauthRoute from "./routes/oauth.ts";
 import sandboxRoute from "./routes/sandbox.ts";
 import daemonRoute from "./routes/daemon.ts";
 import integrationsRoute from "./routes/integrations.ts";
+import debugRoute from "./routes/debug.ts";
+import auditRoute from "./routes/audit.ts";
 import { initDocker } from "./lib/sandbox.ts";
 import { startOAuthTokenRefresh, stopOAuthTokenRefresh } from "./lib/oauth-token-refresh.ts";
 import { handlePcAgentConnection, handlePcAgentMessage, handlePcAgentClose, onPcAgentEvent, onPcFrame, shutdownPcAgents, initLocalBackend } from "./lib/pc-control.ts";
@@ -322,6 +324,8 @@ app.route("/api/oauth", oauthRoute);
 app.route("/api/config/sandbox", sandboxRoute);
 app.route("/api/daemon", daemonRoute);
 app.route("/api/integrations", integrationsRoute);
+app.route("/api/debug", debugRoute);
+app.route("/api/audit", auditRoute);
 
 // Serve TTS audio files (no auth — ephemeral UUIDs)
 app.get("/audio/:filename", (c) => {

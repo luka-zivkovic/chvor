@@ -723,6 +723,63 @@ export function getDb(): Database.Database {
     console.log("[db] migrated to v19: connection_config column on credentials");
   }
 
+  if (currentVersion < 20) {
+    // ── Typed event sourcing: action/observation audit trail ──────────
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS action_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        kind TEXT NOT NULL,
+        tool TEXT NOT NULL,
+        args TEXT NOT NULL,
+        ts INTEGER NOT NULL,
+        actor_type TEXT NOT NULL DEFAULT 'session',
+        actor_id TEXT,
+        parent_action_id TEXT
+      )
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ae_session_ts ON action_events(session_id, ts DESC)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ae_tool_ts ON action_events(tool, ts DESC)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ae_ts ON action_events(ts DESC)");
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS observation_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        action_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        payload TEXT,
+        ts INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_oe_action ON observation_events(action_id)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_oe_session_ts ON observation_events(session_id, ts DESC)");
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        actor_type TEXT NOT NULL,
+        actor_id TEXT,
+        resource_type TEXT,
+        resource_id TEXT,
+        action TEXT,
+        http_method TEXT,
+        http_path TEXT,
+        http_status_code INTEGER,
+        error TEXT,
+        duration_ms INTEGER,
+        created_at TEXT NOT NULL
+      )
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_id, created_at DESC)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event_type, created_at DESC)");
+
+    db.pragma("user_version = 20");
+    console.log("[db] migration v20 applied: action_events, observation_events, audit_log (typed audit trail)");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }

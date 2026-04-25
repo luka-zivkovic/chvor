@@ -70,6 +70,49 @@ function toSummary(cred: Credential, data: CredentialData): CredentialSummary {
   };
 }
 
+/**
+ * Lightweight metadata-only listing for audit/reporting — no decryption,
+ * includes timestamps. Never exposes encrypted_data.
+ */
+export interface CredentialMetadata {
+  id: string;
+  name: string;
+  type: string;
+  usageContext: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastTestedAt: string | null;
+  testStatus: Credential["testStatus"] | null;
+}
+
+export function listCredentialMetadata(): CredentialMetadata[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      "SELECT id, name, type, usage_context, created_at, updated_at, last_tested_at, test_status FROM credentials ORDER BY created_at DESC"
+    )
+    .all() as Array<{
+    id: string;
+    name: string;
+    type: string;
+    usage_context: string | null;
+    created_at: string;
+    updated_at: string;
+    last_tested_at: string | null;
+    test_status: string | null;
+  }>;
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    usageContext: r.usage_context,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    lastTestedAt: r.last_tested_at,
+    testStatus: (r.test_status as Credential["testStatus"]) ?? null,
+  }));
+}
+
 export function listCredentials(): CredentialSummary[] {
   const db = getDb();
   const rows = db.prepare("SELECT * FROM credentials ORDER BY created_at DESC").all() as CredentialRow[];

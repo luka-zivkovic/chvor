@@ -6,14 +6,15 @@ function sha256(input: string): string {
 }
 
 /**
- * Generate a new API key. All keys currently have full access ('*' scope).
- * The scopes column exists in the schema but is not enforced — do not
- * expose it in the UI as if granular permissions are available.
+ * Generate a new API key. Scopes default to `*` (full access); callers can
+ * pass a comma-separated list like `"tool:execute:*,credential:read"` to
+ * restrict the key. Scope enforcement lives in `middleware/auth.ts`.
  */
 export function generateApiKey(
   name: string,
-  expiresInDays?: number
-): { id: string; key: string; prefix: string; name: string } {
+  expiresInDays?: number,
+  scopes: string = "*"
+): { id: string; key: string; prefix: string; name: string; scopes: string } {
   const id = randomBytes(16).toString("hex");
   const rawKey = randomBytes(20).toString("hex"); // 40 hex chars
   const key = `chvor_${rawKey}`;
@@ -23,14 +24,25 @@ export function generateApiKey(
   const expiresAt = expiresInDays
     ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
     : null;
+  const normalizedScopes = scopes.trim() || "*";
 
   const db = getDb();
   db.prepare(
     `INSERT INTO api_keys (id, name, key_prefix, key_hash, scopes, created_at, expires_at)
-     VALUES (?, ?, ?, ?, '*', ?, ?)`
-  ).run(id, name, prefix, keyHash, now, expiresAt);
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, name, prefix, keyHash, normalizedScopes, now, expiresAt);
 
-  return { id, key, prefix, name };
+  return { id, key, prefix, name, scopes: normalizedScopes };
+}
+
+/** Replace the scopes on an existing API key (full overwrite). Returns true on match. */
+export function updateApiKeyScopes(id: string, scopes: string): boolean {
+  const normalized = scopes.trim() || "*";
+  const db = getDb();
+  const result = db
+    .prepare("UPDATE api_keys SET scopes = ? WHERE id = ? AND revoked_at IS NULL")
+    .run(normalized, id);
+  return result.changes > 0;
 }
 
 export function validateApiKey(
