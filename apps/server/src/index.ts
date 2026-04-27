@@ -92,6 +92,7 @@ import { initKeepAwake, shutdownKeepAwake } from "./lib/keep-awake.ts";
 import { startSkillWatcher, stopSkillWatcher } from "./lib/skill-watcher.ts";
 import { startAutoUpdate, stopAutoUpdate } from "./lib/registry-updater.ts";
 import { startMemoryDecay, stopMemoryDecay } from "./lib/memory-decay.ts";
+import { startToolGraphDecay, stopToolGraphDecay } from "./lib/tool-graph-decay.ts";
 import { startConsolidation, stopConsolidation } from "./lib/memory-consolidation.ts";
 import { initJobRunner, stopAllPeriodicJobs } from "./lib/job-runner.ts";
 import { reloadAll } from "./lib/capability-loader.ts";
@@ -658,6 +659,7 @@ startMediaCleanup();
 // Initialize persistent job runner (resets stuck jobs from previous crash)
 initJobRunner();
 startMemoryDecay();
+startToolGraphDecay();
 startConsolidation();
 initManifest();
 initKeepAwake();

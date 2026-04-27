@@ -867,6 +867,54 @@ export function getDb(): Database.Database {
     console.log("[db] migration v24 applied: session_credential_pins for multi-credential picker");
   }
 
+  if (currentVersion < 25) {
+    // ── Cognitive Tool Graph (Phase G) ──────────────────────────────
+    // Tools become graph nodes with strength, success/failure counts,
+    // and a "trial boost" so newly installed tools get a fair evaluation
+    // window before decay kicks in.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tool_nodes (
+        tool_name TEXT PRIMARY KEY,
+        strength REAL NOT NULL DEFAULT 1.0,
+        invocation_count INTEGER NOT NULL DEFAULT 0,
+        success_count INTEGER NOT NULL DEFAULT 0,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        trial_boost_remaining INTEGER NOT NULL DEFAULT 20,
+        installed_at TEXT NOT NULL,
+        last_used_at TEXT,
+        last_decayed_at TEXT
+      )
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_tool_nodes_strength ON tool_nodes(strength DESC)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_tool_nodes_last_used ON tool_nodes(last_used_at DESC)");
+
+    // Hebbian co-activation edges. Symmetric in semantics — we always store
+    // the lexicographically-smaller name as `tool_a` so (a,b) and (b,a)
+    // collapse to a single row.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tool_edges (
+        tool_a TEXT NOT NULL,
+        tool_b TEXT NOT NULL,
+        weight REAL NOT NULL DEFAULT 0.0,
+        co_use_count INTEGER NOT NULL DEFAULT 0,
+        last_co_used_at TEXT NOT NULL,
+        PRIMARY KEY (tool_a, tool_b)
+      )
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_tool_edges_a ON tool_edges(tool_a, weight DESC)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_tool_edges_b ON tool_edges(tool_b, weight DESC)");
+
+    // Seed the periodic decay job so it shows up alongside memory-decay etc.
+    const seedNow = new Date().toISOString();
+    const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+    db.prepare(
+      "INSERT OR IGNORE INTO system_jobs (job_id, interval_ms, next_run_at, status) VALUES (?, ?, ?, 'idle')"
+    ).run("tool-graph-decay", TWELVE_HOURS, seedNow);
+
+    db.pragma("user_version = 25");
+    console.log("[db] migration v25 applied: tool_nodes + tool_edges (Cognitive Tool Graph)");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }

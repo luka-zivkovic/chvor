@@ -101,7 +101,25 @@ export type ExecutionEvent =
   | { type: "execution.failed"; data: { error: string } }
   | { type: "tool.bag.resolved"; data: ToolBagResolvedEvent }
   | { type: "credential.resolved"; data: CredentialResolvedEvent }
-  | { type: "security.verdict"; data: import("./security.js").SecurityVerdictEvent };
+  | { type: "security.verdict"; data: import("./security.js").SecurityVerdictEvent }
+  | { type: "tool.graph.observed"; data: ToolGraphObservedEvent };
+
+/** Per-call rationale from the Cognitive Tool Graph (Phase G). */
+export interface ToolGraphObservedEvent {
+  toolName: string;
+  success: boolean;
+  /** Strength before and after the update — lets the canvas animate the bar. */
+  strengthBefore: number;
+  strengthAfter: number;
+  /** Total successful invocations so far. */
+  successCount: number;
+  /** Total failed invocations so far. */
+  failureCount: number;
+  /** Hebbian edges bumped this call (canonical pair keys). */
+  edgesBumped: Array<{ a: string; b: string }>;
+  /** Whether the node is still in its trial-boost window. */
+  inTrialBoost: boolean;
+}
 
 /** Per-pick rationale for which credential ended up resolving `{{credentials.X}}`. */
 export interface CredentialResolvedEvent {

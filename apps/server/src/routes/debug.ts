@@ -1,6 +1,13 @@
 import { Hono } from "hono";
 import { listTraces, countActionEvents, pruneEventsOlderThan } from "../db/event-store.ts";
 import { listAudit, countAudit, pruneAuditOlderThan } from "../db/audit-log-store.ts";
+import {
+  countEdges,
+  countNodes,
+  getEdgesFor,
+  getNode,
+  listNodes,
+} from "../db/tool-graph-store.ts";
 import type { ActionKind } from "@chvor/shared";
 
 const debugRoute = new Hono();
@@ -74,6 +81,35 @@ debugRoute.post("/prune", async (c) => {
   const prunedAudit = daysAudit ? pruneAuditOlderThan(daysAudit) : 0;
 
   return c.json({ data: { prunedEvents, prunedAudit } });
+});
+
+/**
+ * GET /api/debug/tool-graph
+ * Top-N tool nodes by strength + total counts. Optional `?tool=` returns the
+ * full edge list for a single tool — useful for inspecting "what fired with X?".
+ */
+debugRoute.get("/tool-graph", (c) => {
+  const tool = c.req.query("tool");
+  const limit = Number(c.req.query("limit") ?? "100");
+
+  if (tool) {
+    const node = getNode(tool);
+    const edges = getEdgesFor(tool);
+    return c.json({
+      data: {
+        node,
+        edges,
+        totals: { nodes: countNodes(), edges: countEdges() },
+      },
+    });
+  }
+
+  return c.json({
+    data: {
+      nodes: listNodes(Number.isFinite(limit) ? limit : 100),
+      totals: { nodes: countNodes(), edges: countEdges() },
+    },
+  });
 });
 
 export default debugRoute;

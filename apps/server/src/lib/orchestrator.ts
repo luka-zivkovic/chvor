@@ -42,6 +42,7 @@ import {
 } from "./security-analyzer.ts";
 import type { SecurityActionContext, SecurityActionKind } from "@chvor/shared";
 import { appendAudit } from "../db/audit-log-store.ts";
+import { recordToolOutcome } from "./tool-graph.ts";
 
 export type EventEmitter = (event: ExecutionEvent) => void;
 
@@ -724,6 +725,46 @@ export async function executeConversation(
     // Lazy-init builtin security analyzers (idempotent).
     ensureBuiltinAnalyzersRegistered();
 
+    // Per-turn graph state: track which tools have already succeeded so we can
+    // form Hebbian co-activation edges between tools used together.
+    const turnSuccessSet = new Set<string>();
+
+    /**
+     * Record a tool outcome in the Cognitive Tool Graph and emit a canvas
+     * event. Called after every tool call (success or failure) on every
+     * branch — native, synthesized, MCP. Best-effort: swallows errors so a
+     * graph-store hiccup never breaks the actual tool result.
+     */
+    function observeToolOutcome(toolName: string, success: boolean): void {
+      try {
+        const peers = success ? Array.from(turnSuccessSet).filter((t) => t !== toolName) : [];
+        const result = recordToolOutcome({
+          toolName,
+          success,
+          recentlySucceeded: peers,
+        });
+        if (success) turnSuccessSet.add(toolName);
+        emit({
+          type: "tool.graph.observed",
+          data: {
+            toolName,
+            success,
+            strengthBefore: result.before.strength,
+            strengthAfter: result.after.strength,
+            successCount: result.after.successCount,
+            failureCount: result.after.failureCount,
+            edgesBumped: result.edgesBumped,
+            inTrialBoost: result.after.trialBoostRemaining > 0,
+          },
+        });
+      } catch (err) {
+        console.warn(
+          "[orchestrator] tool-graph observe failed:",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+
     /**
      * Run all registered security analyzers over a tool call. Emits a
      * security.verdict canvas event for HIGH-risk (or always when verbose
@@ -793,6 +834,7 @@ export async function executeConversation(
           security: { risk: verdict.risk, reasons: verdict.highest },
         };
         if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
+        observeToolOutcome(tc.toolName, false);
         return {
           allowed: false,
           result: {
@@ -905,6 +947,7 @@ export async function executeConversation(
             ...(nativeMedia.length > 0 ? { media: nativeMedia } : {}),
           });
           if (emotionEngine) toolOutcomeResults.push({ success: true, severity: toolSeverity(tc.toolName) });
+          observeToolOutcome(tc.toolName, true);
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           logError("tool_failure", err, { toolName: tc.toolName, sessionId: options?.sessionId });
@@ -924,6 +967,7 @@ export async function executeConversation(
             result: { error: errorMsg },
           });
           if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
+          observeToolOutcome(tc.toolName, false);
         }
         continue;
       }
@@ -983,6 +1027,7 @@ export async function executeConversation(
               result: { status: callResult.status, body: callResult.body, truncated: callResult.truncated },
             });
             if (emotionEngine) toolOutcomeResults.push({ success: true, severity: toolSeverity(tc.toolName) });
+            observeToolOutcome(tc.toolName, true);
           } else {
             const errorPayload = callResult.diagnosis
               ? { error: callResult.error, diagnosis: callResult.diagnosis }
@@ -998,6 +1043,7 @@ export async function executeConversation(
               result: errorPayload,
             });
             if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
+            observeToolOutcome(tc.toolName, false);
           }
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -1013,6 +1059,7 @@ export async function executeConversation(
             result: { error: errorMsg },
           });
           if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
+          observeToolOutcome(tc.toolName, false);
         }
         continue;
       }
@@ -1073,6 +1120,7 @@ export async function executeConversation(
           ...(mcpMedia.length > 0 ? { media: mcpMedia } : {}),
         });
         if (emotionEngine) toolOutcomeResults.push({ success: true, severity: toolSeverity(tc.toolName) });
+        observeToolOutcome(tc.toolName, true);
       } catch (err) {
         let errorMsg = err instanceof Error ? err.message : String(err);
         // Nudge LLM toward native fallback on rate-limit errors
@@ -1091,6 +1139,7 @@ export async function executeConversation(
           result: { error: errorMsg },
         });
         if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
+        observeToolOutcome(tc.toolName, false);
       }
     }
 
