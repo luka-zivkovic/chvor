@@ -369,6 +369,7 @@ const handleWebSearch: NativeToolHandler = async (
 };
 
 export const webModule: NativeToolModule = {
+  group: "web",
   defs: {
     [FETCH_TOOL_NAME]: fetchToolDef,
     [WEB_SEARCH_TOOL_NAME]: webSearchToolDef,

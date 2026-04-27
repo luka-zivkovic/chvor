@@ -11,6 +11,7 @@ import type {
   ConversationSummary,
   MemoryRetrievalTrace,
   TokenBudgetInfo,
+  ToolBagResolvedEvent,
 } from "@chvor/shared";
 import { useFeatureStore } from "./feature-store";
 import { useRuntimeStore } from "./runtime-store";
@@ -101,6 +102,8 @@ interface AppState {
   toolTrace: ToolTraceEntry[];
   /** Tool traces keyed by message ID — persisted across messages in a session */
   messageToolTraces: Record<string, ToolTraceEntry[]>;
+  /** Most recent skill-scoped tool bag rationale (null until first turn this session). */
+  lastToolBag: ToolBagResolvedEvent | null;
 
   executionEvents: ExecutionEvent[];
   addExecutionEvent: (event: ExecutionEvent) => void;
@@ -173,6 +176,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       streamingDecisionReason: null,
       memoryTrace: null,
       tokenBudget: null,
+      lastToolBag: null,
     });
     // Re-init WS session with new ID
     const reinit = get()._reinitSession;
@@ -305,6 +309,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { executionEvents: events.length > MAX_EXECUTION_EVENTS ? events.slice(-MAX_EXECUTION_EVENTS) : events };
     }),
   clearExecutionEvents: () => set({ executionEvents: [] }),
+  lastToolBag: null,
 
   pendingApprovals: [],
   respondToApproval: (_requestId, _approved) => {
@@ -462,6 +467,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           set({ tokenBudget: execEvent.data });
         } else if (execEvent.type === "execution.completed") {
           set({ streamingThought: null });
+        } else if (execEvent.type === "tool.bag.resolved") {
+          set({ lastToolBag: execEvent.data });
         }
         break;
       }

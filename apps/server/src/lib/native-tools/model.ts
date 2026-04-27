@@ -152,6 +152,7 @@ const handleSwitchModel: NativeToolHandler = async (
 };
 
 export const modelModule: NativeToolModule = {
+  group: "model",
   defs: { [SWITCH_MODEL_NAME]: switchModelToolDef },
   handlers: { [SWITCH_MODEL_NAME]: handleSwitchModel },
   mappings: { [SWITCH_MODEL_NAME]: { kind: "tool", id: "models" } },

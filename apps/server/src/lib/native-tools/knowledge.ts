@@ -146,6 +146,7 @@ const handleIngestDocument: NativeToolHandler = async (
 };
 
 export const knowledgeModule: NativeToolModule = {
+  group: "knowledge",
   defs: {
     [INGEST_URL_NAME]: ingestUrlToolDef,
     [INGEST_DOCUMENT_NAME]: ingestDocumentToolDef,

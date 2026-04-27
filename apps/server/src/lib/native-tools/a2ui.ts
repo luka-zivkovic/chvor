@@ -360,6 +360,7 @@ const handleA2UIReset: NativeToolHandler = async (
 };
 
 export const a2uiModule: NativeToolModule = {
+  group: "a2ui",
   defs: {
     [A2UI_PUSH_NAME]: a2uiPushToolDef,
     [A2UI_RESET_NAME]: a2uiResetToolDef,

@@ -263,6 +263,11 @@ export function useExecution() {
             resetExecution();
           }, 3000);
           break;
+
+        case "tool.bag.resolved":
+          // No canvas mutation — rationale is stored in app-store via
+          // `lastToolBag` for the debug panel.
+          break;
       }
     }
 

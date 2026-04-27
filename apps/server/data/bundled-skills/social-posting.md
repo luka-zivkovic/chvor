@@ -7,6 +7,9 @@ type: workflow
 category: communication
 icon: share-2
 defaultEnabled: false
+requiredGroups:
+  - social
+  - web
 tags:
   - social-media
   - cross-posting

@@ -72,6 +72,8 @@ const handleRecallDetail: NativeToolHandler = async (
 };
 
 export const recallModule: NativeToolModule = {
+  group: "core",
+  criticality: "always-available",
   defs: { [RECALL_DETAIL_NAME]: recallDetailToolDef },
   handlers: { [RECALL_DETAIL_NAME]: handleRecallDetail },
 };

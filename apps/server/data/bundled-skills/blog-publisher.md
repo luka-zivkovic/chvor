@@ -7,6 +7,11 @@ type: workflow
 category: communication
 icon: file-text
 defaultEnabled: false
+requiredGroups:
+  - social
+  - comms
+  - web
+  - knowledge
 tags:
   - blog
   - wordpress

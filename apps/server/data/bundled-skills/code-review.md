@@ -5,6 +5,12 @@ version: 1.2.0
 author: chvor
 type: workflow
 defaultEnabled: false
+requiredGroups:
+  - sandbox
+  - shell
+  - web
+  - knowledge
+  - files
 category: developer
 icon: code
 tags:

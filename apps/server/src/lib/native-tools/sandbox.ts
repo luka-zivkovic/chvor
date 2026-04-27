@@ -80,6 +80,7 @@ const handleSandboxExecute: NativeToolHandler = async (
 };
 
 export const sandboxModule: NativeToolModule = {
+  group: "sandbox",
   defs: { [SANDBOX_EXECUTE_NAME]: sandboxExecuteToolDef },
   handlers: { [SANDBOX_EXECUTE_NAME]: handleSandboxExecute },
   mappings: { [SANDBOX_EXECUTE_NAME]: { kind: "tool", id: "sandbox" } },

@@ -14,7 +14,10 @@ import type {
   SynthesizedToolConfig,
   SynthesizedEndpoint,
   SynthesizedEndpointParam,
+  ToolGroupId,
+  ToolCriticality,
 } from "@chvor/shared";
+import { isToolGroupId } from "@chvor/shared";
 
 const VALID_CATEGORIES: SkillCategory[] = [
   "ai", "communication", "data", "developer", "file", "productivity", "web",
@@ -170,6 +173,38 @@ function parseCredentialSchema(raw: unknown): CredentialFieldSchema | undefined 
   return { type: String(c.type), name: String(c.name), fields };
 }
 
+function parseRequiredGroups(raw: unknown, filePath: string): ToolGroupId[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ToolGroupId[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    if (isToolGroupId(item)) {
+      if (!out.includes(item)) out.push(item);
+    } else {
+      console.warn(`[capability-parser] ${filePath}: unknown tool group "${item}" — ignoring`);
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function parseStringList(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter((s) => typeof s === "string" && s.length > 0) as string[];
+  return out.length > 0 ? out : undefined;
+}
+
+function parseGroup(raw: unknown, filePath: string): ToolGroupId | undefined {
+  if (typeof raw !== "string") return undefined;
+  if (isToolGroupId(raw)) return raw;
+  console.warn(`[capability-parser] ${filePath}: unknown tool group "${raw}" — ignoring`);
+  return undefined;
+}
+
+function parseCriticality(raw: unknown): ToolCriticality | undefined {
+  if (raw === "always-available" || raw === "normal") return raw;
+  return undefined;
+}
+
 function parseProvides(raw: unknown): Record<string, string> | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
   const result: Record<string, string> = {};
@@ -221,6 +256,14 @@ export function parseCapabilityMd(
       needs: parseDependencies(fm.needs),
       defaultEnabled: typeof fm.defaultEnabled === "boolean" ? fm.defaultEnabled : undefined,
       credentialSchema: parseCredentialSchema(fm.credentials),
+      // Phase C — tool-bag scoping
+      requiredGroups: parseRequiredGroups(fm.requiredGroups ?? fm.required_groups, filePath),
+      requiredTools: parseStringList(fm.requiredTools ?? fm.required_tools),
+      deniedTools: parseStringList(fm.deniedTools ?? fm.denied_tools),
+      allowedCredentialTypes: parseStringList(fm.allowedCredentialTypes ?? fm.allowed_credential_types),
+      preferredUsageContext: parseStringList(fm.preferredUsageContext ?? fm.preferred_usage_context),
+      group: parseGroup(fm.group, filePath),
+      criticality: parseCriticality(fm.criticality),
     };
 
     const instructions = body.trim();

@@ -140,6 +140,7 @@ const handleSocialDisconnect: NativeToolHandler = async (
 };
 
 export const socialModule: NativeToolModule = {
+  group: "social",
   defs: {
     [SOCIAL_CONNECT_NAME]: socialConnectToolDef,
     [SOCIAL_LIST_NAME]: socialListToolDef,

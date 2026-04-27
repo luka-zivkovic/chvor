@@ -221,6 +221,7 @@ const handleDeleteSchedule: NativeToolHandler = async (
 };
 
 export const scheduleModule: NativeToolModule = {
+  group: "daemon",
   defs: {
     [CREATE_SCHEDULE_NAME]: createScheduleToolDef,
     [LIST_SCHEDULES_NAME]: listSchedulesToolDef,

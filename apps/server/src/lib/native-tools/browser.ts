@@ -215,6 +215,7 @@ const handleBrowserObserve: NativeToolHandler = async (
 };
 
 export const browserModule: NativeToolModule = {
+  group: "browser",
   defs: {
     [BROWSER_NAVIGATE_NAME]: browserNavigateToolDef,
     [BROWSER_ACT_NAME]: browserActToolDef,

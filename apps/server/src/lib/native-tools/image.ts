@@ -233,6 +233,7 @@ const handleGenerateImage: NativeToolHandler = async (
 };
 
 export const imageModule: NativeToolModule = {
+  group: "image",
   defs: { [GENERATE_IMAGE_NAME]: generateImageToolDef },
   handlers: { [GENERATE_IMAGE_NAME]: handleGenerateImage },
 };

@@ -7,6 +7,9 @@ type: workflow
 category: communication
 icon: linkedin
 defaultEnabled: false
+requiredGroups:
+  - social
+  - web
 tags:
   - linkedin
   - professional

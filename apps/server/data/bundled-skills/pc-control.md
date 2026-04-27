@@ -7,6 +7,10 @@ category: developer
 icon: monitor
 type: prompt
 defaultEnabled: false
+requiredGroups:
+  - pc
+  - browser
+  - shell
 ---
 
 You can control PCs using the PC control tools. The system uses a 3-layer pipeline that automatically selects the fastest approach:

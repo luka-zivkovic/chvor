@@ -5,6 +5,8 @@ version: 1.2.0
 author: chvor
 type: workflow
 defaultEnabled: false
+requiredGroups:
+  - knowledge
 category: productivity
 icon: pen
 tags:

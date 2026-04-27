@@ -310,6 +310,7 @@ const handleClaudeCode: NativeToolHandler = async (
 };
 
 export const claudeCodeModule: NativeToolModule = {
+  group: "model",
   defs: { [CLAUDE_CODE_NAME]: claudeCodeToolDef },
   handlers: { [CLAUDE_CODE_NAME]: handleClaudeCode },
   mappings: { [CLAUDE_CODE_NAME]: { kind: "tool", id: "claude-code" } },

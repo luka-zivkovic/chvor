@@ -144,6 +144,7 @@ const handleCreateSkill: NativeToolHandler = async (
 };
 
 export const skillModule: NativeToolModule = {
+  group: "skill-mgmt",
   defs: { [CREATE_SKILL_TOOL_NAME]: createSkillToolDef },
   handlers: { [CREATE_SKILL_TOOL_NAME]: handleCreateSkill },
 };

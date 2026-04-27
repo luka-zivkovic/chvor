@@ -63,6 +63,40 @@ export interface CapabilityMetadata {
    * Only meaningful for tools with requires.credentials.
    */
   credentialSchema?: CredentialFieldSchema;
+
+  // -------------------------------------------------------------------------
+  // Tool-bag scoping (Phase C — skill-scoped injection).
+  // Skills declare which tool groups + specific tools they need. Tools declare
+  // which group they belong to + their criticality.
+  // -------------------------------------------------------------------------
+
+  /** Skill-only — tool groups this skill needs. Union of active skills'
+   *  requiredGroups forms the floor of the per-turn tool bag. */
+  requiredGroups?: import("./tool-group.js").ToolGroupId[];
+
+  /** Skill-only — explicit tool IDs (qualified names, e.g. "native__web_search")
+   *  that must be in the bag regardless of group membership. */
+  requiredTools?: string[];
+
+  /** Skill-only — tool IDs explicitly excluded from the bag even when their
+   *  group is otherwise active. */
+  deniedTools?: string[];
+
+  /** Skill-only — credential types this skill is allowed to use. Acts as a
+   *  whitelist for the credential-resolver (Phase E). Empty/undefined ⇒ no
+   *  scoping (matches today's behavior). */
+  allowedCredentialTypes?: string[];
+
+  /** Skill-only — context hints used to disambiguate when multiple credentials
+   *  share a type (matched against `usage_context` on credentials). */
+  preferredUsageContext?: string[];
+
+  /** Tool-only — group this tool belongs to. Used for skill-scoped filtering. */
+  group?: import("./tool-group.js").ToolGroupId;
+
+  /** Tool-only — when set, tool survives every scope filter (decay, group
+   *  scoping, denied list). Use sparingly. */
+  criticality?: import("./tool-group.js").ToolCriticality;
 }
 
 export interface CredentialFieldSchema {

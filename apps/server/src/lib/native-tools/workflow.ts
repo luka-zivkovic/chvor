@@ -422,6 +422,7 @@ const handleDeleteWorkflow: NativeToolHandler = async (
 };
 
 export const workflowModule: NativeToolModule = {
+  group: "daemon",
   defs: {
     [CREATE_WORKFLOW_NAME]: createWorkflowToolDef,
     [RUN_WORKFLOW_NAME]: runWorkflowToolDef,

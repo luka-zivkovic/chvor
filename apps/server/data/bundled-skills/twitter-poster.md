@@ -7,6 +7,9 @@ type: workflow
 category: communication
 icon: twitter
 defaultEnabled: false
+requiredGroups:
+  - social
+  - web
 tags:
   - twitter
   - x
