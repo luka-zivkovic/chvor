@@ -154,21 +154,6 @@ export function lookupToolRisk(
 
 // ── Filter ────────────────────────────────────────────────────
 
-export interface ApplyEmotionGateArgs {
-  defs: Record<string, unknown>;
-  vad: { valence: number; arousal: number; dominance: number } | null;
-  /** Optional override map for tests / non-default classifications. */
-  riskMap?: Map<string, { riskTag: RiskTag; alwaysAvailable: boolean }>;
-}
-
-export interface ApplyEmotionGateResult {
-  defs: Record<string, unknown>;
-  bucket: EmotionBucket;
-  masked: Array<{ toolName: string; riskTag: RiskTag }>;
-  bypassed: string[];
-  event: EmotionGatedToolsEvent | null;
-}
-
 /**
  * Filter a built tool-def map through the emotion gate.
  *
@@ -253,6 +238,23 @@ export function applyEmotionGate<T>({
  * Best-effort VAD lookup for a given session. Returns null when the
  * session has no recorded emotion yet (bucket falls back to neutral
  * → no gating, which is the right default).
+ *
+ * IMPORTANT — one-turn lag, intentional:
+ *   The current turn's VAD is persisted by `executeConversation` AFTER
+ *   the LLM has responded (so the engine can fold the model's
+ *   self-reported emotion + tool outcomes into the snapshot). When the
+ *   gate runs at the start of a turn, `getLatestEmotion` therefore
+ *   reflects the PREVIOUS turn's mood, not the message the user just
+ *   typed. This is the cooling-off semantic: a hostile turn cools off
+ *   the next one, not itself. A "real-time" pre-pass that classifies
+ *   the incoming user text before tool selection is a worthwhile
+ *   follow-up but kept out of scope here so the behaviour stays
+ *   deterministic + cheap (no extra LLM call per turn).
+ *
+ * Trust note: `riskTag` declared in user-installed MCP tool frontmatter
+ * is honoured as-is. Same trust model as `group` and `criticality` from
+ * Phase C — a malicious MCP author could ship `riskTag: safe` on a
+ * destructive endpoint and bypass this gate. Not a new attack surface.
  */
 export function getSessionVAD(
   sessionId: string | undefined

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyEmotionGate,
   bucketFromVAD,
+  buildToolRiskMap,
   defaultRiskForGroup,
   isEmotionGateEnabled,
   lookupToolRisk,
@@ -193,6 +194,54 @@ describe("emotion-gate — applyEmotionGate", () => {
     const r = applyEmotionGate({ defs, vad: null, riskMap: map });
     expect(r.bucket).toBe("neutral");
     expect(r.event).toBeNull();
+  });
+
+  it("empty defs → empty result + no event in any bucket", () => {
+    for (const vad of [
+      { valence: 0, arousal: 0, dominance: 0 } as const,
+      { valence: 0.6, arousal: 0.3, dominance: 0 } as const,
+      { valence: -0.4, arousal: 0, dominance: 0 } as const,
+      { valence: -0.7, arousal: 0.6, dominance: 0 } as const,
+    ]) {
+      const r = applyEmotionGate({ defs: {}, vad, riskMap: map });
+      expect(Object.keys(r.defs)).toHaveLength(0);
+      expect(r.masked).toEqual([]);
+      // Hostile/frustrated would normally emit, but with no candidates we
+      // don't spam the canvas.
+      const expectsEvent = r.bucket === "hostile" || r.bucket === "frustrated";
+      if (expectsEvent) {
+        expect(r.event).not.toBeNull();
+        expect(r.event!.toolCountAfter).toBe(0);
+      } else {
+        expect(r.event).toBeNull();
+      }
+    }
+  });
+});
+
+describe("emotion-gate — buildToolRiskMap (real registry)", () => {
+  it("classifies every native tool with a defined risk + always-available flag", () => {
+    const map = buildToolRiskMap();
+    expect(map.size).toBeGreaterThan(20);
+    for (const [name, entry] of map) {
+      expect(name).toBeTruthy();
+      expect(["safe", "moderate", "destructive"]).toContain(entry.riskTag);
+      expect(typeof entry.alwaysAvailable).toBe("boolean");
+    }
+  });
+
+  it("classifies known destructive native tools accordingly", () => {
+    const map = buildToolRiskMap();
+    const shell = lookupToolRisk("native__shell_execute", map);
+    expect(shell.riskTag).toBe("destructive");
+
+    const recall = lookupToolRisk("native__recall_detail", map);
+    expect(recall.riskTag).toBe("safe");
+    expect(recall.alwaysAvailable).toBe(true);
+
+    // Unknown tool falls through to conservative `moderate`.
+    const unknown = lookupToolRisk("totally__made_up_tool", map);
+    expect(unknown.riskTag).toBe("moderate");
   });
 });
 

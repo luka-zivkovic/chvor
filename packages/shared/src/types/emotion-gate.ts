@@ -35,4 +35,4 @@ export interface EmotionGatedToolsEvent {
   toolCountAfter: number;
   /** Short, user-facing label for the canvas badge ("cooling-off"). */
   reason: string;
-};
+}
