@@ -31,6 +31,8 @@ import { getCognitiveMemoryConfig } from "../db/config-store.ts";
 import { getPersona, isCapabilityEnabled, getExtendedThinking, getBrainConfig } from "../db/config-store.ts";
 import { buildSystemPrompt } from "./orchestrator/system-prompt.ts";
 import { PC_INTERNAL_MEDIA_TOOLS, findCredentialForUrl, extractMedia, sanitizeResultForLLM, summarizeToolResult } from "./orchestrator/tool-result.ts";
+import { beginAction, finishAction, failAction } from "./event-bus.ts";
+import type { ActorType } from "@chvor/shared";
 
 export type EventEmitter = (event: ExecutionEvent) => void;
 
@@ -125,6 +127,8 @@ export interface ExecuteOptions {
   extraRounds?: number;
   /** Signal to abort the current generation mid-stream. */
   abortSignal?: AbortSignal;
+  /** Attribution for typed audit events. Defaults to actor_type=session, actor_id=sessionId. */
+  actor?: { type: ActorType; id: string | null };
 }
 
 /** @deprecated Use ModelUsedInfo from @chvor/shared */
@@ -666,6 +670,13 @@ export async function executeConversation(
       media?: MediaArtifact[];
     }> = [];
 
+    // Attribution for typed audit events — default to session actor when unspecified
+    const actorCtx = {
+      sessionId: options?.sessionId ?? null,
+      actorType: (options?.actor?.type ?? "session") as ActorType,
+      actorId: options?.actor?.id ?? options?.sessionId ?? null,
+    };
+
     for (const tc of toolCalls) {
       // Handle native (built-in) tools first
       if (isNativeTool(tc.toolName)) {
@@ -702,6 +713,7 @@ export async function executeConversation(
             } as ExecutionEvent);
           }
         }
+        const nativeActionHandle = beginAction("native", tc.toolName, tc.args, actorCtx);
         try {
           const latestUserText = (() => {
             for (let i = currentMessages.length - 1; i >= 0; i--) {
@@ -728,6 +740,13 @@ export async function executeConversation(
             latestUserText,
           });
           const nativeMedia = extractMedia(nativeResult, PC_INTERNAL_MEDIA_TOOLS.has(tc.toolName) ? { internal: true } : undefined);
+          // Persist observation with secret-safe payload for credential tools
+          finishAction(
+            nativeActionHandle,
+            tc.toolName === "native__use_credential"
+              ? { content: [{ type: "text", text: "Credential retrieved." }] }
+              : nativeResult
+          );
           if (matchedIntegration) {
             emit({ type: "skill.completed", data: { nodeId: `api-${matchedIntegration.id}`, output: "" } });
           } else if (target) {
@@ -755,6 +774,7 @@ export async function executeConversation(
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           logError("tool_failure", err, { toolName: tc.toolName, sessionId: options?.sessionId });
+          failAction(nativeActionHandle, err);
           if (matchedIntegration) {
             emit({ type: "skill.failed", data: { nodeId: `api-${matchedIntegration.id}`, error: errorMsg } });
           } else if (target) {
@@ -793,6 +813,7 @@ export async function executeConversation(
           data: { nodeId: `tool-${toolId}`, toolId },
         });
 
+        const synthActionHandle = beginAction("synthesized_call", tc.toolName, tc.args, actorCtx);
         try {
           const { callSynthesizedEndpoint } = await import("./synthesized-caller.ts");
           const callResult = await callSynthesizedEndpoint(synthesizedTool, maybeEndpointName, tc.args, {
@@ -801,6 +822,7 @@ export async function executeConversation(
           });
 
           if (callResult.ok) {
+            finishAction(synthActionHandle, { status: callResult.status, body: callResult.body, truncated: callResult.truncated });
             emit({
               type: "tool.completed",
               data: { nodeId: `tool-${toolId}`, output: callResult },
@@ -815,6 +837,7 @@ export async function executeConversation(
             const errorPayload = callResult.diagnosis
               ? { error: callResult.error, diagnosis: callResult.diagnosis }
               : { error: callResult.error };
+            failAction(synthActionHandle, callResult.error);
             emit({
               type: "tool.failed",
               data: { nodeId: `tool-${toolId}`, error: callResult.error },
@@ -829,6 +852,7 @@ export async function executeConversation(
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           logError("tool_failure", err, { toolName: tc.toolName, toolId, sessionId: options?.sessionId });
+          failAction(synthActionHandle, err);
           emit({
             type: "tool.failed",
             data: { nodeId: `tool-${toolId}`, error: errorMsg },
@@ -871,10 +895,12 @@ export async function executeConversation(
         data: { nodeId: `tool-${toolId}`, toolId },
       });
 
+      const mcpActionHandle = beginAction("mcp_call", tc.toolName, tc.args, actorCtx);
       try {
         const mcpResult = await mcpManager.callTool(toolId, toolName, tc.args);
         const mcpMedia = extractMedia(mcpResult);
 
+        finishAction(mcpActionHandle, mcpResult);
         emit({
           type: "tool.completed",
           data: { nodeId: `tool-${toolId}`, output: mcpResult, ...(mcpMedia.length > 0 ? { media: mcpMedia } : {}) },
@@ -894,6 +920,7 @@ export async function executeConversation(
           errorMsg += " — Try using native__web_search as a fallback.";
         }
         logError("tool_failure", err, { toolName: tc.toolName, toolId, sessionId: options?.sessionId });
+        failAction(mcpActionHandle, err);
         emit({
           type: "tool.failed",
           data: { nodeId: `tool-${toolId}`, error: errorMsg },
