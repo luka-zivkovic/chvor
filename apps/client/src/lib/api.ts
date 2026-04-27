@@ -110,9 +110,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (res.status === 401) {
-    // Session expired or not authenticated — notify auth store
-    const { useAuthStore } = await import("../stores/auth-store");
-    useAuthStore.getState().setAuthenticated(false);
+    // Session expired or not authenticated — notify session store
+    const { useSessionStore } = await import("../stores/session-store");
+    useSessionStore.getState().setAuthenticated(false);
     throw new Error("Session expired");
   }
 
@@ -155,6 +155,12 @@ export const api = {
       request<TestCredentialResponse>(`/credentials/${id}/test`, {
         method: "POST",
       }),
+
+    testGeneric: (body: { connectionConfig: import("@chvor/shared").ConnectionConfig; data: Record<string, string>; probePath?: string }) =>
+      request<{ ok: boolean; status?: number; probedUrl?: string; bodyPreview?: string; error?: string; durationMs: number }>(
+        "/credentials/test-generic",
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   },
 
   providers: {
@@ -689,8 +695,8 @@ export const api = {
         credentials: "same-origin",
       });
       if (res.status === 401) {
-        const { useAuthStore } = await import("../stores/auth-store");
-        useAuthStore.getState().setAuthenticated(false);
+        const { useSessionStore } = await import("../stores/session-store");
+        useSessionStore.getState().setAuthenticated(false);
         throw new Error("Session expired");
       }
       if (!res.ok) {
@@ -734,5 +740,36 @@ export const api = {
       request<{ refreshed: boolean; expiresAt?: string }>(`/oauth/refresh/${credentialId}`, {
         method: "POST",
       }),
+    synthesizedRedirectUrl: () =>
+      request<{ redirectUrl: string }>("/oauth/synthesized/redirect-url"),
+    synthesizedInitiate: (body: {
+      credentialType: string;
+      providerName: string;
+      clientId: string;
+      clientSecret?: string;
+      authUrl: string;
+      tokenUrl: string;
+      scopes: string[];
+      extraAuthParams?: Record<string, string>;
+      extraTokenParams?: Record<string, string>;
+    }) =>
+      request<{ redirectUrl: string; connectionId: string; method: string; redirectUriUsed: string }>(
+        "/oauth/synthesized/initiate",
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+  },
+
+  integrations: {
+    catalog: () =>
+      request<import("@chvor/shared").IntegrationCatalogResponse>(
+        "/integrations/catalog",
+      ),
+    research: (q: string, opts?: { specUrl?: string }) => {
+      const params = new URLSearchParams({ q });
+      if (opts?.specUrl) params.set("specUrl", opts.specUrl);
+      return request<import("@chvor/shared").IntegrationResolution>(
+        `/integrations/research?${params.toString()}`,
+      );
+    },
   },
 };

@@ -1,5 +1,5 @@
 import { useEffect, memo } from "react";
-import { useA2UIStore } from "../../stores/a2ui-store";
+import { useRuntimeStore } from "../../stores/runtime-store";
 import { useUIStore } from "../../stores/ui-store";
 import { A2UIRenderer } from "../a2ui/A2UIRenderer";
 import { cn } from "@/lib/utils";
@@ -7,19 +7,19 @@ import type { A2UISurfaceListItem } from "@chvor/shared";
 
 export function CanvasPage() {
   const exitCanvas = useUIStore((s) => s.exitCanvas);
-  const surfaceList = useA2UIStore((s) => s.surfaceList);
-  const activeSurface = useA2UIStore((s) => s.activeSurface);
-  const activeSurfaceId = useA2UIStore((s) => s.activeSurfaceId);
-  const fetchSurfaces = useA2UIStore((s) => s.fetchSurfaces);
-  const fetchSurface = useA2UIStore((s) => s.fetchSurface);
-  const deleteSurface = useA2UIStore((s) => s.deleteSurfaceFromServer);
+  const surfaceList = useRuntimeStore((s) => s.surfaceList);
+  const activeSurface = useRuntimeStore((s) => s.activeSurface);
+  const activeSurfaceId = useRuntimeStore((s) => s.activeSurfaceId);
+  const fetchSurfaces = useRuntimeStore((s) => s.fetchSurfaces);
+  const fetchSurface = useRuntimeStore((s) => s.fetchSurface);
+  const deleteSurface = useRuntimeStore((s) => s.deleteSurfaceFromServer);
 
   // Load surface list on mount and auto-select first surface if none active
   useEffect(() => {
     let cancelled = false;
     fetchSurfaces().then(() => {
       if (cancelled) return;
-      const { activeSurfaceId, surfaceList } = useA2UIStore.getState();
+      const { activeSurfaceId, surfaceList } = useRuntimeStore.getState();
       if (!activeSurfaceId && surfaceList.length > 0) {
         fetchSurface(surfaceList[0].id);
       }

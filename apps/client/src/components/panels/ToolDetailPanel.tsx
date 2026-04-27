@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useCanvasStore } from "../../stores/canvas-store";
-import { useToolStore } from "../../stores/tool-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { useUIStore } from "../../stores/ui-store";
 import { api } from "../../lib/api";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,7 @@ function statusDotClass(status: string): string {
 export function ToolDetailPanel() {
   const detailNodeId = useUIStore((s) => s.detailNodeId);
   const nodes = useCanvasStore((s) => s.nodes);
-  const { tools, fetchTools } = useToolStore();
+  const { tools, fetchTools } = useFeatureStore();
   const [expanded, setExpanded] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
 

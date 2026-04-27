@@ -7,14 +7,13 @@ import { StreamingMessage } from "./StreamingMessage";
 import { ChatInput } from "./ChatInput";
 import { TalkMode } from "./TalkMode";
 import { AudioPlayback } from "./AudioPlayback";
-import { useVoiceStore } from "@/stores/voice-store";
+import { useFeatureStore } from "@/stores/feature-store";
 import { CommandApproval } from "./CommandApproval";
 import { SynthesizedConfirm } from "./SynthesizedConfirm";
 import { CredentialForm } from "../credentials/CredentialForm";
+import { OAuthSynthesizedWizard } from "../credentials/OAuthSynthesizedWizard";
 import { ConversationSwitcher } from "./ConversationSwitcher";
-import { usePersonaStore } from "@/stores/persona-store";
-import { useCredentialStore } from "@/stores/credential-store";
-import { useScheduleStore } from "@/stores/schedule-store";
+import { useConfigStore } from "@/stores/config-store";
 import type { LayoutMode } from "../../stores/ui-store";
 import type { ConversationSummary } from "@chvor/shared";
 
@@ -56,9 +55,9 @@ const FALLBACK_PROMPTS = [
 const CHANNEL_CRED_TYPES = new Set(["telegram", "discord", "slack", "whatsapp", "matrix"]);
 
 function useStarterPrompts(): string[] {
-  const persona = usePersonaStore((s) => s.persona);
-  const credentials = useCredentialStore((s) => s.credentials);
-  const schedules = useScheduleStore((s) => s.schedules);
+  const persona = useConfigStore((s) => s.persona);
+  const credentials = useFeatureStore((s) => s.credentials);
+  const schedules = useFeatureStore((s) => s.schedules);
 
   return useMemo(() => {
     if (!persona) return FALLBACK_PROMPTS;
@@ -84,7 +83,7 @@ function useStarterPrompts(): string[] {
 
 function EmptyState({ onSend }: { onSend: (text: string) => void }) {
   const prompts = useStarterPrompts();
-  const persona = usePersonaStore((s) => s.persona);
+  const persona = useConfigStore((s) => s.persona);
   const aiName = persona?.aiName || "Chvor";
 
   return (
@@ -200,6 +199,8 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   const pendingCredentialRequests = useAppStore((s) => s.pendingCredentialRequests);
   const respondToCredentialRequest = useAppStore((s) => s.respondToCredentialRequest);
   const pendingSynthesizedConfirms = useAppStore((s) => s.pendingSynthesizedConfirms);
+  const pendingOAuthWizards = useAppStore((s) => s.pendingOAuthWizards);
+  const respondToOAuthWizard = useAppStore((s) => s.respondToOAuthWizard);
   const conversations = useAppStore((s) => s.conversations);
   const sessionId = useAppStore((s) => s.sessionId);
   const newConversation = useAppStore((s) => s.newConversation);
@@ -208,8 +209,8 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   const send = useAppStore((s) => s._send);
   const sendChat = useAppStore((s) => s._sendChat);
   const stopGeneration = useAppStore((s) => s._stopGeneration);
-  const { setTalkModeActive } = useVoiceStore();
-  const audioUrls = useVoiceStore((s) => s.audioUrls);
+  const { setTalkModeActive } = useFeatureStore();
+  const audioUrls = useFeatureStore((s) => s.audioUrls);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
@@ -226,7 +227,7 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   }, [messages.length, scrollToBottom]);
 
   useEffect(() => {
-    useVoiceStore.getState().fetchConfig();
+    useFeatureStore.getState().fetchVoiceConfig();
   }, []);
 
   const handleScroll = useCallback(() => {
@@ -268,6 +269,7 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
 
   return (
     <div
+      data-tour="chat-panel"
       className={cn(
         "absolute top-10 right-0 bottom-0 z-20 w-full md:w-[460px]",
         "flex flex-col transition-transform duration-300 ease-in-out",
@@ -379,6 +381,11 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
               source={request.source}
               confidence={request.confidence}
               helpText={request.helpText}
+              specUrl={request.specUrl}
+              specVerified={request.specVerified}
+              authScheme={request.authScheme}
+              baseUrl={request.baseUrl}
+              probePath={request.probePath}
               allowFieldEditing={request.allowFieldEditing}
               existingCredentialId={request.existingCredentialId}
               redactedValues={request.redactedValues}
@@ -411,6 +418,32 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
         <div className="shrink-0 px-3 py-2 space-y-2">
           {pendingSynthesizedConfirms.map((confirm) => (
             <SynthesizedConfirm key={confirm.requestId} confirm={confirm} onSend={send} />
+          ))}
+        </div>
+      )}
+
+      {/* Pending OAuth setup wizards (synthesized OAuth providers) */}
+      {pendingOAuthWizards.length > 0 && (
+        <div className="shrink-0 px-3 py-2 space-y-2">
+          {pendingOAuthWizards.map((wizard) => (
+            <OAuthSynthesizedWizard
+              key={wizard.requestId}
+              request={wizard}
+              onComplete={(connected) => {
+                send({
+                  type: "oauth.synthesized.respond",
+                  data: { requestId: wizard.requestId, cancelled: false, connected },
+                });
+                respondToOAuthWizard(wizard.requestId);
+              }}
+              onCancel={() => {
+                send({
+                  type: "oauth.synthesized.respond",
+                  data: { requestId: wizard.requestId, cancelled: true },
+                });
+                respondToOAuthWizard(wizard.requestId);
+              }}
+            />
           ))}
         </div>
       )}

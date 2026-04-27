@@ -1,4 +1,4 @@
-import { useMemoryStore } from "../../stores/memory-store";
+import { useFeatureStore } from "../../stores/feature-store";
 
 const CATEGORY_COLORS: Record<string, string> = {
   profile: "bg-blue-400",
@@ -20,7 +20,7 @@ const RELATION_COLORS: Record<string, string> = {
 };
 
 export function MemoryStatsView() {
-  const { stats, statsLoading } = useMemoryStore();
+  const { stats, statsLoading } = useFeatureStore();
 
   if (statsLoading) return <p className="text-xs text-muted-foreground">Loading stats...</p>;
   if (!stats) return null;

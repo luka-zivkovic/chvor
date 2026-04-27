@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useCanvasStore } from "../../stores/canvas-store";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { useUIStore } from "../../stores/ui-store";
-import { useWhatsAppStore } from "../../stores/whatsapp-store";
 import { StatusBadge } from "../credentials/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,8 +33,8 @@ function statusDotClass(status: string): string {
 export function IntegrationDetailPanel() {
   const detailNodeId = useUIStore((s) => s.detailNodeId);
   const nodes = useCanvasStore((s) => s.nodes);
-  const { credentials, providers, updateCredential, removeCredential } = useCredentialStore();
-  const whatsappDisconnect = useWhatsAppStore((s) => s.disconnect);
+  const { credentials, providers, updateCredential, removeCredential } = useFeatureStore();
+  const whatsappDisconnect = useFeatureStore((s) => s.disconnect);
   const closePanel = useUIStore((s) => s.closePanel);
 
   const [editing, setEditing] = useState(false);

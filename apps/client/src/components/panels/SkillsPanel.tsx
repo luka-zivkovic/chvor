@@ -1,12 +1,12 @@
 import { useEffect } from "react";
-import { useSkillStore } from "../../stores/skill-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useCanvasStore } from "../../stores/canvas-store";
-import { useRegistryStore } from "../../stores/registry-store";
 import { api } from "../../lib/api";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { RegistrySearchBar } from "../registry/RegistrySearchBar";
+import { EmptyState } from "../ui/empty-state";
 
 const TYPE_LABELS: Record<string, string> = {
   prompt: "Prompt",
@@ -14,9 +14,9 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export function SkillsPanel() {
-  const { skills, fetchSkills } = useSkillStore();
+  const { skills, fetchSkills } = useFeatureStore();
   const nodes = useCanvasStore((s) => s.nodes);
-  const { availableUpdates, checkUpdates } = useRegistryStore();
+  const { availableUpdates, checkUpdates } = useFeatureStore();
 
   useEffect(() => {
     checkUpdates();
@@ -49,12 +49,17 @@ export function SkillsPanel() {
     return (
       <div className="flex flex-col gap-3">
         <RegistrySearchBar kind="skill" onInstalled={fetchSkills} />
-        <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
-          <p className="text-xs text-muted-foreground">No behavioral skills configured</p>
-          <p className="text-[10px] text-muted-foreground/60">
-            Search the registry above to discover and install skills
-          </p>
-        </div>
+        <EmptyState
+          size="compact"
+          icon={
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08 4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08 4.24-4.24" />
+            </svg>
+          }
+          title="No behavioral skills configured"
+          description="Search the registry above to discover and install skills."
+        />
       </div>
     );
   }

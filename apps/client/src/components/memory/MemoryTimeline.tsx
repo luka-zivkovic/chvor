@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMemoryStore } from "../../stores/memory-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import type { MemoryCategory } from "@chvor/shared";
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -24,7 +24,7 @@ const STRENGTH_COLOR = (s: number) =>
   s >= 0.6 ? "bg-green-400" : s >= 0.3 ? "bg-amber-400" : "bg-red-400";
 
 export function MemoryTimeline() {
-  const { memories, loading } = useMemoryStore();
+  const { memories, memoriesLoading: loading } = useFeatureStore();
   const [filter, setFilter] = useState<MemoryCategory | "all">("all");
 
   const sorted = useMemo(() => {

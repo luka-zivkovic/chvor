@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useActivityStore } from "../../stores/activity-store";
+import { useRuntimeStore } from "../../stores/runtime-store";
+import { EmptyState } from "../ui/empty-state";
 import type { ActivitySource } from "@chvor/shared";
 
 const SOURCE_META: Record<ActivitySource, { label: string; color: string }> = {
@@ -11,6 +12,7 @@ const SOURCE_META: Record<ActivitySource, { label: string; color: string }> = {
   webhook: { label: "webhook", color: "text-cyan-400" },
   "pc-control": { label: "pc", color: "text-teal-400" },
   daemon: { label: "daemon", color: "text-indigo-400" },
+  "synthesized-write": { label: "api write", color: "text-orange-400" },
 };
 
 function formatRelativeTime(iso: string): string {
@@ -24,8 +26,8 @@ function formatRelativeTime(iso: string): string {
 }
 
 export default function ActivityPanel() {
-  const { activities, loading, unreadCount, fetchActivities, markRead, markAllRead } =
-    useActivityStore();
+  const { activities, activitiesLoading: loading, unreadCount, fetchActivities, markRead, markAllRead } =
+    useRuntimeStore();
 
   // Re-render every 60s to keep relative timestamps fresh
   const [, setTick] = useState(0);
@@ -53,9 +55,16 @@ export default function ActivityPanel() {
       )}
 
       {!loading && activities.length === 0 && (
-        <p className="text-xs text-muted-foreground text-center py-8">
-          No activity yet. Pulse alerts, schedule results, and repair actions will appear here.
-        </p>
+        <EmptyState
+          size="compact"
+          icon={
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12h4l3-9 4 18 3-9h4" />
+            </svg>
+          }
+          title="No activity yet"
+          description="Pulse alerts, schedule results, and repair actions will appear here."
+        />
       )}
 
       {activities.map((a) => {

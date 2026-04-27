@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { AnyProviderDef, CredentialSummary, ProviderField } from "@chvor/shared";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { api } from "../../lib/api";
 import { CredentialForm } from "./CredentialForm";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,7 @@ export function AddCredentialDialog({ onClose, initialCredType, filter = "all", 
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  const { providers: allProviders, addCredential, updateCredential } = useCredentialStore();
+  const { providers: allProviders, addCredential, updateCredential } = useFeatureStore();
   const providers = allProviders.filter((p) => {
     if (filter === "all") return true;
     const isLLM = "models" in p;

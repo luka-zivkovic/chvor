@@ -1,9 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { TopBar } from "./HudOverlay";
 import { SlideOverPanel } from "./SlideOverPanel";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { BrainCanvas } from "../canvas/BrainCanvas";
-import { CanvasHint } from "../onboarding/CanvasHint";
+import { FirstRunTour } from "../onboarding/FirstRunTour";
 import { ChatPanel } from "../chat/ChatPanel";
 import { SchedulesPanel } from "../panels/SchedulesPanel";
 import { WebhooksPanel } from "../panels/WebhooksPanel";
@@ -17,6 +17,7 @@ import { ToolDetailPanel } from "../panels/ToolDetailPanel";
 import { IntegrationDetailPanel } from "../panels/IntegrationDetailPanel";
 import { ConnectionsPanel } from "../panels/ConnectionsPanel";
 import { IntegrationsPanel } from "../panels/IntegrationsPanel";
+import { IntegrationCatalogPanel } from "../panels/IntegrationCatalogPanel";
 import { ConversationsPanel } from "../panels/ConversationsPanel";
 import ActivityPanel from "../panels/ActivityPanel";
 import { EmotionHistoryPanel } from "../panels/EmotionHistoryPanel";
@@ -32,6 +33,9 @@ import { useAppStore } from "../../stores/app-store";
 import { useExecution } from "../../hooks/use-execution";
 import { useGateway } from "../../hooks/use-gateway";
 import { cn } from "@/lib/utils";
+import { Button } from "../ui/button";
+import { ErrorBoundary } from "../ErrorBoundary";
+import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
 
 const MOBILE_NAV_ITEMS: Array<{ panel: PanelId | "settings"; label: string }> = [
   { panel: "brain", label: "Brain" },
@@ -92,6 +96,7 @@ const PANEL_META: Record<string, { title: string; subtitle: string; width?: numb
   "integration-detail": { title: "Connection", subtitle: "Status & credential" },
   connections: { title: "Connections", subtitle: "LLM provider credentials", info: "API keys and credentials for AI model providers." },
   integrations: { title: "Integrations", subtitle: "Channels & services", info: "External services — Telegram, Discord, Slack, and more." },
+  "integration-catalog": { title: "Integration Catalog", subtitle: "Browse & request services", info: "Every service Chvor knows how to connect to, plus a Tier-3 research request for anything not listed." },
   conversations: { title: "Conversations", subtitle: "Browse and manage chat history" },
   activity: { title: "Activity", subtitle: "System events" },
   "emotion-history": { title: "Emotional World", subtitle: "Inner state, arc & patterns" },
@@ -126,6 +131,8 @@ function PanelContent({ panel }: { panel: string }) {
       return <ConnectionsPanel />;
     case "integrations":
       return <IntegrationsPanel />;
+    case "integration-catalog":
+      return <IntegrationCatalogPanel />;
     case "conversations":
       return <ConversationsPanel />;
     case "activity":
@@ -147,14 +154,11 @@ function ExpandFab() {
   const isExpanded = layoutMode === "canvas-expanded";
 
   return (
-    <button
+    <Button
+      variant="glass"
+      size="icon-lg"
       onClick={toggleCanvasExpand}
-      className={cn(
-        "glass flex h-9 w-9 items-center justify-center rounded-full",
-        "border border-border/50 text-muted-foreground transition-all duration-200",
-        "hover:border-primary/40 hover:text-primary hover:shadow-[0_0_16px_oklch(0.62_0.13_250/0.25)]",
-        isExpanded && "border-primary/30 text-primary"
-      )}
+      className={cn(isExpanded && "border-primary/30 text-primary")}
       title={isExpanded ? "Exit fullscreen (Esc)" : "Expand canvas (F)"}
     >
       {isExpanded ? (
@@ -174,7 +178,7 @@ function ExpandFab() {
           <line x1="3" y1="21" x2="10" y2="14" />
         </svg>
       )}
-    </button>
+    </Button>
   );
 }
 
@@ -185,6 +189,7 @@ export function MainLayout() {
   const closePanel = useUIStore((s) => s.closePanel);
   const toggleCanvasExpand = useUIStore((s) => s.toggleCanvasExpand);
   const setLayoutMode = useUIStore((s) => s.setLayoutMode);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   useExecution();
   useGateway();
@@ -214,6 +219,10 @@ export function MainLayout() {
       if (e.key === "f" || e.key === "F") {
         toggleCanvasExpand();
       }
+      if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+      }
       if (e.key === "Escape") {
         if (isExpanded) {
           setLayoutMode("default");
@@ -238,11 +247,12 @@ export function MainLayout() {
         <BrainCanvas />
       </div>
 
-      {/* One-time hint after onboarding */}
-      <CanvasHint />
+      {/* First-run guided tour after onboarding + WS connect */}
+      <FirstRunTour />
 
       {/* ─── Layer 1: Top Bar (40px) ─── */}
       <div
+        data-tour="top-bar"
         className="absolute top-0 right-0 left-0 z-30 h-10"
         style={{
           background: "var(--glass-bg)",
@@ -275,7 +285,9 @@ export function MainLayout() {
             width={meta.width}
             onClose={closePanel}
           >
-            <PanelContent panel={activePanel} />
+            <ErrorBoundary variant="inline" scope={meta.title} resetKey={activePanel}>
+              <PanelContent panel={activePanel} />
+            </ErrorBoundary>
           </SlideOverPanel>
         </div>
       )}
@@ -311,6 +323,9 @@ export function MainLayout() {
 
       {/* ─── Full-screen Settings overlay ─── */}
       <SettingsOverlay />
+
+      {/* ─── Keyboard shortcuts cheat sheet (?) ─── */}
+      <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       {/* ─── Expand mode hint ─── */}
       {isExpanded && (

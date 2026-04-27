@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CredentialSummary } from "@chvor/shared";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { CredentialCard } from "./CredentialCard";
 import { AddCredentialDialog } from "./AddCredentialDialog";
 
@@ -9,7 +9,7 @@ interface Props {
 }
 
 export function CredentialList({ onEdit }: Props) {
-  const { credentials } = useCredentialStore();
+  const { credentials } = useFeatureStore();
   const [editingCredential, setEditingCredential] = useState<CredentialSummary | null>(null);
 
   if (credentials.length === 0) {

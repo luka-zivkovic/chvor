@@ -1,6 +1,6 @@
 // apps/client/src/components/chat/TalkMode.tsx
 import { useEffect, useCallback, useRef } from "react";
-import { useVoiceStore } from "@/stores/voice-store";
+import { useFeatureStore } from "@/stores/feature-store";
 import { useWebSpeech } from "@/hooks/useWebSpeech";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,7 @@ export function TalkMode({ onSend }: Props) {
   const {
     talkModeActive, talkPhase, setTalkPhase, setTalkModeActive,
     audioUrls, lastPlayedAudioId, setLastPlayedAudioId, ttsMode,
-  } = useVoiceStore();
+  } = useFeatureStore();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const retryCountRef = useRef(0);
   const ttsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);

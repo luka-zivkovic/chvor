@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { WorkspacePage } from "./pages/WorkspacePage";
 import { OnboardingExperience } from "./components/onboarding/OnboardingExperience";
-import { usePersonaStore } from "./stores/persona-store";
-import { useAuthStore } from "./stores/auth-store";
+import { useConfigStore } from "./stores/config-store";
+import { useSessionStore } from "./stores/session-store";
 import { LoginPage } from "./pages/LoginPage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { authEnabled, authenticated, checkStatus } = useAuthStore();
+  const { authEnabled, authenticated, checkStatus } = useSessionStore();
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
@@ -33,7 +33,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 function OnboardingGate({ children }: { children: React.ReactNode }) {
-  const { persona, fetchPersona } = usePersonaStore();
+  const { persona, fetchPersona } = useConfigStore();
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [checked, setChecked] = useState(false);
 

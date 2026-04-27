@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
 import { AddCredentialDialog } from "@/components/credentials/AddCredentialDialog";
 import { OAuthConnectButton } from "@/components/credentials/OAuthConnectButton";
-import { useCredentialStore } from "@/stores/credential-store";
+import { useFeatureStore } from "@/stores/feature-store";
 import { SKILL_CATALOG, CATEGORY_LABELS, CATEGORY_ORDER, type SkillEntry } from "../onboarding-data";
 import { staggerContainer, staggerItem, phaseVariants } from "../onboarding-variants";
 interface Props {
@@ -14,7 +14,7 @@ interface Props {
 }
 
 export function PowerUpPhase({ direction, onBack, onNext }: Props) {
-  const { credentials, oauthConnections, fetchAll: fetchCredentials, fetchOAuthState } = useCredentialStore();
+  const { credentials, oauthConnections, fetchCredentials, fetchOAuthState } = useFeatureStore();
   const [setupCredType, setSetupCredType] = useState<string | null>(null);
 
   useEffect(() => { fetchCredentials(); fetchOAuthState(); }, [fetchCredentials, fetchOAuthState]);

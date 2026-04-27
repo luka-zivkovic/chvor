@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { useAuthStore } from "../stores/auth-store";
+import { useSessionStore } from "../stores/session-store";
 import { api } from "../lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function LoginPage() {
-  const { authMethod, login, loading, error } = useAuthStore();
+  const { authMethod, login, loading, error } = useSessionStore();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [pin, setPin] = useState("");

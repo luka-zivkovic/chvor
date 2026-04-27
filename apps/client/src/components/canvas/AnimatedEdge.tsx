@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { getBezierPath, useInternalNode } from "@xyflow/react";
 import type { EdgeProps } from "@xyflow/react";
-import { useEmotionStore } from "../../stores/emotion-store";
+import { useRuntimeStore } from "../../stores/runtime-store";
 import { getFloatingEdgeParams } from "./floating-edge-utils";
 
 function AnimatedEdgeInner({ id, source, target, data }: EdgeProps) {
@@ -11,10 +11,10 @@ function AnimatedEdgeInner({ id, source, target, data }: EdgeProps) {
   const edgeData = data as { active?: boolean; ghost?: boolean } | undefined;
   const active = edgeData?.active ?? false;
   const ghost = edgeData?.ghost ?? false;
-  const emotionColor = useEmotionStore((s) => s.displayColor);
-  const previousColor = useEmotionStore((s) => s.previousSnapshot?.color ?? null);
-  const arousal = useEmotionStore((s) => s.currentSnapshot?.vad?.arousal ?? 0);
-  const blendIntensity = useEmotionStore((s) => s.blendIntensity);
+  const emotionColor = useRuntimeStore((s) => s.displayColor);
+  const previousColor = useRuntimeStore((s) => s.previousSnapshot?.color ?? null);
+  const arousal = useRuntimeStore((s) => s.currentSnapshot?.vad?.arousal ?? 0);
+  const blendIntensity = useRuntimeStore((s) => s.blendIntensity);
 
   if (!sourceNode || !targetNode) return null;
 

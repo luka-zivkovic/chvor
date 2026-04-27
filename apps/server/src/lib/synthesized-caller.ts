@@ -16,15 +16,19 @@ import { lookup } from "node:dns/promises";
 import * as https from "node:https";
 import * as http from "node:http";
 import type { Tool, SynthesizedEndpoint, ConnectionConfig } from "@chvor/shared";
-import { getCredentialData, listCredentials } from "../db/credential-store.ts";
+import { getCredentialData, listCredentials, updateCredential } from "../db/credential-store.ts";
 import { isPrivateIp, isPrivateHostname } from "./url-safety.ts";
 import { logError } from "./error-logger.ts";
+import { insertActivity } from "../db/activity-store.ts";
 import {
   requestApproval,
   recordSuccess,
   recordFailure,
   getSessionStats,
 } from "./approval-gate.ts";
+import { refreshAccessToken, type OAuthProviderConfig } from "./oauth-engine.ts";
+import { getDirectOAuthProvider } from "./oauth-providers.ts";
+import { SynthesizedToolError } from "./errors.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 600_000;
@@ -124,22 +128,44 @@ export async function resolveSafeSynthesizedTarget(rawUrl: string): Promise<Reso
   try {
     parsed = new URL(rawUrl);
   } catch {
-    throw new Error(`invalid URL: ${rawUrl}`);
+    throw new SynthesizedToolError(`invalid URL: ${rawUrl}`, {
+      code: "synth.url_blocked",
+      context: { rawUrl, reason: "parse_failed" },
+      userFacing: true,
+    });
   }
   if (parsed.protocol !== "https:") {
-    throw new Error(`non-HTTPS blocked (got ${parsed.protocol}) — synthesized tool calls require HTTPS`);
+    throw new SynthesizedToolError(
+      `non-HTTPS blocked (got ${parsed.protocol}) — synthesized tool calls require HTTPS`,
+      { code: "synth.url_blocked", context: { rawUrl, reason: "non_https" }, userFacing: true },
+    );
   }
   const hostname = parsed.hostname;
   // Block IP literals — hostname must be DNS-resolvable
   if (/^[0-9.]+$/.test(hostname) || hostname.includes(":")) {
-    throw new Error(`IP literal hostname blocked: ${hostname}`);
+    throw new SynthesizedToolError(`IP literal hostname blocked: ${hostname}`, {
+      code: "synth.url_blocked",
+      context: { hostname, reason: "ip_literal" },
+      userFacing: true,
+    });
   }
   if (!ALLOW_PRIVATE && isPrivateHostname(hostname)) {
-    throw new Error(`private/internal hostname blocked: ${hostname}`);
+    throw new SynthesizedToolError(`private/internal hostname blocked: ${hostname}`, {
+      code: "synth.url_blocked",
+      context: { hostname, reason: "private_hostname" },
+      userFacing: true,
+    });
   }
   const { address } = await lookup(hostname);
   if (!ALLOW_PRIVATE && isPrivateIp(address)) {
-    throw new Error(`private/link-local address blocked: ${hostname} → ${address}`);
+    throw new SynthesizedToolError(
+      `private/link-local address blocked: ${hostname} → ${address}`,
+      {
+        code: "synth.url_blocked",
+        context: { hostname, address, reason: "private_resolution" },
+        userFacing: true,
+      },
+    );
   }
   return { url: parsed, resolvedIp: address, hostname };
 }
@@ -349,6 +375,137 @@ function diagnoseAuthError(args: {
   };
 }
 
+// ── OAuth refresh-token rotation (Track 0.7) ───────────────────
+//
+// When a synthesized OAuth call returns 401 and the credential has both a
+// refreshToken and a tokenUrl (set by /oauth/synthesized/initiate or by the
+// built-in OAuth flow), rotate transparently and let the caller retry once.
+// Returns the refreshed credential data on success, null on any failure
+// (token expired beyond refresh, network error, missing fields).
+
+interface RefreshResult {
+  data: Record<string, string>;
+}
+
+async function tryRefreshOAuthToken(
+  credId: string,
+  credName: string,
+  data: Record<string, string>,
+): Promise<RefreshResult | null> {
+  const refreshToken = data.refreshToken;
+  const clientId = data.clientId;
+  if (!refreshToken || !clientId) return null;
+
+  // Two paths: synthesized OAuth (tokenUrl persisted on the cred itself) or
+  // built-in OAuth (look up the static provider config + setup credential
+  // for the client_secret).
+  let providerConfig: OAuthProviderConfig | null = null;
+  let clientSecret: string | undefined = data.clientSecret;
+  if (data.tokenUrl) {
+    providerConfig = {
+      id: data.provider ?? "synthesized",
+      name: credName,
+      authUrl: data.authUrl ?? "",
+      tokenUrl: data.tokenUrl,
+      scopes: data.scopes ? data.scopes.split(/\s+/).filter(Boolean) : [],
+    };
+  } else if (data.provider) {
+    const builtin = getDirectOAuthProvider(data.provider);
+    if (builtin) {
+      providerConfig = builtin;
+      try {
+        const { getClientSecretForProvider } = await import("../routes/oauth.ts");
+        clientSecret = clientSecret ?? getClientSecretForProvider(data.provider);
+      } catch { /* best-effort */ }
+    }
+  }
+  if (!providerConfig || !providerConfig.tokenUrl) return null;
+
+  try {
+    const tokens = await refreshAccessToken(providerConfig, refreshToken, clientId, clientSecret);
+    const updated: Record<string, string> = {
+      ...data,
+      accessToken: tokens.accessToken,
+    };
+    if (tokens.refreshToken) updated.refreshToken = tokens.refreshToken;
+    if (tokens.expiresAt) updated.expiresAt = tokens.expiresAt;
+    if (tokens.scope) updated.scope = tokens.scope;
+    updateCredential(credId, credName, updated);
+    return { data: updated };
+  } catch (err) {
+    console.warn("[synthesized-caller] OAuth refresh failed:", err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+// ── Audit logging for mutating calls (Track 0.11) ──────────────
+//
+// Whenever a non-GET synthesized call returns 2xx we record one entry in
+// activity_log so the user can see — after the fact — what their AI changed
+// in third-party services on their behalf. This is best-effort: any failure
+// here is swallowed so the actual tool result is still returned to the user.
+
+const MAX_AUDIT_BODY_PREVIEW = 2_000;
+
+function previewForAudit(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value === "string") {
+    return value.length > MAX_AUDIT_BODY_PREVIEW
+      ? value.slice(0, MAX_AUDIT_BODY_PREVIEW) + "…"
+      : value;
+  }
+  try {
+    const json = JSON.stringify(value, null, 2);
+    return json.length > MAX_AUDIT_BODY_PREVIEW
+      ? json.slice(0, MAX_AUDIT_BODY_PREVIEW) + "…"
+      : json;
+  } catch {
+    return null;
+  }
+}
+
+function recordSynthesizedMutationAudit(args: {
+  tool: Tool;
+  endpoint: SynthesizedEndpoint;
+  resolvedUrl: string;
+  pathParams: Record<string, string | number>;
+  queryParams: Record<string, string | number | boolean>;
+  body: unknown;
+  responseStatus: number;
+  responseBody: unknown;
+  durationMs: number;
+}): void {
+  try {
+    const lines: string[] = [];
+    lines.push(`${args.endpoint.method} ${args.resolvedUrl}`);
+    lines.push(`status: ${args.responseStatus} · duration: ${args.durationMs}ms`);
+    if (Object.keys(args.pathParams).length > 0) {
+      lines.push(`path params: ${JSON.stringify(args.pathParams)}`);
+    }
+    if (Object.keys(args.queryParams).length > 0) {
+      lines.push(`query: ${JSON.stringify(args.queryParams)}`);
+    }
+    const bodyPreview = previewForAudit(args.body);
+    if (bodyPreview) {
+      lines.push(`request body:\n${bodyPreview}`);
+    }
+    const respPreview = previewForAudit(args.responseBody);
+    if (respPreview) {
+      lines.push(`response:\n${respPreview}`);
+    }
+    insertActivity({
+      source: "synthesized-write",
+      title: `${args.tool.metadata.name} · ${args.endpoint.name}`,
+      content: lines.join("\n"),
+    });
+  } catch (err) {
+    console.warn(
+      "[synthesized-caller] audit log insert failed:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
 // ── Main entry ─────────────────────────────────────────────────
 
 function resolveTimeoutMs(tool: Tool): number {
@@ -484,6 +641,9 @@ export async function callSynthesizedEndpoint(
       path: endpoint.path,
       resolvedUrl: target.url.toString(),
       argsPreview,
+      pathParams: Object.keys(pathParams).length > 0 ? pathParams : undefined,
+      queryParams: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+      body: bodyValue,
       verified: tool.synthesized.verified,
       source: tool.synthesized.source,
     });
@@ -559,6 +719,97 @@ export async function callSynthesizedEndpoint(
       }
     : parsed;
 
+  // Track 0.7: transparent OAuth refresh on 401 — applies to both bearer
+  // and api-key-header (some providers carry the access token in a custom
+  // header rather than Authorization). One retry max, only if a refresh
+  // token is present and the refresh exchange succeeds.
+  if (response.status === 401 && cred.data.refreshToken) {
+    const refreshed = await tryRefreshOAuthToken(credId, cred.cred.name, cred.data);
+    if (refreshed) {
+      // Rebuild headers with the new access token and re-fire the request
+      // against the same already-resolved target (no second DNS round-trip,
+      // so SSRF gates remain enforced from the original lookup).
+      const retryHeaders: Record<string, string> = {
+        "Accept": "application/json",
+      };
+      if (bodyValue !== undefined) retryHeaders["Content-Type"] = "application/json";
+      if (connection.headers) {
+        for (const [k, v] of Object.entries(connection.headers)) {
+          retryHeaders[stripCrlf(k)] = stripCrlf(v);
+        }
+      }
+      applyAuth(retryHeaders, target.url, connection.auth, refreshed.data);
+
+      try {
+        response = await pinnedHttpsRequest({
+          target,
+          method: endpoint.method,
+          headers: retryHeaders,
+          body: bodyValue !== undefined ? Buffer.from(JSON.stringify(bodyValue), "utf-8") : undefined,
+          timeoutMs,
+          maxBytes: MAX_RESPONSE_BYTES,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        recordFailure(context.sessionId, tool.id, endpoint.name);
+        return { ok: false, error: `network error after token refresh: ${msg}`, durationMs: Date.now() - started };
+      }
+
+      const refreshedRawText = response.body.toString("utf-8");
+      const refreshedTruncated = response.truncated;
+      const refreshedSize = response.size;
+      const refreshedContentType = response.headers["content-type"] ?? "";
+      let refreshedParsed: unknown;
+      if (refreshedContentType.includes("application/json")) {
+        try { refreshedParsed = JSON.parse(refreshedRawText); } catch { refreshedParsed = refreshedRawText; }
+      } else {
+        refreshedParsed = refreshedRawText;
+      }
+      const refreshedFinalBody = refreshedTruncated
+        ? { truncated: true as const, preview: refreshedRawText.slice(0, TRUNCATION_PREVIEW_BYTES), size: refreshedSize }
+        : refreshedParsed;
+
+      logError("mcp_crash" as const, "", {
+        kind: "synthesized_call",
+        callId,
+        toolId: tool.id,
+        endpoint: endpoint.name,
+        method: endpoint.method,
+        host: target.hostname,
+        status: response.status,
+        durationMs: Date.now() - started,
+        refreshed: true,
+      });
+
+      if (response.status >= 200 && response.status < 300) {
+        recordSuccess(context.sessionId, tool.id, endpoint.name);
+        if (endpoint.method !== "GET") {
+          recordSynthesizedMutationAudit({
+            tool,
+            endpoint,
+            resolvedUrl: target.url.toString(),
+            pathParams,
+            queryParams,
+            body: bodyValue,
+            responseStatus: response.status,
+            responseBody: refreshedFinalBody,
+            durationMs: Date.now() - started,
+          });
+        }
+        return {
+          ok: true,
+          status: response.status,
+          body: refreshedFinalBody,
+          truncated: refreshedTruncated,
+          size: refreshedSize,
+          durationMs: Date.now() - started,
+        };
+      }
+      // Refresh succeeded but the retry still failed — fall through to the
+      // standard error pipeline so the user gets a real diagnosis.
+    }
+  }
+
   if (response.status === 401 || response.status === 403 || response.status === 429) {
     recordFailure(context.sessionId, tool.id, endpoint.name);
     const diagnosis = diagnoseAuthError({
@@ -588,12 +839,144 @@ export async function callSynthesizedEndpoint(
   }
 
   recordSuccess(context.sessionId, tool.id, endpoint.name);
+  if (endpoint.method !== "GET") {
+    recordSynthesizedMutationAudit({
+      tool,
+      endpoint,
+      resolvedUrl: target.url.toString(),
+      pathParams,
+      queryParams,
+      body: bodyValue,
+      responseStatus: response.status,
+      responseBody: finalBody,
+      durationMs: Date.now() - started,
+    });
+  }
   return {
     ok: true,
     status: response.status,
     body: finalBody,
     truncated,
     size,
+    durationMs: Date.now() - started,
+  };
+}
+
+// ── Generic credential probe (Track 0.3) ───────────────────────
+
+export interface ProbeResult {
+  ok: boolean;
+  status?: number;
+  /** Resolved URL we actually called (helps diagnose typos in baseUrl). */
+  probedUrl?: string;
+  /** Short body preview when failing. */
+  bodyPreview?: string;
+  error?: string;
+  durationMs: number;
+}
+
+/**
+ * Probes a service with a candidate ConnectionConfig + credential data, before
+ * the credential is saved. Useful as a pre-save sanity check so users find out
+ * about wrong baseUrls / auth-scheme mismatches immediately rather than minutes
+ * later when the AI tries to use the credential.
+ *
+ * Strategy: a single GET against `probePath` (or `/` if omitted) on baseUrl, with
+ * full SSRF gates and the same auth pipeline as live calls. Any 2xx/3xx is a
+ * pass; 401/403 is a fail with the diagnosis carried in the body preview.
+ *
+ * Note: many APIs serve a 404 at root but a 200 at e.g. `/v1/me`. Callers
+ * should pass a `probePath` when known. Without one, a 404 is treated as
+ * "host reachable but path unknown" and reported as ambiguous — not a hard
+ * failure — because the credential may still be valid for actual endpoints.
+ */
+export async function probeCredentialConfig(args: {
+  connection: ConnectionConfig;
+  data: Record<string, string>;
+  probePath?: string;
+  timeoutMs?: number;
+}): Promise<ProbeResult> {
+  const started = Date.now();
+  const { connection, data, probePath } = args;
+  const timeoutMs = Math.min(args.timeoutMs ?? 15_000, MAX_TIMEOUT_MS);
+
+  if (!connection.baseUrl) {
+    return { ok: false, error: "connectionConfig.baseUrl is required for probe", durationMs: 0 };
+  }
+
+  const path = probePath && probePath.trim() ? probePath.trim() : "/";
+  let target: ResolvedTarget;
+  try {
+    const urlStr = buildUrl(connection.baseUrl, path, {}, {});
+    target = await resolveSafeSynthesizedTarget(urlStr);
+  } catch (err) {
+    return {
+      ok: false,
+      error: `URL safety check failed: ${err instanceof Error ? err.message : String(err)}`,
+      durationMs: Date.now() - started,
+    };
+  }
+
+  const headersObj: Record<string, string> = { Accept: "application/json" };
+  if (connection.headers) {
+    for (const [k, v] of Object.entries(connection.headers)) {
+      headersObj[stripCrlf(k)] = stripCrlf(v);
+    }
+  }
+  applyAuth(headersObj, target.url, connection.auth, data);
+
+  let response: PinnedResponse;
+  try {
+    response = await pinnedHttpsRequest({
+      target,
+      method: "GET",
+      headers: headersObj,
+      timeoutMs,
+      maxBytes: 64 * 1024,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      probedUrl: target.url.toString(),
+      error: `network error: ${msg}`,
+      durationMs: Date.now() - started,
+    };
+  }
+
+  const bodyPreview = response.body.toString("utf-8").slice(0, 500);
+  const status = response.status;
+  const probedUrl = target.url.toString();
+
+  if (status >= 200 && status < 400) {
+    return { ok: true, status, probedUrl, durationMs: Date.now() - started };
+  }
+  // 404 with no probePath: ambiguous — the host responded, the credential may still be valid.
+  if (status === 404 && !probePath) {
+    return {
+      ok: true,
+      status,
+      probedUrl,
+      bodyPreview: "host reachable, root path returned 404 — credential not validated, but baseUrl works",
+      durationMs: Date.now() - started,
+    };
+  }
+  if (status === 401 || status === 403) {
+    return {
+      ok: false,
+      status,
+      probedUrl,
+      bodyPreview,
+      error: `auth rejected (${status}) — check the credential value and auth scheme`,
+      durationMs: Date.now() - started,
+    };
+  }
+  return {
+    ok: false,
+    status,
+    probedUrl,
+    bodyPreview,
+    error: `HTTP ${status} ${response.statusText}`,
     durationMs: Date.now() - started,
   };
 }

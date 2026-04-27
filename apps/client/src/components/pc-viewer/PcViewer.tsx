@@ -1,14 +1,14 @@
 import { useEffect, useRef } from "react";
-import { usePcStore } from "../../stores/pc-store";
+import { useSessionStore } from "../../stores/session-store";
 import { PcConnectionPanel } from "./PcConnectionPanel";
 
 export function PcViewer() {
-  const { agents, activeAgentId, latestFrame, latestFrameMime, viewerOpen, setViewerOpen } = usePcStore();
+  const { agents, activeAgentId, latestFrame, latestFrameMime, viewerOpen, setViewerOpen } = useSessionStore();
   const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
-    usePcStore.getState().fetchAgents();
-    usePcStore.getState().fetchConfig();
+    useSessionStore.getState().fetchAgents();
+    useSessionStore.getState().fetchConfig();
   }, []);
 
   useEffect(() => {

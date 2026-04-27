@@ -12,16 +12,9 @@ import type {
   MemoryRetrievalTrace,
   TokenBudgetInfo,
 } from "@chvor/shared";
-import { useScheduleStore } from "./schedule-store";
-import { useWebhookStore } from "./webhook-store";
-import { useVoiceStore } from "./voice-store";
-import { useActivityStore } from "./activity-store";
-import { usePcStore } from "./pc-store";
-import { useWhatsAppStore } from "./whatsapp-store";
-import { useEmotionStore } from "./emotion-store";
-import { useSkillStore } from "./skill-store";
-import { useRegistryStore } from "./registry-store";
-import { useA2UIStore } from "./a2ui-store";
+import { useFeatureStore } from "./feature-store";
+import { useRuntimeStore } from "./runtime-store";
+import { useSessionStore } from "./session-store";
 import { useUIStore } from "./ui-store";
 import { SESSION_ID_KEY } from "../lib/constants";
 import { api } from "../lib/api";
@@ -122,6 +115,9 @@ interface AppState {
   pendingSynthesizedConfirms: import("@chvor/shared").SynthesizedConfirmData[];
   respondToSynthesizedConfirm: (requestId: string) => void;
 
+  pendingOAuthWizards: import("@chvor/shared").OAuthSynthesizedWizardData[];
+  respondToOAuthWizard: (requestId: string) => void;
+
   handleServerEvent: (event: GatewayServerEvent) => void;
 }
 
@@ -134,6 +130,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       updates.pendingApprovals = [];
       updates.pendingCredentialRequests = [];
       updates.pendingSynthesizedConfirms = [];
+      updates.pendingOAuthWizards = [];
     }
     set(updates);
   },
@@ -166,6 +163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pendingApprovals: [],
       pendingCredentialRequests: [],
       pendingSynthesizedConfirms: [],
+      pendingOAuthWizards: [],
       currentEmotion: null,
       messagesLoading: false,
       messageTraces: {},
@@ -330,6 +328,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
+  pendingOAuthWizards: [],
+  respondToOAuthWizard: (requestId) => {
+    set((s) => ({
+      pendingOAuthWizards: s.pendingOAuthWizards.filter((w) => w.requestId !== requestId),
+    }));
+  },
+
   handleServerEvent: (event) => {
     switch (event.type) {
       case "chat.message": {
@@ -446,7 +451,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         } else if (execEvent.type === "brain.emotion") {
           const d = execEvent.data;
           if ("emotion" in d && "intensity" in d) set({ currentEmotion: d });
-          useEmotionStore.getState().handleEmotionEvent(d);
+          useRuntimeStore.getState().handleEmotionEvent(d);
         } else if (execEvent.type === "brain.thinking") {
           set({ streamingThought: execEvent.data.thought });
         } else if (execEvent.type === "brain.decision") {
@@ -463,25 +468,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       case "schedule.created":
       case "schedule.updated":
       case "schedule.deleted":
-        useScheduleStore.getState().fetchAll();
+        useFeatureStore.getState().fetchSchedules();
         break;
       case "webhook.created":
       case "webhook.updated":
       case "webhook.deleted":
       case "webhook.received":
-        useWebhookStore.getState().fetchAll();
+        useFeatureStore.getState().fetchWebhooks();
         break;
       case "a2ui.surface":
-        useA2UIStore.getState().handleSurfaceUpdate(event.data);
+        useRuntimeStore.getState().handleSurfaceUpdate(event.data);
         break;
       case "a2ui.data":
-        useA2UIStore.getState().handleDataUpdate(event.data);
+        useRuntimeStore.getState().handleDataUpdate(event.data);
         break;
       case "a2ui.delete":
-        useA2UIStore.getState().handleDelete(event.data);
+        useRuntimeStore.getState().handleDelete(event.data);
         break;
       case "a2ui.deleteAll":
-        useA2UIStore.getState().handleDeleteAll();
+        useRuntimeStore.getState().handleDeleteAll();
         break;
       case "a2ui.toast":
         // Auto-open the preview modal so the user sees the dashboard immediately
@@ -491,16 +496,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         }).catch(() => { /* sonner not available */ });
         break;
       case "activity.new":
-        useActivityStore.getState().handleActivityEvent(event.data);
+        useRuntimeStore.getState().handleActivityEvent(event.data);
         break;
       case "pc.connected":
-        usePcStore.getState().handleAgentConnected(event.data);
+        useSessionStore.getState().handleAgentConnected(event.data);
         break;
       case "pc.disconnected":
-        usePcStore.getState().handleAgentDisconnected(event.data.id);
+        useSessionStore.getState().handleAgentDisconnected(event.data.id);
         break;
       case "pc.frame":
-        usePcStore.getState().handleFrame(event.data.agentId, event.data.screenshot, event.data.mimeType);
+        useSessionStore.getState().handleFrame(event.data.agentId, event.data.screenshot, event.data.mimeType);
         break;
       case "session.ack":
         console.log("[ws] session acknowledged:", event.data.sessionId);
@@ -535,35 +540,50 @@ export const useAppStore = create<AppState>((set, get) => ({
           pendingSynthesizedConfirms: [...s.pendingSynthesizedConfirms, event.data],
         }));
         break;
+      case "oauth.synthesized.wizard":
+        set((s) => ({
+          pendingOAuthWizards: [...s.pendingOAuthWizards, event.data],
+        }));
+        break;
       case "error":
         console.error("[gateway] error:", event.data.message);
         break;
+      case "system.shutdown": {
+        console.log("[ws] server shutdown announced:", event.data.reason);
+        // Suppress the noisy reconnect-loop UI — the next clean restart will
+        // re-open the socket on its own.
+        set({ connected: false });
+        import("sonner").then(({ toast }) => {
+          toast.info("Server is restarting…");
+        }).catch(() => { /* sonner not available */ });
+        break;
+      }
       case "chat.audio": {
-        useVoiceStore.getState().setAudioUrl(event.data.messageId, event.data.audioUrl);
+        useFeatureStore.getState().setAudioUrl(event.data.messageId, event.data.audioUrl);
         break;
       }
       case "voice.status": {
         const state = event.data.state;
         if (state === "transcribing") {
-          useVoiceStore.getState().setTalkPhase("listening");
+          useFeatureStore.getState().setTalkPhase("listening");
         } else if (state === "synthesizing") {
-          useVoiceStore.getState().setTalkPhase("thinking");
+          useFeatureStore.getState().setTalkPhase("thinking");
         } else if (state === "ready") {
-          useVoiceStore.getState().setTalkPhase("idle");
+          useFeatureStore.getState().setTalkPhase("idle");
         }
         break;
       }
       case "whatsapp.qr":
-        useWhatsAppStore.getState().setQR(event.data.qrDataUrl);
+        useFeatureStore.getState().setQR(event.data.qrDataUrl);
         break;
       case "whatsapp.status":
-        useWhatsAppStore.getState().setStatus(event.data.status, event.data.phoneNumber);
+        useFeatureStore.getState().setStatus(event.data.status, event.data.phoneNumber);
         break;
       case "skills.reloaded":
-        useSkillStore.getState().fetchSkills();
+        useFeatureStore.getState().fetchSkills();
         break;
       case "registry.updatesAvailable":
-        useRegistryStore.getState().checkUpdates();
+        useFeatureStore.getState().checkUpdates();
         break;
     }
   },

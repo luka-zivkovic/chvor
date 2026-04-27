@@ -11,9 +11,11 @@
 
 import { parse as parseYaml } from "yaml";
 import { assertSafeSynthesizedUrl } from "./synthesized-caller.ts";
+import { cacheDiscoveredSpec, loadCachedSpec } from "../db/synthesized-store.ts";
 
 const SPEC_FETCH_TIMEOUT_MS = 8000;
 const MAX_SPEC_BYTES = 2 * 1024 * 1024; // 2MB
+const MAX_REDIRECTS = 3;
 const APIS_GURU_LIST = "https://api.apis.guru/v2/list.json";
 
 const WELL_KNOWN_PATHS = [
@@ -48,9 +50,35 @@ export interface DiscoveredSpec {
 // ── Fetch helpers ──────────────────────────────────────────────
 
 async function safeFetchText(rawUrl: string): Promise<string | null> {
-  try {
-    await assertSafeSynthesizedUrl(rawUrl);
-    const res = await fetch(rawUrl, { signal: AbortSignal.timeout(SPEC_FETCH_TIMEOUT_MS) });
+  // Manual redirect loop: re-gate every hop through assertSafeSynthesizedUrl so
+  // a public host can't bounce us to 127.0.0.1, 169.254.169.254, etc. Default
+  // fetch() follows redirects silently — we opt out with `redirect: "manual"`.
+  let currentUrl = rawUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    let res: Response;
+    try {
+      await assertSafeSynthesizedUrl(currentUrl);
+      res = await fetch(currentUrl, {
+        signal: AbortSignal.timeout(SPEC_FETCH_TIMEOUT_MS),
+        redirect: "manual",
+      });
+    } catch {
+      return null;
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      if (hop >= MAX_REDIRECTS) return null;
+      const location = res.headers.get("location");
+      if (!location) return null;
+      try {
+        currentUrl = new URL(location, currentUrl).toString();
+      } catch {
+        return null;
+      }
+      try { res.body?.cancel(); } catch { /* ignore */ }
+      continue;
+    }
+
     if (!res.ok) return null;
 
     const reader = res.body?.getReader();
@@ -74,9 +102,8 @@ async function safeFetchText(rawUrl: string): Promise<string | null> {
       reader.releaseLock();
     }
     return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf-8");
-  } catch {
-    return null;
   }
+  return null;
 }
 
 function tryParseSpec(raw: string): Record<string, unknown> | null {
@@ -275,23 +302,56 @@ async function findInApisGuru(serviceName: string): Promise<string | null> {
 
 // ── Public entry ──────────────────────────────────────────────
 
+function cacheKey(serviceName: string): string {
+  return serviceName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 export async function discoverOpenApi(args: {
   serviceName: string;
   baseUrl?: string;
   hintedSpecUrl?: string;
+  /** Skip the SQLite cache (force a fresh probe). */
+  skipCache?: boolean;
 }): Promise<DiscoveredSpec | null> {
-  const { serviceName, baseUrl, hintedSpecUrl } = args;
+  const { serviceName, baseUrl, hintedSpecUrl, skipCache } = args;
+  const slug = cacheKey(serviceName);
+
+  // Cache hit short-circuits all network probes.
+  if (!skipCache && slug) {
+    try {
+      const cached = loadCachedSpec(slug);
+      if (cached) {
+        // If a hint URL is supplied and disagrees with the cached one, fall
+        // through to the live probe — the hint is more specific.
+        if (!hintedSpecUrl || hintedSpecUrl === cached.specUrl) {
+          return cached;
+        }
+      }
+    } catch (err) {
+      console.warn("[spec-fetcher] cache lookup failed:", err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  const persist = (spec: DiscoveredSpec): DiscoveredSpec => {
+    if (slug) {
+      try { cacheDiscoveredSpec(slug, spec); } catch { /* non-critical */ }
+    }
+    return spec;
+  };
 
   // Hinted URL first
   if (hintedSpecUrl) {
     const text = await safeFetchText(hintedSpecUrl);
     const doc = text ? tryParseSpec(text) : null;
     if (doc && isLikelyOpenApi(doc)) {
-      return {
+      return persist({
         specUrl: hintedSpecUrl,
         baseUrl: extractBaseUrl(doc),
         operations: normalizeOperations(doc),
-      };
+      });
     }
   }
 
@@ -304,11 +364,11 @@ export async function discoverOpenApi(args: {
       if (!r.text) continue;
       const doc = tryParseSpec(r.text);
       if (doc && isLikelyOpenApi(doc)) {
-        return {
+        return persist({
           specUrl: r.url,
           baseUrl: extractBaseUrl(doc) ?? baseUrl,
           operations: normalizeOperations(doc),
-        };
+        });
       }
     }
   }
@@ -319,11 +379,11 @@ export async function discoverOpenApi(args: {
     const text = await safeFetchText(apisGuruUrl);
     const doc = text ? tryParseSpec(text) : null;
     if (doc && isLikelyOpenApi(doc)) {
-      return {
+      return persist({
         specUrl: apisGuruUrl,
         baseUrl: extractBaseUrl(doc),
         operations: normalizeOperations(doc),
-      };
+      });
     }
   }
 

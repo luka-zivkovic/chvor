@@ -6,16 +6,11 @@ import "@xyflow/react/dist/style.css";
 import { useCanvasStore } from "../../stores/canvas-store";
 import type { ChvorNode, ChvorEdge } from "../../stores/canvas-store";
 import { useAppStore } from "../../stores/app-store";
-import { useEmotionStore } from "../../stores/emotion-store";
+import { useRuntimeStore } from "../../stores/runtime-store";
 import { useUIStore } from "../../stores/ui-store";
-import { useSkillStore } from "../../stores/skill-store";
-import { usePersonaStore } from "../../stores/persona-store";
+import { useFeatureStore } from "../../stores/feature-store";
+import { useConfigStore } from "../../stores/config-store";
 import { EMOTION_COLORS } from "@chvor/shared";
-import { useScheduleStore } from "../../stores/schedule-store";
-import { useWebhookStore } from "../../stores/webhook-store";
-import { useCredentialStore } from "../../stores/credential-store";
-import { useModelsStore } from "../../stores/models-store";
-import { useToolStore } from "../../stores/tool-store";
 import { api } from "../../lib/api";
 import type { AnyProviderDef } from "@chvor/shared";
 import { BrainNode } from "./BrainNode";
@@ -80,12 +75,20 @@ export function BrainCanvas() {
     initializeEmptyState,
     updateBrainLabel,
   } = useCanvasStore();
-  const persona = usePersonaStore((s) => s.persona);
-  const { skills, fetchSkills } = useSkillStore();
-  const { tools, fetchTools } = useToolStore();
-  const { schedules, fetchAll: fetchSchedules } = useScheduleStore();
-  const { webhooks, fetchAll: fetchWebhooks } = useWebhookStore();
-  const { credentials, providers, fetchAll: fetchCredentials } = useCredentialStore();
+  // Per-property selectors — reading the whole store object would re-render this 530 LOC
+  // canvas on every mutation in any unrelated slice (voice config, knowledge, schedules, ...).
+  const persona = useConfigStore((s) => s.persona);
+  const skills = useFeatureStore((s) => s.skills);
+  const fetchSkills = useFeatureStore((s) => s.fetchSkills);
+  const tools = useFeatureStore((s) => s.tools);
+  const fetchTools = useFeatureStore((s) => s.fetchTools);
+  const schedules = useFeatureStore((s) => s.schedules);
+  const fetchSchedules = useFeatureStore((s) => s.fetchSchedules);
+  const webhooks = useFeatureStore((s) => s.webhooks);
+  const fetchWebhooks = useFeatureStore((s) => s.fetchWebhooks);
+  const credentials = useFeatureStore((s) => s.credentials);
+  const providers = useFeatureStore((s) => s.providers);
+  const fetchCredentials = useFeatureStore((s) => s.fetchCredentials);
   const connected = useAppStore((s) => s.connected);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, nodeId: null, nodeType: null });
   const [searchDialog, setSearchDialog] = useState<{ open: boolean; initialKind: "skill" | "tool" | null }>({ open: false, initialKind: null });
@@ -211,8 +214,8 @@ export function BrainCanvas() {
   }, []);
 
   // Sync brain node with configured model (from models-store), falling back to credential auto-detect
-  const modelRoles = useModelsStore((s) => s.roles);
-  const llmProviderDefs = useCredentialStore((s) => s.llmProviders);
+  const modelRoles = useConfigStore((s) => s.roles);
+  const llmProviderDefs = useFeatureStore((s) => s.llmProviders);
 
   useEffect(() => {
     if (nodes.length === 0) return;
@@ -319,21 +322,21 @@ export function BrainCanvas() {
           ui.openNodeDetail("tool-detail", node.id);
         }
       } else if (node.type === "schedule-hub") {
-        useScheduleStore.getState().selectSchedule(null);
+        useFeatureStore.getState().selectSchedule(null);
         ui.openPanel("schedules");
       } else if (node.type === "schedule") {
         const schedData = node.data as { scheduleId?: string };
         if (schedData.scheduleId) {
-          useScheduleStore.getState().selectSchedule(schedData.scheduleId);
+          useFeatureStore.getState().selectSchedule(schedData.scheduleId);
         }
         ui.openPanel("schedules");
       } else if (node.type === "webhooks-hub") {
-        useWebhookStore.getState().selectWebhook(null);
+        useFeatureStore.getState().selectWebhook(null);
         ui.openPanel("webhooks");
       } else if (node.type === "webhook") {
         const whData = node.data as { webhookId?: string };
         if (whData.webhookId) {
-          useWebhookStore.getState().selectWebhook(whData.webhookId);
+          useFeatureStore.getState().selectWebhook(whData.webhookId);
         }
         ui.openPanel("webhooks");
       } else if (node.type === "ghost-hub") {
@@ -354,7 +357,15 @@ export function BrainCanvas() {
   }, [handleSaveLayout]);
 
   return (
-    <div className="relative h-full w-full" tabIndex={-1} style={{ background: "var(--canvas-bg)" }}>
+    <div
+      className="relative h-full w-full transition-[opacity,filter] duration-500"
+      tabIndex={-1}
+      style={{
+        background: "var(--canvas-bg)",
+        opacity: connected ? 1 : 0.55,
+        filter: connected ? "none" : "saturate(0.6)",
+      }}
+    >
       <CanvasAtmosphere />
       <ThoughtStreamCanvas rfInstance={rfInstanceRef} />
       <ReactFlow
@@ -471,10 +482,10 @@ function seededPositions(count: number, seed: number) {
 
 const EmotionTintOverlay = memo(function EmotionTintOverlay() {
   // Prefer VAD-based emotion store; fall back to legacy
-  const vadColor = useEmotionStore((s) => s.displayColor);
-  const vadIntensity = useEmotionStore((s) => s.blendIntensity);
-  const vadLabel = useEmotionStore((s) => s.displayLabel);
-  const dominance = useEmotionStore((s) => s.currentSnapshot?.vad?.dominance ?? 0);
+  const vadColor = useRuntimeStore((s) => s.displayColor);
+  const vadIntensity = useRuntimeStore((s) => s.blendIntensity);
+  const vadLabel = useRuntimeStore((s) => s.displayLabel);
+  const dominance = useRuntimeStore((s) => s.currentSnapshot?.vad?.dominance ?? 0);
 
   const currentEmotion = useAppStore((s) => s.currentEmotion);
   const legacyColor = currentEmotion ? EMOTION_COLORS[currentEmotion.emotion] : null;

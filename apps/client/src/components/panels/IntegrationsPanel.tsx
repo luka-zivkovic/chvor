@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { AddCredentialDialog } from "../credentials/AddCredentialDialog";
 import { OAuthConnectButton } from "../credentials/OAuthConnectButton";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
+import { useUIStore } from "../../stores/ui-store";
 
 export function IntegrationsPanel() {
   const {
@@ -11,15 +12,16 @@ export function IntegrationsPanel() {
     oauthProviders,
     oauthConnections,
     hasComposioKey,
-    fetchAll,
+    fetchCredentials: fetchAll,
     fetchOAuthState,
-    loading,
-    error,
-  } = useCredentialStore();
+    credentialsLoading: loading,
+    credentialsError: error,
+  } = useFeatureStore();
   const [showAdd, setShowAdd] = useState(false);
   const [addCredType, setAddCredType] = useState<string | undefined>(undefined);
   const [editingCredential, setEditingCredential] = useState<typeof credentials[0] | null>(null);
   const [composioExpanded, setComposioExpanded] = useState(false);
+  const openPanel = useUIStore((s) => s.openPanel);
 
   useEffect(() => {
     fetchAll();
@@ -67,16 +69,24 @@ export function IntegrationsPanel() {
         <span className="text-[10px] text-muted-foreground">
           {(() => { const total = integrationCredentials.length + oauthConnections.filter((c) => c.status === "active").length; return `${total} service${total !== 1 ? "s" : ""} connected`; })()}
         </span>
-        <button
-          onClick={() => { setAddCredType(undefined); setShowAdd(true); }}
-          className="flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors"
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Add
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => openPanel("integration-catalog")}
+            className="rounded-md border border-border/40 px-2.5 py-1 text-[10px] font-medium text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-colors"
+          >
+            Browse catalog
+          </button>
+          <button
+            onClick={() => { setAddCredType(undefined); setShowAdd(true); }}
+            className="flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Add
+          </button>
+        </div>
       </div>
 
       {/* Connected integrations */}

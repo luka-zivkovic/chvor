@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
-import { usePersonaStore } from "@/stores/persona-store";
+import { useConfigStore } from "@/stores/config-store";
 import { PERSONALITY_PRESETS } from "@/lib/personality-presets";
 import type { PersonalityTag } from "@/lib/personality-presets";
 import type { TemplateManifest } from "@chvor/shared";
@@ -24,7 +24,7 @@ interface Props {
 }
 
 export function OnboardingExperience({ onComplete }: Props) {
-  const { updatePersona } = usePersonaStore();
+  const { updatePersona } = useConfigStore();
 
   // Phase state — now tracks PhaseId instead of raw index
   const [currentPhase, setCurrentPhase] = useState<PhaseId>("intro");

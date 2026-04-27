@@ -10,7 +10,7 @@ import type {
   EdgeChange,
 } from "@xyflow/react";
 import type { Skill, Tool, Schedule, WebhookSubscription, CredentialSummary } from "@chvor/shared";
-import { computeOrbitalPositions, OFFSETS, INNER_RADIUS, HUB_SLOT_ANGLE } from "../hooks/use-orbital-layout";
+import { computeOrbitalPositions, OFFSETS, INNER_RADIUS, HUB_SLOT_ANGLE } from "../lib/orbital-geometry";
 
 export const BRAIN_NODE_ID = "brain-0";
 

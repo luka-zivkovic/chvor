@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CredentialSummary } from "@chvor/shared";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { api } from "../../lib/api";
 import { StatusBadge } from "./StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ function getAccentBorder(status?: string): string {
 }
 
 export function CredentialCard({ credential, onEdit }: Props) {
-  const { removeCredential, updateCredential } = useCredentialStore();
+  const { removeCredential, updateCredential } = useFeatureStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [testing, setTesting] = useState(false);
 

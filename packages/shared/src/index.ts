@@ -31,6 +31,7 @@ export * from "./types/action-event.js";
 
 // Lib
 export * from "./lib/validate-skill.js";
+export * from "./lib/a2ui-action.js";
 
 // Constants
 export * from "./constants/categories.js";

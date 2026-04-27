@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useWhatsAppStore } from "../../stores/whatsapp-store";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { api } from "../../lib/api";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
@@ -11,8 +10,8 @@ interface Props {
 
 export function WhatsAppPairingDialog({ onClose }: Props) {
   const { status, phoneNumber, qrDataUrl, connect, disconnect, fetchStatus } =
-    useWhatsAppStore();
-  const { addCredential } = useCredentialStore();
+    useFeatureStore();
+  const { addCredential } = useFeatureStore();
   const credCreated = useRef(false);
 
   useEffect(() => {

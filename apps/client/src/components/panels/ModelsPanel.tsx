@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { toast } from "sonner";
-import { useModelsStore } from "../../stores/models-store";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useConfigStore } from "../../stores/config-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { useUIStore } from "../../stores/ui-store";
 import { api } from "../../lib/api";
 import { cn } from "@/lib/utils";
@@ -35,7 +35,7 @@ function useDynamicModels() {
   const [loading, setLoading] = useState<string | null>(null);
   const [, forceUpdate] = useState(0);
 
-  const credentials = useCredentialStore((s) => s.credentials);
+  const credentials = useFeatureStore((s) => s.credentials);
   const credVersionRef = useRef(credentials);
   if (credVersionRef.current !== credentials) {
     credVersionRef.current = credentials;
@@ -80,7 +80,7 @@ function InlineCredentialForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
-  const { addCredential, updateCredential } = useCredentialStore();
+  const { addCredential, updateCredential } = useFeatureStore();
   const isEdit = !!editCredential;
 
   const [fields, setFields] = useState<Record<string, string>>(() => {
@@ -468,8 +468,8 @@ function ModelDropdown({
 /* ─── Fallback List ─── */
 
 function FallbackList({ role }: { role: ModelRole }) {
-  const { fallbacks, setFallbacks } = useModelsStore();
-  const { credentials, llmProviders } = useCredentialStore();
+  const { fallbacks, setFallbacks } = useConfigStore();
+  const { credentials, llmProviders } = useFeatureStore();
   const [showAdd, setShowAdd] = useState(false);
   const [addProvider, setAddProvider] = useState<LLMProviderDef | null>(null);
   const [addModel, setAddModel] = useState("");
@@ -675,8 +675,8 @@ function RoleSelector({
   label: string;
   description: string;
 }) {
-  const { roles, defaults, setRole } = useModelsStore();
-  const { credentials, llmProviders, fetchAll } = useCredentialStore();
+  const { roles, defaults, setRole } = useConfigStore();
+  const { credentials, llmProviders, fetchCredentials: fetchAll } = useFeatureStore();
 
   const config = roles[role];
   const effectiveConfig = config ?? defaults[role] ?? null;
@@ -890,8 +890,8 @@ interface EmbeddingHealth {
 }
 
 function EmbeddingsSection() {
-  const { embedding, setEmbedding, reembedStatus, triggerReembed, pollReembedStatus } = useModelsStore();
-  const { credentials, embeddingProviders } = useCredentialStore();
+  const { embedding, setEmbedding, reembedStatus, triggerReembed, pollReembedStatus } = useConfigStore();
+  const { credentials, embeddingProviders } = useFeatureStore();
 
   const [showWarning, setShowWarning] = useState(false);
   const [pendingProvider, setPendingProvider] = useState<{ providerId: string; model: string } | null>(null);
@@ -1166,14 +1166,14 @@ function EmbeddingsSection() {
 /* ─── Main Panel ─── */
 
 export function ModelsPanel() {
-  const { fetchConfig, loading } = useModelsStore();
-  const { fetchAll } = useCredentialStore();
+  const { fetchModelsConfig, modelsLoading: loading } = useConfigStore();
+  const { fetchCredentials: fetchAll } = useFeatureStore();
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
-    fetchConfig();
+    fetchModelsConfig();
     fetchAll();
-  }, [fetchConfig, fetchAll]);
+  }, [fetchModelsConfig, fetchAll]);
 
   if (loading) {
     return <p className="text-xs text-muted-foreground">Loading...</p>;

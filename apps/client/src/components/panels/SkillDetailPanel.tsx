@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useCanvasStore } from "../../stores/canvas-store";
-import { useSkillStore } from "../../stores/skill-store";
-import { useRegistryStore } from "../../stores/registry-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { useUIStore } from "../../stores/ui-store";
 import { api } from "../../lib/api";
 import { Button } from "@/components/ui/button";
@@ -36,7 +35,7 @@ function statusDotClass(status: string): string {
 export function SkillDetailPanel() {
   const detailNodeId = useUIStore((s) => s.detailNodeId);
   const nodes = useCanvasStore((s) => s.nodes);
-  const { skills, fetchSkills } = useSkillStore();
+  const { skills, fetchSkills } = useFeatureStore();
   const [expanded, setExpanded] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -410,8 +409,8 @@ function SkillConfigSection({ skillId }: { skillId: string }) {
 }
 
 function RegistryActionsSection({ skillId }: { skillId: string }) {
-  const { availableUpdates, applyUpdate, checkUpdates } = useRegistryStore();
-  const { fetchSkills } = useSkillStore();
+  const { availableUpdates, applyUpdate, checkUpdates } = useFeatureStore();
+  const { fetchSkills } = useFeatureStore();
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {

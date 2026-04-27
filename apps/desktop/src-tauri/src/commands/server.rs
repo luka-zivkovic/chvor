@@ -297,17 +297,61 @@ pub async fn stop_server(state: State<'_, ServerState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Kill a server process, attempting graceful shutdown first.
+/// Best-effort HTTP graceful shutdown via the server's localhost-only admin
+/// endpoint. Returns `true` if the request succeeded — does NOT wait for the
+/// process to actually exit; callers should poll `is_process_alive`.
+fn request_http_shutdown(port: &str, token: Option<&str>) -> bool {
+    let url = format!("http://127.0.0.1:{}/api/admin/shutdown", port);
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let mut req = client.post(&url);
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {}", t));
+    }
+    match req.send() {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+/// Stop the server process. Tries an HTTP graceful shutdown first (works on
+/// Windows where signal delivery is unreliable), then OS-level signals, then
+/// finally a hard kill. Total worst-case: ~6 seconds.
 pub fn kill_server_process(pid: u32) {
+    // Best-effort: ask the server to shut itself down cleanly first. The
+    // config + state aren't reachable from this fn's signature, so fall back
+    // to a port-file probe — the desktop wrapper writes config.port and the
+    // server boots on it, so reading the config from disk is reliable here.
+    let config = read_config(None);
+    let token = config.token.as_deref();
+    let asked = request_http_shutdown(&config.port, token);
+
+    if asked {
+        // Give the server up to 4s to drain on its own (it has an 8s internal
+        // failsafe but typical clean exit is sub-second).
+        for _ in 0..8 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if !is_process_alive(pid) {
+                return;
+            }
+        }
+    }
+
     #[cfg(target_os = "windows")]
     {
-        // First try graceful shutdown (without /F)
+        // First try graceful shutdown (without /F) — only effective for GUI apps,
+        // but harmless for headless processes.
         let _ = silent_command("taskkill")
             .args(["/PID", &pid.to_string(), "/T"])
             .output();
 
-        // Wait up to 5 seconds for graceful exit
-        for _ in 0..10 {
+        // Wait up to 3 seconds for graceful exit
+        for _ in 0..6 {
             std::thread::sleep(std::time::Duration::from_millis(500));
             if !is_process_alive(pid) {
                 return;
@@ -324,8 +368,8 @@ pub fn kill_server_process(pid: u32) {
         unsafe {
             libc::kill(pid as i32, libc::SIGTERM);
         }
-        // Wait up to 5 seconds for graceful exit, then SIGKILL
-        for _ in 0..10 {
+        // Wait up to 3 seconds for graceful exit, then SIGKILL
+        for _ in 0..6 {
             std::thread::sleep(std::time::Duration::from_millis(500));
             if !is_process_alive(pid) {
                 return;

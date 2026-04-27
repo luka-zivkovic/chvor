@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useEmotionStore } from "../../stores/emotion-store";
+import { useRuntimeStore } from "../../stores/runtime-store";
 import { EmotionSparkline } from "../canvas/EmotionSparkline";
 import { getEmotionDisplayColor } from "../../lib/emotion-colors";
 import type { EmotionSnapshot } from "@chvor/shared";
@@ -12,9 +12,9 @@ interface PatternData {
 }
 
 export function EmotionHistoryPanel() {
-  const sessionHistory = useEmotionStore((s) => s.sessionHistory);
-  const currentSnapshot = useEmotionStore((s) => s.currentSnapshot);
-  const distanceFromHome = useEmotionStore((s) => s.distanceFromHome);
+  const sessionHistory = useRuntimeStore((s) => s.sessionHistory);
+  const currentSnapshot = useRuntimeStore((s) => s.currentSnapshot);
+  const distanceFromHome = useRuntimeStore((s) => s.distanceFromHome);
   const [patterns, setPatterns] = useState<PatternData | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
   const sparklineRef = useRef<HTMLDivElement>(null);
