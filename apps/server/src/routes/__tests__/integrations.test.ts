@@ -65,7 +65,7 @@ describe("GET /research", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.source).toBe("ai-research");
-    expect(mockResearch).toHaveBeenCalledWith("unknown-service");
+    expect(mockResearch).toHaveBeenCalledWith("unknown-service", { hintedSpecUrl: undefined });
   });
 
   it("caches AI research results", async () => {

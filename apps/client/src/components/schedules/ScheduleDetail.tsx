@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { ScheduleRun } from "@chvor/shared";
-import { useScheduleStore } from "../../stores/schedule-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { cronToHuman, getNextRun, formatRelativeTime } from "../../lib/cron-utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -54,7 +54,7 @@ function RunEntry({ run }: { run: ScheduleRun }) {
 
 export function ScheduleDetail() {
   const { schedules, selectedScheduleId, selectSchedule, runs, runsLoading } =
-    useScheduleStore();
+    useFeatureStore();
   const schedule = schedules.find((s) => s.id === selectedScheduleId);
 
   // Clear selection if schedule was deleted — via effect, not during render

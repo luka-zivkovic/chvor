@@ -30,12 +30,17 @@ chvor/
   apps/
     client/     # React + Vite frontend
     server/     # Hono + Node.js backend
+    desktop/    # Tauri shell that bundles client + spawns server
   packages/
-    shared/     # Shared TypeScript types
+    shared/     # Shared TypeScript types & validators
+    cli/        # Command-line interface
+    pc-agent/   # Local PC-control daemon
   data/
     bundled-skills/   # Default skills
     bundled-tools/    # Default tool definitions
 ```
+
+**Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before your first PR** — it explains the message flow, layering, persistence model, and walks through how to add a skill, channel, or native tool.
 
 ### Code quality
 

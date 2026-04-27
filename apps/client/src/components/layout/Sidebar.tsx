@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "../../stores/app-store";
 import { useUIStore } from "../../stores/ui-store";
-import { usePcStore } from "../../stores/pc-store";
+import { useSessionStore } from "../../stores/session-store";
 import type { PanelId } from "../../stores/ui-store";
 
 const NAV_ITEMS: { id: PanelId | "settings"; label: string; icon: ReactNode }[] = [
@@ -103,8 +103,8 @@ function ConnectionDot() {
 }
 
 function PcControlButton() {
-  const agents = usePcStore((s) => s.agents);
-  const setViewerOpen = usePcStore((s) => s.setViewerOpen);
+  const agents = useSessionStore((s) => s.agents);
+  const setViewerOpen = useSessionStore((s) => s.setViewerOpen);
   const hasAgents = agents.length > 0;
 
   return (

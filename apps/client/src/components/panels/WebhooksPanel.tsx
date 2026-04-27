@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useWebhookStore } from "../../stores/webhook-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,7 +36,7 @@ function formatTime(iso: string | null): string {
 }
 
 function WebhookItem({ webhook, onSelect }: { webhook: WebhookSubscription; onSelect: () => void }) {
-  const { updateWebhook } = useWebhookStore();
+  const { updateWebhook } = useFeatureStore();
   const src = SOURCE_LABELS[webhook.source] ?? SOURCE_LABELS.generic;
 
   const handleToggle = async (e: React.MouseEvent) => {
@@ -80,7 +80,7 @@ function WebhookItem({ webhook, onSelect }: { webhook: WebhookSubscription; onSe
 }
 
 function WebhookDetail() {
-  const { selectedWebhookId, selectWebhook, events, eventsLoading, eventsError, removeWebhook } = useWebhookStore();
+  const { selectedWebhookId, selectWebhook, events, eventsLoading, eventsError, removeWebhook } = useFeatureStore();
   const [webhook, setWebhook] = useState<WebhookSubscription | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -255,7 +255,7 @@ function WebhookDetail() {
 }
 
 function CreateWebhookDialog({ onClose }: { onClose: () => void }) {
-  const { addWebhook } = useWebhookStore();
+  const { addWebhook } = useFeatureStore();
   const [name, setName] = useState("");
   const [source, setSource] = useState<WebhookSource>("github");
   const [promptTemplate, setPromptTemplate] = useState(
@@ -346,7 +346,7 @@ function CreateWebhookDialog({ onClose }: { onClose: () => void }) {
 }
 
 export function WebhooksPanel() {
-  const { fetchAll, loading, error, webhooks, selectedWebhookId, selectWebhook } = useWebhookStore();
+  const { fetchWebhooks: fetchAll, webhooksLoading: loading, webhooksError: error, webhooks, selectedWebhookId, selectWebhook } = useFeatureStore();
   const [showAdd, setShowAdd] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
 

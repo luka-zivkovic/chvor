@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { useMemoryStore } from "../../stores/memory-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { MemoryList } from "../memory/MemoryList";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function MemoryPanel() {
-  const { fetchAll, clearAll, addMemory, memories, loading, error } = useMemoryStore();
+  const { fetchMemories: fetchAll, clearAll, addMemory, memories, memoriesLoading: loading, memoriesError: error } = useFeatureStore();
   const [confirmClear, setConfirmClear] = useState(false);
   const [newFact, setNewFact] = useState("");
   const [search, setSearch] = useState("");

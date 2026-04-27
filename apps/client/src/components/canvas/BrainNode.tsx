@@ -3,7 +3,7 @@ import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import type { BrainNodeData } from "../../stores/canvas-store";
 import { useAppStore } from "../../stores/app-store";
-import { useEmotionStore } from "../../stores/emotion-store";
+import { useRuntimeStore } from "../../stores/runtime-store";
 import { getBreatheDuration, getGlowSpread } from "../../lib/emotion-colors";
 import { useUIStore } from "../../stores/ui-store";
 import { withOpacity } from "@/lib/utils";
@@ -36,12 +36,12 @@ const MOOD_HUES: Record<string, string> = {
 export const BrainNode = memo(function BrainNode({ data }: NodeProps) {
   const d = data as unknown as BrainNodeData;
   const currentEmotion = useAppStore((s) => s.currentEmotion);
-  const snapshot = useEmotionStore((s) => s.currentSnapshot);
-  const displayColor = useEmotionStore((s) => s.displayColor);
-  const displayLabel = useEmotionStore((s) => s.displayLabel);
-  const secondaryLabel = useEmotionStore((s) => s.secondaryLabel);
-  const blendIntensity = useEmotionStore((s) => s.blendIntensity);
-  const isSignificantShift = useEmotionStore((s) => s.isSignificantShift);
+  const snapshot = useRuntimeStore((s) => s.currentSnapshot);
+  const displayColor = useRuntimeStore((s) => s.displayColor);
+  const displayLabel = useRuntimeStore((s) => s.displayLabel);
+  const secondaryLabel = useRuntimeStore((s) => s.secondaryLabel);
+  const blendIntensity = useRuntimeStore((s) => s.blendIntensity);
+  const isSignificantShift = useRuntimeStore((s) => s.isSignificantShift);
 
   const status = d.executionStatus;
   const isRunning = status === "running";

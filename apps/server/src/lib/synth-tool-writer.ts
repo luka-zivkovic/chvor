@@ -77,14 +77,15 @@ export function validateSpec(spec: SynthToolSpec): void {
 }
 
 /**
- * Redact any line that starts with `---` (optionally followed by whitespace/text)
- * so user-supplied notes can't close the frontmatter fence and inject YAML that
- * gets loaded on the next capability reload.
+ * Indent any line whose first non-whitespace characters are `---` so user-supplied
+ * notes can't close the frontmatter fence and inject YAML that gets loaded on the
+ * next capability reload. Single regex catches trailing-whitespace, trailing-text,
+ * and leading-whitespace variants in one pass.
  */
 function sanitizeNotes(raw: string): string {
   return raw
     .split(/\r?\n/)
-    .map((line) => (/^\s*---\s*$/.test(line) || /^---\s+/.test(line) ? `  ${line}` : line))
+    .map((line) => (/^\s*---/.test(line) ? `  ${line}` : line))
     .join("\n");
 }
 

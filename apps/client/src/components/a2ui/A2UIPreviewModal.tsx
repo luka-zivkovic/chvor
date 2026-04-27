@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useUIStore } from "../../stores/ui-store";
-import { useA2UIStore } from "../../stores/a2ui-store";
+import { useRuntimeStore } from "../../stores/runtime-store";
 import { A2UIRenderer } from "./A2UIRenderer";
 import { cn } from "@/lib/utils";
 
@@ -14,11 +14,11 @@ export function A2UIPreviewModal() {
   const close = useUIStore((s) => s.closePreviewModal);
   const openCanvas = useUIStore((s) => s.openCanvas);
 
-  const surfaceList = useA2UIStore((s) => s.surfaceList);
-  const activeSurface = useA2UIStore((s) => s.activeSurface);
-  const activeSurfaceId = useA2UIStore((s) => s.activeSurfaceId);
-  const fetchSurface = useA2UIStore((s) => s.fetchSurface);
-  const fetchSurfaces = useA2UIStore((s) => s.fetchSurfaces);
+  const surfaceList = useRuntimeStore((s) => s.surfaceList);
+  const activeSurface = useRuntimeStore((s) => s.activeSurface);
+  const activeSurfaceId = useRuntimeStore((s) => s.activeSurfaceId);
+  const fetchSurface = useRuntimeStore((s) => s.fetchSurface);
+  const fetchSurfaces = useRuntimeStore((s) => s.fetchSurfaces);
 
   // Position & size
   const [pos, setPos] = useState({ x: -1, y: -1 });
@@ -46,7 +46,7 @@ export function A2UIPreviewModal() {
   useEffect(() => {
     if (open) {
       fetchSurfaces().then(() => {
-        const { activeSurfaceId, surfaceList } = useA2UIStore.getState();
+        const { activeSurfaceId, surfaceList } = useRuntimeStore.getState();
         if (!activeSurfaceId && surfaceList.length > 0) {
           fetchSurface(surfaceList[0].id);
         }

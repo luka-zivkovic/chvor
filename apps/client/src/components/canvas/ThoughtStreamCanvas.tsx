@@ -14,7 +14,7 @@ import { useRef, useEffect, useCallback, memo } from "react";
 import type { ReactFlowInstance } from "@xyflow/react";
 import { useCanvasStore } from "../../stores/canvas-store";
 import type { ChvorNode, ChvorEdge } from "../../stores/canvas-store";
-import { useEmotionStore } from "../../stores/emotion-store";
+import { useRuntimeStore } from "../../stores/runtime-store";
 import { useThoughtStream } from "../../hooks/use-thought-stream";
 import { buildLineWidthFn } from "../../lib/thought-stream/exclusion-zones";
 import { layoutThoughtStream } from "../../lib/thought-stream/text-layout";
@@ -32,7 +32,7 @@ export const ThoughtStreamCanvas = memo(function ThoughtStreamCanvas({ rfInstanc
   const rafRef = useRef<number | null>(null);
   const { segments, isActive } = useThoughtStream();
   const nodes = useCanvasStore((s) => s.nodes);
-  const emotionColor = useEmotionStore((s) => s.displayColor);
+  const emotionColor = useRuntimeStore((s) => s.displayColor);
 
   const segmentsRef = useRef(segments);
   const nodesRef = useRef(nodes);

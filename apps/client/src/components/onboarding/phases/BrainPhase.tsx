@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
-import { useCredentialStore } from "@/stores/credential-store";
+import { useFeatureStore } from "@/stores/feature-store";
 import { api } from "@/lib/api";
 import type { LLMProviderDef } from "@chvor/shared";
 import { staggerContainer, staggerItem, phaseVariants } from "../onboarding-variants";
@@ -16,7 +16,7 @@ interface Props {
 }
 
 export function BrainPhase({ direction, onBack, onNext }: Props) {
-  const { credentials, providers, llmProviders, embeddingProviders, fetchAll: fetchCredentials } = useCredentialStore();
+  const { credentials, providers, llmProviders, embeddingProviders, fetchCredentials } = useFeatureStore();
 
   const [selectedSetup, setSelectedSetup] = useState<LLMProviderDef | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});

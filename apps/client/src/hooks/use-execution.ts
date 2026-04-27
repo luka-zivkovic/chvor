@@ -1,10 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useAppStore } from "../stores/app-store";
 import { useCanvasStore } from "../stores/canvas-store";
-import { useSkillStore } from "../stores/skill-store";
-import { useToolStore } from "../stores/tool-store";
-import { useCredentialStore } from "../stores/credential-store";
-import { usePcStore } from "../stores/pc-store";
+import { useFeatureStore } from "../stores/feature-store";
+import { useSessionStore } from "../stores/session-store";
 import type { ExecutionEvent } from "@chvor/shared";
 
 const BRAIN_NODE_ID = "brain-0";
@@ -242,14 +240,14 @@ export function useExecution() {
           break;
 
         case "pc.pipeline.layer":
-          usePcStore.getState().handlePipelineEvent(event.type, event.data);
+          useSessionStore.getState().handlePipelineEvent(event.type, event.data);
           break;
 
         case "execution.completed":
           markNodeFinal(BRAIN_NODE_ID, "completed");
-          useSkillStore.getState().fetchSkills();
-          useToolStore.getState().fetchTools();
-          useCredentialStore.getState().fetchAll();
+          useFeatureStore.getState().fetchSkills();
+          useFeatureStore.getState().fetchTools();
+          useFeatureStore.getState().fetchCredentials();
           clearTimeout(resetTimer.current);
           resetTimer.current = setTimeout(() => {
             clearAllPending();

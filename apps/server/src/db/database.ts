@@ -723,6 +723,70 @@ export function getDb(): Database.Database {
     console.log("[db] migrated to v19: connection_config column on credentials");
   }
 
+  // v20: persistent synthesized-tool session state (approval-gate.ts) so users
+  // don't lose "allow-session" approvals across server restart. Discovered specs
+  // are cached in v21 below to avoid re-scraping every boot.
+  if (currentVersion < 20) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS synthesized_session_state (
+        session_id TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        tool_id TEXT NOT NULL,
+        endpoint_name TEXT NOT NULL,
+        value TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (session_id, scope, tool_id, endpoint_name)
+      )
+    `);
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_synth_session_scope ON synthesized_session_state(session_id, scope)"
+    );
+    db.pragma("user_version = 20");
+    console.log("[db] migrated to v20: synthesized_session_state table");
+  }
+
+  if (currentVersion < 21) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS synthesized_specs (
+        service_slug TEXT PRIMARY KEY,
+        spec_url TEXT NOT NULL,
+        base_url TEXT,
+        operations TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        ttl_seconds INTEGER NOT NULL DEFAULT 86400
+      )
+    `);
+    db.pragma("user_version = 21");
+    console.log("[db] migrated to v21: synthesized_specs cache table");
+  }
+
+  // v22: deferred-intent table. When the AI asks for a credential mid-task,
+  // we record the original user prompt so we can surface a "resume?" cue once
+  // the credential is saved (esp. after server restart or session interrupt).
+  if (currentVersion < 22) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_intents (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        channel_id TEXT,
+        original_text TEXT NOT NULL,
+        waiting_for_credential_type TEXT,
+        waiting_for_credential_request_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        resolved_at TEXT
+      )
+    `);
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_pending_intents_session ON pending_intents(session_id, status)"
+    );
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_pending_intents_credtype ON pending_intents(waiting_for_credential_type, status)"
+    );
+    db.pragma("user_version = 22");
+    console.log("[db] migrated to v22: pending_intents table");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }

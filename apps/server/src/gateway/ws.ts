@@ -13,7 +13,9 @@ const VALID_CLIENT_EVENT_TYPES = new Set([
   "command.respond",
   "credential.respond",
   "synthesized.respond",
+  "oauth.synthesized.respond",
   "canvas.subscribe",
+  "heartbeat",
 ]);
 
 /** Runtime validation — ensures the event has a known type and correct data shape. */
@@ -39,19 +41,32 @@ function isValidClientEvent(event: unknown): event is GatewayClientEvent {
     case "synthesized.respond":
       return typeof d.requestId === "string" &&
         (d.decision === "allow-once" || d.decision === "allow-session" || d.decision === "deny");
+    case "oauth.synthesized.respond":
+      return typeof d.requestId === "string" && typeof d.cancelled === "boolean";
     case "canvas.subscribe":
       return typeof d.workspaceId === "string";
+    case "heartbeat":
+      return true;
     default:
       return false;
   }
 }
 
+// Server pings every HEARTBEAT_INTERVAL_MS. A client is considered stale if it
+// hasn't sent ANY message (heartbeat or otherwise) within STALE_TIMEOUT_MS, and
+// its socket is closed so it can reconnect cleanly. Mobile/sleep half-open
+// sockets are the primary motivation: TCP keepalive can take 2 hours to notice.
+const HEARTBEAT_INTERVAL_MS = 15_000;
+const STALE_TIMEOUT_MS = 60_000;
+
 export class WSManager {
   private clients = new Map<string, WSContext>();
+  private lastSeen = new Map<string, number>();
   private messageHandler: ClientMessageHandler | null = null;
   private counter = 0;
   /** Maps WS clientId (ws-N) → persistent sessionId (UUID) */
   private sessionMap = new Map<string, string>();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   onClientMessage(handler: ClientMessageHandler): void {
     this.messageHandler = handler;
@@ -60,6 +75,8 @@ export class WSManager {
   handleConnection(ws: WSContext): string {
     const clientId = `ws-${++this.counter}`;
     this.clients.set(clientId, ws);
+    this.lastSeen.set(clientId, Date.now());
+    this.startHeartbeat();
     console.log(`[ws] client connected: ${clientId} (total: ${this.clients.size})`);
     return clientId;
   }
@@ -92,6 +109,9 @@ export class WSManager {
   }
 
   handleMessage(clientId: string, data: string): void {
+    // Any message updates lastSeen — the explicit "heartbeat" event is just
+    // the lowest-cost ping the client can send.
+    this.lastSeen.set(clientId, Date.now());
     if (data.length > 32_768) {
       console.warn(`[ws] message too large from ${clientId}: ${data.length} bytes`);
       return;
@@ -102,6 +122,8 @@ export class WSManager {
         console.warn(`[ws] malformed event from ${clientId}:`, event?.type);
         return;
       }
+      // Heartbeats are pure liveness signals — don't dispatch to handlers.
+      if (event.type === "heartbeat") return;
       this.messageHandler?.(clientId, event);
     } catch (err) {
       console.error(`[ws] invalid message from ${clientId}:`, err);
@@ -111,7 +133,9 @@ export class WSManager {
   handleClose(clientId: string): void {
     this.clients.delete(clientId);
     this.sessionMap.delete(clientId);
+    this.lastSeen.delete(clientId);
     console.log(`[ws] client disconnected: ${clientId} (total: ${this.clients.size})`);
+    if (this.clients.size === 0) this.stopHeartbeat();
   }
 
   broadcast(event: GatewayServerEvent): void {
@@ -132,6 +156,62 @@ export class WSManager {
       return true;
     }
     return false;
+  }
+
+  /** Send a server→client heartbeat to every connected client and evict any
+   *  client whose lastSeen is older than the stale threshold. Idempotent.
+   */
+  private heartbeatTick(): void {
+    const now = Date.now();
+    const ping = JSON.stringify({ type: "heartbeat", data: {} });
+    for (const [id, client] of this.clients) {
+      const seen = this.lastSeen.get(id) ?? now;
+      if (now - seen > STALE_TIMEOUT_MS) {
+        console.warn(`[ws] evicting stale client ${id} (idle ${now - seen}ms)`);
+        try { client.close(1001, "stale connection"); } catch { /* ignore */ }
+        this.handleClose(id);
+        continue;
+      }
+      try {
+        client.send(ping);
+      } catch {
+        this.handleClose(id);
+      }
+    }
+  }
+
+  private startHeartbeat(): void {
+    if (this.heartbeatTimer) return;
+    this.heartbeatTimer = setInterval(() => this.heartbeatTick(), HEARTBEAT_INTERVAL_MS);
+    // Don't keep the process alive just for heartbeats.
+    if (typeof this.heartbeatTimer === "object" && this.heartbeatTimer && "unref" in this.heartbeatTimer) {
+      (this.heartbeatTimer as NodeJS.Timeout).unref?.();
+    }
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  /** Stop the heartbeat loop — called during graceful shutdown. */
+  shutdown(): void {
+    this.stopHeartbeat();
+  }
+
+  /**
+   * Close every active client with a clean WS close frame so browsers don't
+   * treat the disconnect as an error. Used during graceful shutdown.
+   */
+  closeAll(code: number = 1001, reason: string = "server shutting down"): void {
+    for (const [id, client] of this.clients) {
+      try { client.close(code, reason); } catch { /* ignore */ }
+      this.clients.delete(id);
+      this.sessionMap.delete(id);
+      this.lastSeen.delete(id);
+    }
   }
 
   /** Send event to all clients sharing a persistent session */

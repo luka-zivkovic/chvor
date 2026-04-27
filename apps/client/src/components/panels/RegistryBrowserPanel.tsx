@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
-import { useRegistryStore, type RegistryEntryWithStatus } from "../../stores/registry-store";
-import { useSkillStore } from "../../stores/skill-store";
-import { useToolStore } from "../../stores/tool-store";
-import { useScheduleStore } from "../../stores/schedule-store";
-import { useCredentialStore } from "../../stores/credential-store";
+import { useFeatureStore, type RegistryEntryWithStatus } from "../../stores/feature-store";
 import { TemplateSetupWizard } from "../templates/TemplateSetupWizard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -155,8 +151,8 @@ function EntryCard({
 export function RegistryBrowserPanel() {
   const {
     entries,
-    loading,
-    error,
+    registryLoading: loading,
+    registryError: error,
     searchQuery,
     categoryFilter,
     kindFilter,
@@ -167,11 +163,11 @@ export function RegistryBrowserPanel() {
     applyAllUpdates,
     checkUpdates,
     setKindFilter,
-  } = useRegistryStore();
-  const { fetchSkills } = useSkillStore();
-  const { fetchTools } = useToolStore();
-  const { fetchAll: fetchSchedules } = useScheduleStore();
-  const { fetchAll: fetchCredentials } = useCredentialStore();
+    fetchSkills,
+    fetchTools,
+    fetchSchedules,
+    fetchCredentials,
+  } = useFeatureStore();
 
   const [inputValue, setInputValue] = useState(searchQuery);
   const [activeTemplate, setActiveTemplate] = useState<{ id: string; manifest: TemplateManifest; includes?: string[] } | null>(null);

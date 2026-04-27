@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AddCredentialDialog } from "@/components/credentials/AddCredentialDialog";
-import { useCredentialStore } from "@/stores/credential-store";
+import { useFeatureStore } from "@/stores/feature-store";
 import type { TemplateManifest, TemplateCredentialDef } from "@chvor/shared";
 
 type Step = "overview" | "credentials" | "done";
@@ -15,7 +15,7 @@ interface Props {
 }
 
 export function TemplateSetupWizard({ template, includes, onComplete, onCancel }: Props) {
-  const { credentials, fetchAll: fetchCredentials } = useCredentialStore();
+  const { credentials, fetchCredentials } = useFeatureStore();
   const [step, setStep] = useState<Step>("overview");
   const [setupCredType, setSetupCredType] = useState<string | null>(null);
   const [activating, setActivating] = useState(false);

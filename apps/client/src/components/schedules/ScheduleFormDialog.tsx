@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import type { Schedule, Workspace, DeliveryTarget } from "@chvor/shared";
-import { useScheduleStore } from "../../stores/schedule-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { api } from "../../lib/api";
 import type { ChannelTargetDTO } from "../../lib/api";
 import { cronToHuman } from "../../lib/cron-utils";
@@ -26,7 +26,7 @@ export function ScheduleFormDialog({ onClose, schedule }: Props) {
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  const { addSchedule, updateSchedule } = useScheduleStore();
+  const { addSchedule, updateSchedule } = useFeatureStore();
   const [name, setName] = useState(schedule?.name ?? "");
   const [cronExpression, setCronExpression] = useState(
     schedule?.cronExpression ?? ""

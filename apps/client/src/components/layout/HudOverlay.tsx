@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "../../stores/app-store";
 import { useUIStore } from "../../stores/ui-store";
-import { useActivityStore } from "../../stores/activity-store";
-import { useRegistryStore } from "../../stores/registry-store";
+import { useRuntimeStore } from "../../stores/runtime-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { TokenCounter } from "./TokenCounter";
 import type { LayoutMode } from "../../stores/ui-store";
 
@@ -85,8 +85,8 @@ function ChatToggle() {
 
 export function TopBar({ layoutMode }: { layoutMode?: LayoutMode }) {
   const isExpanded = layoutMode === "canvas-expanded";
-  const unreadCount = useActivityStore((s) => s.unreadCount);
-  const fetchUnread = useActivityStore((s) => s.fetchUnread);
+  const unreadCount = useRuntimeStore((s) => s.unreadCount);
+  const fetchUnread = useRuntimeStore((s) => s.fetchUnread);
   const togglePanel = useUIStore((s) => s.togglePanel);
   const toggleMobileMenu = useUIStore((s) => s.toggleMobileMenu);
 
@@ -142,7 +142,7 @@ export function TopBar({ layoutMode }: { layoutMode?: LayoutMode }) {
         </button>
         <button
           onClick={() => {
-            const store = useRegistryStore.getState();
+            const store = useFeatureStore.getState();
             const ui = useUIStore.getState();
             store.setKindFilter("template");
             if (ui.activePanel === "registry") {

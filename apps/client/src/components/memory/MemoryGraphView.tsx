@@ -11,7 +11,7 @@ import {
   Position,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useMemoryStore } from "../../stores/memory-store";
+import { useFeatureStore } from "../../stores/feature-store";
 
 const CATEGORY_COLORS: Record<string, string> = {
   profile: "#60a5fa",
@@ -56,7 +56,7 @@ const nodeTypes = { memory: MemoryNode };
 const MAX_VISIBLE_NODES = 100;
 
 function useGraphData() {
-  const { graphNodes, graphEdges } = useMemoryStore();
+  const { graphNodes, graphEdges } = useFeatureStore();
 
   return useMemo(() => {
     if (graphNodes.length === 0) return { nodes: [], edges: [], totalCount: 0 };
@@ -107,7 +107,7 @@ function useGraphData() {
 
 /** Button shown in the sidebar to launch the full-screen graph overlay */
 export function MemoryGraphButton({ onClick }: { onClick: () => void }) {
-  const { graphNodes, graphLoading } = useMemoryStore();
+  const { graphNodes, graphLoading } = useFeatureStore();
 
   if (graphLoading) return <p className="text-xs text-muted-foreground">Loading graph...</p>;
 
@@ -153,7 +153,7 @@ export function MemoryGraphButton({ onClick }: { onClick: () => void }) {
 
 /** Full-screen overlay for the memory graph — rendered via portal to escape transform containing blocks */
 export function MemoryGraphOverlay({ onClose }: { onClose: () => void }) {
-  const { graphLoading } = useMemoryStore();
+  const { graphLoading } = useFeatureStore();
   const { nodes, edges, totalCount } = useGraphData();
 
   useEffect(() => {

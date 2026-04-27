@@ -223,7 +223,24 @@
 }
 
 /* ─── Glass morphism utilities ─── */
-.glass {
+/*
+ * Three tiers — pick by surface weight:
+ *   .glass-sm     — subtle (chips, small overlays, tooltips)
+ *   .glass / .glass-md — default (panels, top bar, FABs)
+ *   .glass-strong — heavyweight (modals, drawers, focus dialogs)
+ *
+ * `.glass` is kept as an alias of `.glass-md` so existing call sites
+ * keep working unchanged. New code should prefer the explicit tier.
+ */
+.glass-sm {
+  background: color-mix(in oklch, var(--glass-bg) 65%, transparent);
+  backdrop-filter: blur(12px) saturate(1.05);
+  -webkit-backdrop-filter: blur(12px) saturate(1.05);
+  border: 1px solid color-mix(in oklch, var(--glass-border) 60%, transparent);
+}
+
+.glass,
+.glass-md {
   background: var(--glass-bg);
   backdrop-filter: blur(20px) saturate(1.1);
   -webkit-backdrop-filter: blur(20px) saturate(1.1);

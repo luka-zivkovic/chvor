@@ -6,7 +6,7 @@
  * subtracting horizontal spans occupied by orbital nodes.
  */
 
-import { OFFSETS } from "../../hooks/use-orbital-layout";
+import { OFFSETS } from "../orbital-geometry";
 import type { ChvorNode, ChvorNodeData } from "../../stores/canvas-store";
 
 export interface Viewport {

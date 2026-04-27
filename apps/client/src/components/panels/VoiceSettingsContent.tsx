@@ -1,7 +1,7 @@
 // apps/client/src/components/panels/VoiceSettingsContent.tsx
 import { useEffect, useState } from "react";
-import { useVoiceStore } from "@/stores/voice-store";
-import type { VoiceProviderInfo, TtsMode } from "@/stores/voice-store";
+import { useFeatureStore } from "@/stores/feature-store";
+import type { VoiceProviderInfo, TtsMode } from "@/stores/feature-store";
 import { cn } from "@/lib/utils";
 
 // ── Provider Card ─────────────────────────────────────────────
@@ -133,20 +133,20 @@ export function VoiceSettingsContent({ compact }: Props) {
     models,
     fetchVoiceStatus,
     fetchModels,
-    fetchConfig,
+    fetchVoiceConfig,
     updateSTTProvider,
     updateTTSProvider,
     updateTTSMode,
     updateTTSSpeed,
     updatePiperVoice,
     startModelDownload,
-  } = useVoiceStore();
+  } = useFeatureStore();
 
   useEffect(() => {
-    fetchConfig();
+    fetchVoiceConfig();
     fetchVoiceStatus();
     fetchModels();
-  }, [fetchConfig, fetchVoiceStatus, fetchModels]);
+  }, [fetchVoiceConfig, fetchVoiceStatus, fetchModels]);
 
   const sttAlternatives = voiceStatus?.stt?.alternatives ?? [];
   const ttsProviders = voiceStatus?.tts?.providers ?? [];

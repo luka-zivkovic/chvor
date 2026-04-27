@@ -5,7 +5,7 @@ import { MediaRenderer } from "./MediaRenderer";
 import { MemoryTrace } from "./MemoryTrace";
 import { ToolTrace } from "./ToolTrace";
 import { sanitizeMessageContent } from "@/lib/chat-utils";
-import { useEmotionStore } from "@/stores/emotion-store";
+import { useRuntimeStore } from "@/stores/runtime-store";
 import { useAppStore } from "@/stores/app-store";
 
 interface Props {
@@ -112,7 +112,7 @@ export function MessageBubble({ message }: Props) {
 }
 
 function useEmotionForMessage(timestamp: string): { label: string; color: string } | null {
-  const history = useEmotionStore((s) => s.sessionHistory);
+  const history = useRuntimeStore((s) => s.sessionHistory);
   return useMemo(() => {
     if (!history.length) return null;
     const msgTime = new Date(timestamp).getTime();

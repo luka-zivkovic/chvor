@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
-import { useKnowledgeStore } from "@/stores/knowledge-store";
+import { useFeatureStore } from "@/stores/feature-store";
 import { UploadZone } from "@/components/knowledge/UploadZone";
 import { ResourceCard } from "@/components/knowledge/ResourceCard";
 
 export function KnowledgePanel() {
   const {
     resources,
-    loading,
+    knowledgeLoading: loading,
     uploading,
-    error,
-    fetchAll,
+    knowledgeError: error,
+    fetchKnowledge: fetchAll,
     uploadFile,
     ingestUrl,
     deleteResource,
-  } = useKnowledgeStore();
+  } = useFeatureStore();
 
   const [search, setSearch] = useState("");
 

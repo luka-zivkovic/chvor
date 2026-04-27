@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import type { Memory } from "@chvor/shared";
-import { useMemoryStore } from "../../stores/memory-store";
+import { useFeatureStore } from "../../stores/feature-store";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,7 +19,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export function MemoryCard({ memory }: Props) {
-  const { removeMemory, updateMemory } = useMemoryStore();
+  const { removeMemory, updateMemory } = useFeatureStore();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(memory.content);
   const [confirmDelete, setConfirmDelete] = useState(false);

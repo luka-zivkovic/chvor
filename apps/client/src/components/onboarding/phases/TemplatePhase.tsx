@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import type { TemplateManifest } from "@chvor/shared";
-import type { RegistryEntryWithStatus } from "@/stores/registry-store";
+import type { RegistryEntryWithStatus } from "@/stores/feature-store";
 import { staggerContainer, staggerItem, phaseVariants } from "../onboarding-variants";
 
 interface Props {

@@ -1,12 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
 import type { CredentialSummary, ChatType, ApiKeyInfo, ProviderField, IntegrationResolution } from "@chvor/shared";
 import { toast } from "sonner";
-import { useCredentialStore } from "../../stores/credential-store";
-import { useRetentionStore } from "../../stores/retention-store";
-import { useSessionLifecycleStore } from "../../stores/session-lifecycle-store";
-import { useAuthStore } from "../../stores/auth-store";
-import { useBackupStore } from "../../stores/backup-store";
-import { useRegistryStore, type RegistryEntryWithStatus } from "../../stores/registry-store";
+import { useFeatureStore, type RegistryEntryWithStatus } from "../../stores/feature-store";
+import { useConfigStore } from "../../stores/config-store";
+import { useSessionStore } from "../../stores/session-store";
 import { CredentialList } from "../credentials/CredentialList";
 import { AddCredentialDialog } from "../credentials/AddCredentialDialog";
 import { CredentialForm } from "../credentials/CredentialForm";
@@ -36,9 +33,15 @@ const RETENTION_OPTIONS = [
 ];
 
 export function CredentialsContent() {
-  const { fetchAll, loading, error, credentials, addCredential } = useCredentialStore();
-  const { config: retention, fetchConfig, updateConfig } = useRetentionStore();
-  const registryStore = useRegistryStore();
+  const {
+    fetchCredentials: fetchAll,
+    credentialsLoading: loading,
+    credentialsError: error,
+    credentials,
+    addCredential,
+  } = useFeatureStore();
+  const { retentionConfig: retention, fetchRetentionConfig: fetchConfig, updateRetentionConfig: updateConfig } = useConfigStore();
+  const registryStore = useFeatureStore();
   const [showAdd, setShowAdd] = useState(false);
   const [editingCredential, setEditingCredential] = useState<CredentialSummary | null>(null);
 
@@ -171,11 +174,11 @@ export function CredentialsContent() {
           className="mb-3 text-xs"
         />
 
-        {registryStore.loading && (
+        {registryStore.registryLoading && (
           <p className="text-xs text-muted-foreground">Loading registry...</p>
         )}
 
-        {!registryStore.loading && filteredRegistryTools.length > 0 && (
+        {!registryStore.registryLoading && filteredRegistryTools.length > 0 && (
           <div className="flex flex-col gap-1.5 mb-3">
             {filteredRegistryTools.map((entry) => (
               <div
@@ -211,7 +214,7 @@ export function CredentialsContent() {
           </div>
         )}
 
-        {!registryStore.loading && filteredRegistryTools.length === 0 && registrySearch.trim() && (
+        {!registryStore.registryLoading && filteredRegistryTools.length === 0 && registrySearch.trim() && (
           <p className="text-[10px] text-muted-foreground/60 mb-3">
             No registry tools found for "{registrySearch}".
           </p>
@@ -309,7 +312,7 @@ export function CredentialsContent() {
 }
 
 export function SecurityContent() {
-  const { authEnabled, authMethod, checkStatus, apiKeys, fetchApiKeys } = useAuthStore();
+  const { authEnabled, authMethod, checkStatus, apiKeys, fetchApiKeys } = useSessionStore();
   const [loading, setLoading] = useState(true);
 
   // Auth setup state
@@ -575,7 +578,7 @@ const CHAT_TYPES: { id: ChatType; label: string }[] = [
 ];
 
 export function SessionsContent() {
-  const { config, fetchConfig, updateConfig } = useSessionLifecycleStore();
+  const { sessionLifecycleConfig: config, fetchSessionLifecycleConfig: fetchConfig, updateSessionLifecycleConfig: updateConfig } = useConfigStore();
   const [triggerInput, setTriggerInput] = useState("");
 
   useEffect(() => {
@@ -788,9 +791,9 @@ const MAX_AGE_OPTIONS = [
 
 export function BackupContent() {
   const {
-    backups, config, creating, restoring, error,
-    fetchBackups, fetchConfig, updateConfig, createBackup, deleteBackup, restoreBackup,
-  } = useBackupStore();
+    backups, backupConfig: config, creating, restoring, backupError: error,
+    fetchBackups, fetchBackupConfig: fetchConfig, updateBackupConfig: updateConfig, createBackup, deleteBackup, restoreBackup,
+  } = useConfigStore();
   const [pendingRestoreFile, setPendingRestoreFile] = useState<File | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [localMaxCount, setLocalMaxCount] = useState<string>("");

@@ -11,6 +11,7 @@ import {
   removePendingFlow,
   exchangeCode,
   refreshAccessToken,
+  type OAuthProviderConfig,
 } from "../lib/oauth-engine.ts";
 import {
   initiateConnection as composioInitiate,
@@ -25,6 +26,7 @@ import {
   deleteCredential,
 } from "../db/credential-store.ts";
 import type { OAuthConnection, OAuthMethod } from "@chvor/shared";
+import { assertSafeUrl } from "../lib/url-safety.ts";
 
 const oauth = new Hono();
 
@@ -212,7 +214,9 @@ oauth.get("/callback", async (c) => {
     return c.html(callbackHtml(false, "OAuth session expired. Please try again."));
   }
 
-  const providerConfig = getDirectOAuthProvider(flow.providerId);
+  // Inline provider (synthesized-OAuth wizard) takes precedence over the
+  // built-in registry — that's how user-supplied OAuth services work.
+  const providerConfig = flow.inlineProvider ?? getDirectOAuthProvider(flow.providerId);
   if (!providerConfig) {
     removePendingFlow(state);
     return c.html(callbackHtml(false, `Unknown provider: ${flow.providerId}`));
@@ -222,8 +226,10 @@ oauth.get("/callback", async (c) => {
     const tokens = await exchangeCode(providerConfig, code, flow);
     removePendingFlow(state);
 
-    // Store tokens as a credential
-    const credType = `oauth-token-${flow.providerId}`;
+    // Store tokens as a credential. For synthesized OAuth the credentialType
+    // comes from the flow (the AI's chosen slug, e.g. "quickbooks") so the
+    // synthesized-caller can find the credential by the same key it requested.
+    const credType = flow.credentialType ?? `oauth-token-${flow.providerId}`;
     const existingCreds = listCredentials();
     const existing = existingCreds.find((cr) => cr.type === credType);
 
@@ -235,14 +241,26 @@ oauth.get("/callback", async (c) => {
     if (tokens.refreshToken) credData.refreshToken = tokens.refreshToken;
     if (tokens.expiresAt) credData.expiresAt = tokens.expiresAt;
     if (tokens.scope) credData.scope = tokens.scope;
-    // clientSecret is NOT stored here — it lives in the setup credential only
+    // For synthesized OAuth we *do* persist clientSecret + token/auth URLs so
+    // the refresh path can run without a separate setup credential.
+    if (flow.inlineProvider) {
+      if (flow.clientSecret) credData.clientSecret = flow.clientSecret;
+      credData.tokenUrl = flow.inlineProvider.tokenUrl;
+      credData.authUrl = flow.inlineProvider.authUrl;
+      if (flow.inlineProvider.scopes.length) {
+        credData.scopes = flow.inlineProvider.scopes.join(" ");
+      }
+    }
+
+    const friendlyName = flow.inlineProviderName
+      ?? OAUTH_PROVIDERS.find((p) => p.id === flow.providerId)?.name
+      ?? flow.providerId;
 
     if (existing) {
       updateCredential(existing.id, existing.name, credData);
     } else {
-      const provDef = OAUTH_PROVIDERS.find((p) => p.id === flow.providerId);
       createCredential(
-        `${provDef?.name ?? flow.providerId} (OAuth)`,
+        `${friendlyName} (OAuth)`,
         credType,
         credData,
       );
@@ -344,6 +362,103 @@ oauth.post("/refresh/:credentialId", async (c) => {
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
+});
+
+// ── Synthesized OAuth (user-supplied provider config) ───────────
+//
+// Track 0.6: when the AI's research_integration tool reports
+// authScheme=oauth2 for a service that isn't in OAUTH_PROVIDERS, the client
+// runs a 3-step wizard. These endpoints back the wizard.
+
+interface SynthesizedOAuthInitiate {
+  credentialType: string;
+  providerName: string;
+  clientId: string;
+  clientSecret?: string;
+  authUrl: string;
+  tokenUrl: string;
+  scopes: string[];
+  extraAuthParams?: Record<string, string>;
+  extraTokenParams?: Record<string, string>;
+}
+
+/** GET /redirect-url — surfaced in the wizard so the user knows what to whitelist. */
+oauth.get("/synthesized/redirect-url", (c) => {
+  return c.json({ redirectUrl: CALLBACK_URL });
+});
+
+/**
+ * POST /synthesized/initiate — start an OAuth flow for a user-supplied provider.
+ * Returns the URL to open in a popup; the existing /callback handles the rest.
+ */
+oauth.post("/synthesized/initiate", async (c) => {
+  let body: SynthesizedOAuthInitiate;
+  try {
+    body = await c.req.json<SynthesizedOAuthInitiate>();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const credentialType = String(body.credentialType ?? "").trim();
+  const providerName = String(body.providerName ?? "").trim();
+  const clientId = String(body.clientId ?? "").trim();
+  const clientSecret = body.clientSecret ? String(body.clientSecret).trim() : undefined;
+  const authUrl = String(body.authUrl ?? "").trim();
+  const tokenUrl = String(body.tokenUrl ?? "").trim();
+  const scopes = Array.isArray(body.scopes)
+    ? body.scopes.map((s) => String(s).trim()).filter(Boolean)
+    : [];
+
+  if (!credentialType || !/^[a-z0-9][a-z0-9-]*$/.test(credentialType)) {
+    return c.json({ error: "credentialType must be lowercase alphanumeric/hyphen (e.g. 'quickbooks')" }, 400);
+  }
+  if (!providerName) return c.json({ error: "providerName is required" }, 400);
+  if (!clientId) return c.json({ error: "clientId is required" }, 400);
+  if (!authUrl) return c.json({ error: "authUrl is required" }, 400);
+  if (!tokenUrl) return c.json({ error: "tokenUrl is required" }, 400);
+
+  // Reject SSRF / non-HTTP(S) URLs early.
+  try {
+    assertSafeUrl(authUrl, "authUrl");
+    assertSafeUrl(tokenUrl, "tokenUrl");
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+  }
+
+  // Force HTTPS for the auth + token endpoints — OAuth over plain HTTP is
+  // a credential leak in transit.
+  if (!authUrl.startsWith("https://")) return c.json({ error: "authUrl must be https://" }, 400);
+  if (!tokenUrl.startsWith("https://")) return c.json({ error: "tokenUrl must be https://" }, 400);
+
+  const inlineProvider: OAuthProviderConfig = {
+    id: credentialType,
+    name: providerName,
+    authUrl,
+    tokenUrl,
+    scopes,
+    extraAuthParams: body.extraAuthParams,
+    extraTokenParams: body.extraTokenParams,
+    requiresSecret: !!clientSecret,
+  };
+
+  const { authUrl: redirectUrl, state } = generateAuthUrl(
+    inlineProvider,
+    clientId,
+    clientSecret,
+    CALLBACK_URL,
+    {
+      inlineProvider,
+      inlineProviderName: providerName,
+      credentialType,
+    },
+  );
+
+  return c.json({
+    redirectUrl,
+    connectionId: state,
+    method: "synthesized" as const,
+    redirectUriUsed: CALLBACK_URL,
+  });
 });
 
 // ── Callback HTML ────────────────────────────────────────────────

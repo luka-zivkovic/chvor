@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type PanelId = "brain" | "persona" | "memory" | "knowledge" | "schedules" | "webhooks" | "skills" | "skill-detail" | "tools" | "tool-detail" | "integration-detail" | "connections" | "integrations" | "conversations" | "activity" | "emotion-history" | "registry";
+export type PanelId = "brain" | "persona" | "memory" | "knowledge" | "schedules" | "webhooks" | "skills" | "skill-detail" | "tools" | "tool-detail" | "integration-detail" | "connections" | "integrations" | "integration-catalog" | "conversations" | "activity" | "emotion-history" | "registry";
 export type BrainTab = "overview" | "models" | "persona" | "memory";
 export type SettingsSection = "permissions" | "connections" | "voice" | "security" | "sessions" | "backup";
 export type LayoutMode = "default" | "canvas-expanded" | "canvas";
@@ -78,8 +78,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   openCanvas: (surfaceId?: string) => {
     set({ layoutMode: "canvas", activePanel: null });
     if (surfaceId) {
-      import("./a2ui-store").then(({ useA2UIStore }) => {
-        useA2UIStore.getState().fetchSurface(surfaceId);
+      import("./runtime-store").then(({ useRuntimeStore }) => {
+        useRuntimeStore.getState().fetchSurface(surfaceId);
       }).catch((err) => {
         console.error("[ui] failed to load a2ui-store for auto-select:", err);
       });
@@ -92,8 +92,8 @@ export const useUIStore = create<UIState>((set, get) => ({
     if (get().previewModalDismissed) return;
     set({ previewModalOpen: true });
     if (surfaceId) {
-      import("./a2ui-store").then(({ useA2UIStore }) => {
-        useA2UIStore.getState().fetchSurface(surfaceId);
+      import("./runtime-store").then(({ useRuntimeStore }) => {
+        useRuntimeStore.getState().fetchSurface(surfaceId);
       }).catch((err) => {
         console.error("[ui] failed to load a2ui-store for preview:", err);
       });

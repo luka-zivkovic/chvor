@@ -1,16 +1,16 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useAppStore } from "../stores/app-store";
-import { useSkillStore } from "../stores/skill-store";
-import { useToolStore } from "../stores/tool-store";
-import { useCredentialStore } from "../stores/credential-store";
-import { useScheduleStore } from "../stores/schedule-store";
-import { usePersonaStore } from "../stores/persona-store";
-import { useEmotionStore } from "../stores/emotion-store";
+import { useFeatureStore } from "../stores/feature-store";
+import { useConfigStore } from "../stores/config-store";
+import { useRuntimeStore } from "../stores/runtime-store";
 import type { GatewayClientEvent, GatewayServerEvent, MediaArtifact } from "@chvor/shared";
 import { SESSION_ID_KEY } from "../lib/constants";
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const MAX_RECONNECT_DELAY = 30_000;
+// Match server-side HEARTBEAT_INTERVAL_MS — the server sends pings every 15s
+// and evicts after 60s of silence, so 15s here keeps us well under the cliff.
+const HEARTBEAT_INTERVAL_MS = 15_000;
 
 function getOrCreateSessionId(): string {
   let id = localStorage.getItem(SESSION_ID_KEY);
@@ -24,9 +24,17 @@ function getOrCreateSessionId(): string {
 export function useGateway() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const heartbeatTimer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const attemptRef = useRef(0);
 
   const intentionalCloseRef = useRef(false);
+
+  const stopHeartbeat = useCallback(() => {
+    if (heartbeatTimer.current !== undefined) {
+      clearInterval(heartbeatTimer.current);
+      heartbeatTimer.current = undefined;
+    }
+  }, []);
 
   const connect = useCallback(() => {
     // Guard against duplicate connections (e.g. React StrictMode double-mount)
@@ -56,17 +64,25 @@ export function useGateway() {
       useAppStore.getState().loadSessionHistory(sessionId);
 
       // Load emotion history for this session
-      useEmotionStore.getState().loadSessionHistory(sessionId);
+      useRuntimeStore.getState().loadSessionHistory(sessionId);
 
       // Load conversations list
       useAppStore.getState().loadConversations();
 
       // Refetch all stores — covers "server started late" and "server restarted"
-      useSkillStore.getState().fetchSkills();
-      useToolStore.getState().fetchTools();
-      useCredentialStore.getState().fetchAll();
-      useScheduleStore.getState().fetchAll();
-      usePersonaStore.getState().fetchPersona();
+      useFeatureStore.getState().fetchSkills();
+      useFeatureStore.getState().fetchTools();
+      useFeatureStore.getState().fetchCredentials();
+      useFeatureStore.getState().fetchSchedules();
+      useConfigStore.getState().fetchPersona();
+
+      // Begin liveness heartbeat — server evicts at 60s of silence.
+      stopHeartbeat();
+      heartbeatTimer.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "heartbeat", data: {} }));
+        }
+      }, HEARTBEAT_INTERVAL_MS);
     };
 
     ws.onmessage = (e) => {
@@ -80,6 +96,7 @@ export function useGateway() {
 
     ws.onclose = () => {
       console.log("[ws] disconnected");
+      stopHeartbeat();
       if (intentionalCloseRef.current) return;
       useAppStore.getState().setConnected(false);
       if (attemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
@@ -96,16 +113,17 @@ export function useGateway() {
     ws.onerror = (err) => {
       console.error("[ws] error:", err);
     };
-  }, []);
+  }, [stopHeartbeat]);
 
   useEffect(() => {
     connect();
     return () => {
       clearTimeout(reconnectTimer.current);
+      stopHeartbeat();
       intentionalCloseRef.current = true;
       wsRef.current?.close();
     };
-  }, [connect]);
+  }, [connect, stopHeartbeat]);
 
   const send = useCallback((event: GatewayClientEvent) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
