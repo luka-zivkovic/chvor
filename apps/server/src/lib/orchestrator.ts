@@ -203,6 +203,9 @@ export async function executeConversation(
   // Skill-scoped tool-bag floor (Phase C): only tools the active skills' groups
   // include make it into the bag. Skills with no declarations trigger a
   // permissive scope so legacy installs keep working.
+  //
+  // Scope is computed ONCE per turn and reused on the credential-change rebuild
+  // below. Mid-turn skill toggles take effect on the *next* turn, not this one.
   const bagScope = resolveSkillBag(skills);
   const toolDefs = await buildToolDefinitions(enabledTools, bagScope);
   if (options?.excludeTools) {

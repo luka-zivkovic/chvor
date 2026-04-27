@@ -75,11 +75,13 @@ export function resolveSkillBag(skills: Skill[]): ToolBagScope {
 }
 
 /**
- * Filter MCP / synth (non-native) tools against a ToolBagScope.
- * Tools opt in by declaring `group:` in frontmatter; an undeclared tool
- * is treated as `integrations-other` (catch-all).
+ * Filter MCP / synth (non-native) tools against a ToolBagScope. Operates at the
+ * Tool level (the enclosing capability), NOT the per-endpoint level — endpoint
+ * pruning is handled later by `applyScopeToDefs` once the full def map exists.
  *
- * Permissive scope returns the input untouched.
+ * Tools opt in by declaring `group:` in frontmatter; an undeclared tool is
+ * treated as `integrations-other` (catch-all). Permissive scope returns the
+ * input untouched.
  */
 export function filterTools(allTools: Tool[], scope: ToolBagScope): Tool[] {
   if (scope.isPermissive) return allTools;
@@ -91,20 +93,12 @@ export function filterTools(allTools: Tool[], scope: ToolBagScope): Tool[] {
 
     const group: ToolGroupId = t.metadata.group ?? "integrations-other";
 
-    // Denied-list: any required-tool entry pointing at any endpoint of this tool.
-    const allDenied = Array.from(scope.deniedTools).some(
-      (d) => d === t.id || d.startsWith(qualifiedPrefix)
-    );
-    if (allDenied) {
-      // If every endpoint is denied we can't represent it cleanly here, but
-      // tool-builder enforces the per-endpoint deny on the def map itself.
-      // Continue: tool stays available, individual endpoints get pruned.
-    }
-
     if (scope.groups.has("*")) return true;
     if (scope.groups.has(group)) return true;
 
-    // Allow when ANY required-tool entry points at this tool.
+    // Allow when ANY required-tool entry points at this tool. Per-endpoint
+    // entries (`<toolId>__<endpoint>`) keep the enclosing tool alive here;
+    // `applyScopeToDefs` then prunes the specific endpoints from the def map.
     for (const r of scope.requiredTools) {
       if (r === t.id || r.startsWith(qualifiedPrefix)) return true;
     }

@@ -54,6 +54,27 @@ describe("tool-groups — resolveSkillBag", () => {
     expect(scope.contributingSkills).not.toContain("brainstorming");
   });
 
+  it("strict scope when only requiredTools declared (no requiredGroups)", () => {
+    const scope = resolveSkillBag([
+      makeSkill("tool-only", { requiredTools: ["native__pc_do"] }),
+    ]);
+    expect(scope.isPermissive).toBe(false);
+    // core is implicitly added even when nothing else is declared
+    expect(scope.groups.has("core")).toBe(true);
+    expect(scope.groups.has("*")).toBe(false);
+    expect(Array.from(scope.requiredTools)).toEqual(["native__pc_do"]);
+    expect(scope.contributingSkills).toEqual(["tool-only"]);
+  });
+
+  it("strict scope when only deniedTools declared (no requiredGroups)", () => {
+    const scope = resolveSkillBag([
+      makeSkill("deny-only", { deniedTools: ["native__shell_execute"] }),
+    ]);
+    expect(scope.isPermissive).toBe(false);
+    expect(scope.groups.has("core")).toBe(true);
+    expect(Array.from(scope.deniedTools)).toEqual(["native__shell_execute"]);
+  });
+
   it("unions groups across multiple declaring skills + accumulates required/denied", () => {
     const skills = [
       makeSkill("a", { requiredGroups: ["pc", "browser"], requiredTools: ["native__pc_do"] }),
