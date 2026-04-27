@@ -151,7 +151,11 @@ export function pickCredential(
   }
 
   // Tier 4 — first-match fallback (alphabetical by name → deterministic).
-  const sorted = [...candidates].sort((a, b) => a.name.localeCompare(b.name));
+  // Byte-wise compare (not localeCompare) so the same data dir picks the
+  // same credential regardless of which machine's locale runs the server.
+  const sorted = [...candidates].sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+  );
   const chosen = sorted[0];
   return {
     credentialId: chosen.id,

@@ -98,7 +98,25 @@ sessionPinsRoute.post("/:sessionId/credential-pins", async (c) => {
  * Removes a single pin.
  */
 sessionPinsRoute.delete("/:sessionId/credential-pins/:type", (c) => {
-  const removed = clearSessionPin(c.req.param("sessionId"), c.req.param("type"));
+  const sessionId = c.req.param("sessionId");
+  const credentialType = c.req.param("type");
+  const existing = getSessionPin(sessionId, credentialType);
+  const removed = clearSessionPin(sessionId, credentialType);
+
+  if (removed) {
+    appendAudit({
+      eventType: "credential.session.unpin",
+      actorType: c.get("authType") === "apikey" ? "apikey" : "session",
+      actorId: c.get("apiKeyId") ?? c.get("sessionId") ?? sessionId,
+      resourceType: "credential",
+      resourceId: existing?.credentialId ?? credentialType,
+      action: "unpin",
+      httpMethod: "DELETE",
+      httpPath: c.req.path,
+      httpStatusCode: 200,
+    });
+  }
+
   return c.json({ data: { removed } });
 });
 
@@ -107,7 +125,23 @@ sessionPinsRoute.delete("/:sessionId/credential-pins/:type", (c) => {
  * Removes every pin for the session (used on logout / session-reset).
  */
 sessionPinsRoute.delete("/:sessionId/credential-pins", (c) => {
-  const removed = clearAllSessionPins(c.req.param("sessionId"));
+  const sessionId = c.req.param("sessionId");
+  const removed = clearAllSessionPins(sessionId);
+
+  if (removed > 0) {
+    appendAudit({
+      eventType: "credential.session.unpin",
+      actorType: c.get("authType") === "apikey" ? "apikey" : "session",
+      actorId: c.get("apiKeyId") ?? c.get("sessionId") ?? sessionId,
+      resourceType: "session",
+      resourceId: sessionId,
+      action: "unpin-all",
+      httpMethod: "DELETE",
+      httpPath: c.req.path,
+      httpStatusCode: 200,
+    });
+  }
+
   return c.json({ data: { removed } });
 });
 

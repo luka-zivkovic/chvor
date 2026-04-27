@@ -29,6 +29,7 @@ import {
 import { refreshAccessToken, type OAuthProviderConfig } from "./oauth-engine.ts";
 import { getDirectOAuthProvider } from "./oauth-providers.ts";
 import { SynthesizedToolError } from "./errors.ts";
+import { pickCredential, type PickResult } from "./credential-picker.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 600_000;
@@ -71,8 +72,6 @@ export interface AuthDiagnosis {
 }
 
 // ── Credential lookup ──────────────────────────────────────────
-
-import { pickCredential, type PickResult } from "./credential-picker.ts";
 
 function pickCredentialForCall(
   credentialType: string,
