@@ -29,6 +29,7 @@ export * from "./types/sandbox.js";
 export * from "./types/daemon.js";
 export * from "./types/action-event.js";
 export * from "./types/tool-group.js";
+export * from "./types/security.js";
 
 // Lib
 export * from "./lib/validate-skill.js";
