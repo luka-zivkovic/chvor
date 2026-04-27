@@ -1,5 +1,5 @@
 import type { tool } from "ai";
-import type { ToolBagScope, ToolGroupId, ToolCriticality } from "@chvor/shared";
+import type { ToolBagScope, ToolGroupId, ToolCriticality, RiskTag } from "@chvor/shared";
 import type { NativeToolContext, NativeToolHandler, NativeToolModule, NativeToolResult } from "./types.ts";
 
 import { webModule } from "./web.ts";
@@ -122,11 +122,12 @@ export function getNativeToolDefinitions(
 function effectiveTagging(
   name: string,
   mod: NativeToolModule
-): { group: ToolGroupId; criticality: ToolCriticality } {
+): { group: ToolGroupId; criticality: ToolCriticality; riskTag: RiskTag | undefined } {
   const override = mod.toolOverrides?.[name];
   return {
     group: override?.group ?? mod.group,
     criticality: override?.criticality ?? mod.criticality ?? "normal",
+    riskTag: override?.riskTag ?? mod.riskTag,
   };
 }
 
@@ -148,14 +149,17 @@ function toolPassesScope(
 }
 
 /**
- * Inspect every native tool's effective group + criticality.
+ * Inspect every native tool's effective group + criticality + risk tag.
  * Used by tests, the security audit, and tool-bag rationale events.
  */
 export function getNativeToolGroupMap(): Record<
   string,
-  { group: ToolGroupId; criticality: ToolCriticality }
+  { group: ToolGroupId; criticality: ToolCriticality; riskTag: RiskTag | undefined }
 > {
-  const out: Record<string, { group: ToolGroupId; criticality: ToolCriticality }> = {};
+  const out: Record<
+    string,
+    { group: ToolGroupId; criticality: ToolCriticality; riskTag: RiskTag | undefined }
+  > = {};
   for (const mod of ALL_MODULES) {
     for (const name of Object.keys(mod.defs)) {
       out[name] = effectiveTagging(name, mod);

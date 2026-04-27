@@ -1,5 +1,5 @@
 import type { tool } from "ai";
-import type { ExecutionEvent, ToolGroupId, ToolCriticality } from "@chvor/shared";
+import type { ExecutionEvent, ToolGroupId, ToolCriticality, RiskTag } from "@chvor/shared";
 
 export type NativeToolContentItem =
   | { type: "text"; text: string }
@@ -47,7 +47,13 @@ export interface NativeToolModule {
    * module has one or two tools that don't fit the module's primary group
    * (e.g. a "diagnose" tool inside a domain-specific module wants `core`).
    */
-  toolOverrides?: Record<string, { group?: ToolGroupId; criticality?: ToolCriticality }>;
+  toolOverrides?: Record<string, { group?: ToolGroupId; criticality?: ToolCriticality; riskTag?: RiskTag }>;
   /** Default criticality for tools in this module. Defaults to "normal". */
   criticality?: ToolCriticality;
+  /**
+   * Default risk classification used by the Phase H emotion gate. When
+   * omitted, falls back to the group-default mapping in emotion-gate.ts.
+   * Override per-tool via `toolOverrides`.
+   */
+  riskTag?: RiskTag;
 }

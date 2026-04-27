@@ -43,6 +43,7 @@ import {
 import type { SecurityActionContext, SecurityActionKind } from "@chvor/shared";
 import { appendAudit } from "../db/audit-log-store.ts";
 import { recordToolOutcome } from "./tool-graph.ts";
+import { applyEmotionGate, getSessionVAD, isEmotionGateEnabled } from "./emotion-gate.ts";
 
 export type EventEmitter = (event: ExecutionEvent) => void;
 
@@ -222,10 +223,27 @@ export async function executeConversation(
   const preferredUsageContext = Array.from(
     new Set(skills.flatMap((s) => s.metadata.preferredUsageContext ?? []))
   );
-  const toolDefs = await buildToolDefinitions(enabledTools, bagScope);
+  const builtToolDefs = await buildToolDefinitions(enabledTools, bagScope);
   if (options?.excludeTools) {
-    for (const name of options.excludeTools) delete toolDefs[name];
+    for (const name of options.excludeTools) delete builtToolDefs[name];
   }
+
+  // Phase H — emotion-modulated risk gate. When the user's VAD lands in the
+  // frustrated/hostile bucket, mask destructive (and on hostile, also moderate)
+  // tools from the bag. `criticality: always-available` tools bypass.
+  let toolDefs: typeof builtToolDefs = builtToolDefs;
+  if (isEmotionGateEnabled()) {
+    const sessionVad = getSessionVAD(options?.sessionId);
+    const gateResult = applyEmotionGate({ defs: builtToolDefs, vad: sessionVad });
+    toolDefs = gateResult.defs;
+    if (gateResult.event) {
+      emit({ type: "tool.bag.emotion-gated", data: gateResult.event });
+      console.log(
+        `[emotion-gate] ${gateResult.bucket} → masked ${gateResult.masked.length} tool(s); ${gateResult.bypassed.length} bypassed via always-available`
+      );
+    }
+  }
+
   const toolCount = Object.keys(toolDefs).length;
   console.log(
     `[orchestrator] ${toolCount} tools available — bag: ${
@@ -1169,7 +1187,14 @@ export async function executeConversation(
       const refreshed = loadTools().filter((t) => isCapabilityEnabled("tool", t.id, t.metadata.defaultEnabled));
       // Reuse the same skill-scoped bag for the rebuild so newly-credentialed
       // tools land in the same scope as the original turn.
-      const newDefs = await buildToolDefinitions(refreshed, bagScope);
+      let newDefs = await buildToolDefinitions(refreshed, bagScope);
+      // Re-apply the emotion gate to the rebuild — a mid-turn credential
+      // change shouldn't sneak destructive tools past a frustrated user.
+      if (isEmotionGateEnabled()) {
+        const vad = getSessionVAD(options?.sessionId);
+        const gated = applyEmotionGate({ defs: newDefs, vad });
+        newDefs = gated.defs;
+      }
       for (const key of Object.keys(toolDefs)) delete toolDefs[key];
       Object.assign(toolDefs, newDefs);
       if (options?.excludeTools) {

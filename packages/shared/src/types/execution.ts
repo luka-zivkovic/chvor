@@ -102,7 +102,8 @@ export type ExecutionEvent =
   | { type: "tool.bag.resolved"; data: ToolBagResolvedEvent }
   | { type: "credential.resolved"; data: CredentialResolvedEvent }
   | { type: "security.verdict"; data: import("./security.js").SecurityVerdictEvent }
-  | { type: "tool.graph.observed"; data: ToolGraphObservedEvent };
+  | { type: "tool.graph.observed"; data: ToolGraphObservedEvent }
+  | { type: "tool.bag.emotion-gated"; data: import("./emotion-gate.js").EmotionGatedToolsEvent };
 
 /** Per-call rationale from the Cognitive Tool Graph (Phase G). */
 export interface ToolGraphObservedEvent {
@@ -142,7 +143,7 @@ export interface CredentialResolvedEvent {
   surface: "synthesized" | "mcp" | "native";
   /** Optional short detail for the canvas — never includes secret values. */
   detail?: string;
-};
+}
 
 /** Per-turn rationale for which tools landed in the LLM's choice set. */
 export interface ToolBagResolvedEvent {
@@ -160,7 +161,7 @@ export interface ToolBagResolvedEvent {
   contributingSkills: string[];
   /** Total tools in the final bag handed to the LLM. */
   toolCount: number;
-};
+}
 
 export interface TokenBudgetInfo {
   contextWindow: number;
