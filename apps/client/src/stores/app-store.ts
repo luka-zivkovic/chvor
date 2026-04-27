@@ -12,7 +12,10 @@ import type {
   MemoryRetrievalTrace,
   TokenBudgetInfo,
   ToolBagResolvedEvent,
+  SecurityVerdictEvent,
 } from "@chvor/shared";
+
+const MAX_SECURITY_VERDICTS = 50;
 import { useFeatureStore } from "./feature-store";
 import { useRuntimeStore } from "./runtime-store";
 import { useSessionStore } from "./session-store";
@@ -104,6 +107,8 @@ interface AppState {
   messageToolTraces: Record<string, ToolTraceEntry[]>;
   /** Most recent skill-scoped tool bag rationale (null until first turn this session). */
   lastToolBag: ToolBagResolvedEvent | null;
+  /** Rolling buffer of recent security-analyzer verdicts (newest last). */
+  securityVerdicts: SecurityVerdictEvent[];
 
   executionEvents: ExecutionEvent[];
   addExecutionEvent: (event: ExecutionEvent) => void;
@@ -177,6 +182,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       memoryTrace: null,
       tokenBudget: null,
       lastToolBag: null,
+      securityVerdicts: [],
     });
     // Re-init WS session with new ID
     const reinit = get()._reinitSession;
@@ -310,6 +316,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   clearExecutionEvents: () => set({ executionEvents: [] }),
   lastToolBag: null,
+  securityVerdicts: [],
 
   pendingApprovals: [],
   respondToApproval: (_requestId, _approved) => {
@@ -469,6 +476,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           set({ streamingThought: null });
         } else if (execEvent.type === "tool.bag.resolved") {
           set({ lastToolBag: execEvent.data });
+        } else if (execEvent.type === "security.verdict") {
+          set((s) => {
+            const next = [...s.securityVerdicts, execEvent.data];
+            return {
+              securityVerdicts:
+                next.length > MAX_SECURITY_VERDICTS
+                  ? next.slice(-MAX_SECURITY_VERDICTS)
+                  : next,
+            };
+          });
         }
         break;
       }

@@ -268,6 +268,18 @@ export function useExecution() {
           // No canvas mutation — rationale is stored in app-store via
           // `lastToolBag` for the debug panel.
           break;
+
+        case "security.verdict":
+          // No canvas mutation — verdicts accumulate in app-store via
+          // `securityVerdicts` for the debug panel / audit UI. Briefly
+          // flash the offending tool node when blocked, so the user can
+          // see something happened.
+          if (event.data.blocked) {
+            const toolNodeId = `tool-${event.data.toolName}`;
+            markRunning(toolNodeId);
+            markNodeFinal(toolNodeId, "failed");
+          }
+          break;
       }
     }
 

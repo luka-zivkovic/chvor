@@ -86,6 +86,62 @@ export function getRiskOrder(r: SecurityRisk): number {
 }
 
 // ---------------------------------------------------------------------------
+// Args -> corpus
+// ---------------------------------------------------------------------------
+
+/** Cap on flattened-corpus size before regex matching, to bound CPU cost. */
+const MAX_CORPUS_BYTES = 64 * 1024;
+
+/**
+ * Walk `args` recursively and collect every string leaf into a single
+ * space-joined corpus. This defeats the array-form bypass: an LLM that
+ * emits `{cmd: ["rm", "-rf", "/"]}` previously slipped past `\brm\s+-rf\b`
+ * because JSON.stringify put `","` between tokens. Flattening rejoins
+ * them with whitespace so the patterns fire as intended.
+ *
+ * The traversal also stringifies non-string scalars (numbers, bools) so
+ * patterns like `chmod 777` still match if 777 lands in a numeric arg.
+ */
+export function flattenArgsToCorpus(args: unknown, cap = MAX_CORPUS_BYTES): string {
+  const parts: string[] = [];
+  let size = 0;
+  const seen = new WeakSet<object>();
+
+  function visit(node: unknown): void {
+    if (size >= cap) return;
+    if (node == null) return;
+    if (typeof node === "string") {
+      parts.push(node);
+      size += node.length + 1;
+      return;
+    }
+    if (typeof node === "number" || typeof node === "boolean" || typeof node === "bigint") {
+      const s = String(node);
+      parts.push(s);
+      size += s.length + 1;
+      return;
+    }
+    if (typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        if (size >= cap) return;
+        visit(item);
+      }
+      return;
+    }
+    for (const value of Object.values(node as Record<string, unknown>)) {
+      if (size >= cap) return;
+      visit(value);
+    }
+  }
+
+  visit(args);
+  return parts.join(" ").slice(0, cap);
+}
+
+// ---------------------------------------------------------------------------
 // Built-in analyzers
 // ---------------------------------------------------------------------------
 
@@ -97,7 +153,7 @@ export function getRiskOrder(r: SecurityRisk): number {
 export const staticRulesAnalyzer: SecurityAnalyzer = {
   id: "static-rules",
   analyze(action) {
-    const blob = JSON.stringify(action.args ?? {}).toLowerCase();
+    const blob = flattenArgsToCorpus(action.args ?? {}).toLowerCase();
     const reasons: string[] = [];
     let risk: SecurityRisk = "low";
 
@@ -163,7 +219,9 @@ const MCP_DESTRUCTIVE_PATTERN = new RegExp(
 export const mcpHeuristicAnalyzer: SecurityAnalyzer = {
   id: "mcp-heuristic",
   analyze(action) {
-    if (action.kind !== "mcp") return null;
+    // Synthesized tools come from user-built API descriptors and routinely
+    // expose `delete_*` / `wipe_*` endpoints — same risk profile as MCP.
+    if (action.kind !== "mcp" && action.kind !== "synthesized") return null;
 
     // Inspect the endpoint/method name first (more precise) then full tool name.
     const candidates = [action.endpointName, action.toolName].filter(
@@ -175,8 +233,8 @@ export const mcpHeuristicAnalyzer: SecurityAnalyzer = {
         return {
           analyzer: "mcp-heuristic",
           risk: "medium",
-          reason: `MCP method name suggests destructive op: "${m[0]}" in "${name}"`,
-          details: { matchedTerm: m[0], scannedName: name },
+          reason: `${action.kind} method name suggests destructive op: "${m[0]}" in "${name}"`,
+          details: { matchedTerm: m[0], scannedName: name, kind: action.kind },
         };
       }
     }
@@ -188,26 +246,34 @@ export const mcpHeuristicAnalyzer: SecurityAnalyzer = {
  * Argument-leak analyzer — flags args that look like they're carrying a raw
  * secret (PAT, OAuth bearer, OpenAI key) into a tool call. Most tools should
  * receive credential _references_ via the resolver, never the secret itself.
+ *
+ * Important: we never echo any byte of the matched secret back into the
+ * verdict / canvas event / audit log. Only the family label
+ * (`github_pat`, `aws_access_key`, …) leaves this function. Leaking even
+ * the first few chars of a real PAT into observability sinks would be a
+ * security bug in a security analyzer.
  */
-const SECRET_PATTERNS: RegExp[] = [
-  /ghp_[A-Za-z0-9]{36,}/,
-  /sk-[A-Za-z0-9]{32,}/,
-  /xoxb-[A-Za-z0-9-]{20,}/,
-  /AKIA[0-9A-Z]{16}/, // AWS access key
+const SECRET_PATTERNS: Array<{ family: string; re: RegExp }> = [
+  { family: "github_pat", re: /ghp_[A-Za-z0-9]{36,}/ },
+  { family: "openai_key", re: /sk-[A-Za-z0-9]{32,}/ },
+  { family: "slack_bot_token", re: /xoxb-[A-Za-z0-9-]{20,}/ },
+  { family: "aws_access_key", re: /AKIA[0-9A-Z]{16}/ },
 ];
 
 export const argLeakAnalyzer: SecurityAnalyzer = {
   id: "arg-leak",
   analyze(action) {
-    const blob = JSON.stringify(action.args ?? {});
-    for (const re of SECRET_PATTERNS) {
-      const m = blob.match(re);
-      if (m) {
+    // No `.toLowerCase()` — AWS keys + PAT prefixes are case-sensitive.
+    // Cap blob size to bound CPU cost on adversarially-large args.
+    const blob = JSON.stringify(action.args ?? {}).slice(0, MAX_CORPUS_BYTES);
+    for (const { family, re } of SECRET_PATTERNS) {
+      if (re.test(blob)) {
         return {
           analyzer: "arg-leak",
           risk: "high",
-          reason: "tool call args appear to contain a raw secret",
-          details: { matchedPrefix: m[0].slice(0, 8) + "…" },
+          reason: `tool call args appear to contain a raw secret (${family})`,
+          // Deliberately no slice of the matched value — see fn doc.
+          details: { family, redacted: true },
         };
       }
     }
