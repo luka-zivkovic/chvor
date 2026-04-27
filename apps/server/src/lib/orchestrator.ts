@@ -34,6 +34,14 @@ import { PC_INTERNAL_MEDIA_TOOLS, findCredentialForUrl, extractMedia, sanitizeRe
 import { beginAction, finishAction, failAction } from "./event-bus.ts";
 import type { ActorType } from "@chvor/shared";
 import { resolveSkillBag, summarizeScope, filterTools as filterToolsByScope } from "./tool-groups.ts";
+import {
+  analyzeAction,
+  ensureBuiltinAnalyzersRegistered,
+  isBlockHighRiskEnabled,
+  isVerdictEventVerbose,
+} from "./security-analyzer.ts";
+import type { SecurityActionContext, SecurityActionKind } from "@chvor/shared";
+import { appendAudit } from "../db/audit-log-store.ts";
 
 export type EventEmitter = (event: ExecutionEvent) => void;
 
@@ -713,9 +721,99 @@ export async function executeConversation(
       actorId: options?.actor?.id ?? options?.sessionId ?? null,
     };
 
+    // Lazy-init builtin security analyzers (idempotent).
+    ensureBuiltinAnalyzersRegistered();
+
+    /**
+     * Run all registered security analyzers over a tool call. Emits a
+     * security.verdict canvas event for HIGH-risk (or always when verbose
+     * mode is on). When policy says to block HIGH-risk, returns a synthetic
+     * tool error result so the LLM sees the refusal and can react.
+     */
+    async function runSecurityGate(
+      tc: { toolCallId: string; toolName: string; args: Record<string, unknown> },
+      kind: SecurityActionKind,
+      extras: { toolId?: string; endpointName?: string; group?: import("@chvor/shared").ToolGroupId } = {},
+    ): Promise<
+      | { allowed: true }
+      | { allowed: false; result: { toolCallId: string; toolName: string; result: unknown } }
+    > {
+      const ctx: SecurityActionContext = {
+        kind,
+        toolName: tc.toolName,
+        toolId: extras.toolId,
+        endpointName: extras.endpointName,
+        group: extras.group,
+        args: tc.args,
+        sessionId: options?.sessionId,
+        actorType: actorCtx.actorType,
+      };
+
+      const verdict = await analyzeAction(ctx);
+      const block = verdict.risk === "high" && isBlockHighRiskEnabled();
+
+      if (verdict.risk !== "low" || isVerdictEventVerbose()) {
+        emit({
+          type: "security.verdict",
+          data: {
+            toolName: tc.toolName,
+            kind,
+            risk: verdict.risk,
+            blocked: block,
+            reasons: verdict.verdicts.map((v) => ({
+              analyzer: v.analyzer,
+              risk: v.risk,
+              reason: v.reason,
+            })),
+          },
+        });
+      }
+
+      if (block) {
+        try {
+          appendAudit({
+            eventType: "security.blocked",
+            actorType: actorCtx.actorType,
+            actorId: actorCtx.actorId,
+            resourceType: "tool",
+            resourceId: tc.toolName,
+            action: "deny",
+            error: verdict.highest.map((v) => `[${v.analyzer}] ${v.reason}`).join(" | "),
+          });
+        } catch (err) {
+          console.warn("[orchestrator] security audit write failed:", err instanceof Error ? err.message : String(err));
+        }
+
+        const messages = verdict.highest.map((v) => `${v.analyzer}: ${v.reason}`).join("; ");
+        const errorPayload = {
+          error:
+            "Action blocked by security policy. " +
+            `Reasons: ${messages}. ` +
+            "If this was a legitimate request, ask the user to relax the policy or rephrase without dangerous payloads.",
+          security: { risk: verdict.risk, reasons: verdict.highest },
+        };
+        if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
+        return {
+          allowed: false,
+          result: {
+            toolCallId: tc.toolCallId,
+            toolName: tc.toolName,
+            result: errorPayload,
+          },
+        };
+      }
+
+      return { allowed: true };
+    }
+
     for (const tc of toolCalls) {
       // Handle native (built-in) tools first
       if (isNativeTool(tc.toolName)) {
+        const gate = await runSecurityGate(tc, "native");
+        if (!gate.allowed) {
+          toolResults.push(gate.result);
+          continue;
+        }
         const target = getNativeToolTarget(tc.toolName);
         // Detect matching API connection BEFORE emitting events so we light up the right node
         let matchedIntegration: { id: string; name: string } | null = null;
@@ -840,6 +938,15 @@ export async function executeConversation(
 
       if (synthesizedTool) {
         const toolId = synthesizedTool.id;
+        const gate = await runSecurityGate(tc, "synthesized", {
+          toolId,
+          endpointName: maybeEndpointName,
+          group: synthesizedTool.metadata.group,
+        });
+        if (!gate.allowed) {
+          toolResults.push(gate.result);
+          continue;
+        }
         emit({
           type: "brain.decision",
           data: { toolId, capabilityKind: "tool", reason: `Calling synthesized ${maybeEndpointName}` },
@@ -928,6 +1035,16 @@ export async function executeConversation(
       }
 
       const { toolId, toolName } = parsed;
+      const mcpToolMeta = loadTools().find((t) => t.id === toolId);
+      const mcpGate = await runSecurityGate(tc, "mcp", {
+        toolId,
+        endpointName: toolName,
+        group: mcpToolMeta?.metadata.group,
+      });
+      if (!mcpGate.allowed) {
+        toolResults.push(mcpGate.result);
+        continue;
+      }
 
       emit({
         type: "brain.decision",

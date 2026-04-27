@@ -100,7 +100,8 @@ export type ExecutionEvent =
   | { type: "execution.completed"; data: { output: unknown } }
   | { type: "execution.failed"; data: { error: string } }
   | { type: "tool.bag.resolved"; data: ToolBagResolvedEvent }
-  | { type: "credential.resolved"; data: CredentialResolvedEvent };
+  | { type: "credential.resolved"; data: CredentialResolvedEvent }
+  | { type: "security.verdict"; data: import("./security.js").SecurityVerdictEvent };
 
 /** Per-pick rationale for which credential ended up resolving `{{credentials.X}}`. */
 export interface CredentialResolvedEvent {
