@@ -207,6 +207,12 @@ export async function executeConversation(
   // Scope is computed ONCE per turn and reused on the credential-change rebuild
   // below. Mid-turn skill toggles take effect on the *next* turn, not this one.
   const bagScope = resolveSkillBag(skills);
+  // Aggregate `preferredUsageContext` across active skills — fed to the
+  // multi-credential picker so it can tie-break between same-type credentials
+  // (e.g. two GitHub accounts) without bothering the LLM.
+  const preferredUsageContext = Array.from(
+    new Set(skills.flatMap((s) => s.metadata.preferredUsageContext ?? []))
+  );
   const toolDefs = await buildToolDefinitions(enabledTools, bagScope);
   if (options?.excludeTools) {
     for (const name of options.excludeTools) delete toolDefs[name];
@@ -849,6 +855,13 @@ export async function executeConversation(
           const callResult = await callSynthesizedEndpoint(synthesizedTool, maybeEndpointName, tc.args, {
             sessionId: options?.sessionId,
             originClientId: options?.originClientId,
+            preferredUsageContext,
+            onCredentialResolved: (info) => {
+              emit({
+                type: "credential.resolved",
+                data: { ...info, surface: "synthesized" },
+              });
+            },
           });
 
           if (callResult.ok) {

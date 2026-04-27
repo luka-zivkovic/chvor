@@ -1,4 +1,5 @@
 import { listCredentials, getCredentialData } from "../db/credential-store.ts";
+import { pickCredential, type PickResult } from "./credential-picker.ts";
 
 const PLACEHOLDER_RE = /\{\{credentials\.([^}]+)\}\}/g;
 
@@ -35,30 +36,80 @@ export function hasRequiredCredentials(
 }
 
 /**
+ * Optional context to drive the multi-credential picker (Phase E).
+ * - `sessionId` enables session pin lookup.
+ * - `preferredUsageContext` is the union of active skills' hints — used to
+ *   tie-break between candidates by `usage_context` token overlap.
+ * - `onPick` is a sink for picker rationale; orchestrator wires it to a
+ *   canvas event so users can see *which* credential fired.
+ */
+export interface PickerContext {
+  sessionId?: string | null;
+  preferredUsageContext?: string[];
+  onPick?: (info: {
+    credentialType: string;
+    credentialId: string;
+    credentialName: string;
+    reason: PickResult["reason"];
+    candidateCount: number;
+    detail?: string;
+  }) => void;
+}
+
+function loadPickedCredentialData(
+  reqType: string,
+  pickerCtx: PickerContext | undefined
+): Record<string, string> | null {
+  const pick = pickCredential(reqType, {
+    sessionId: pickerCtx?.sessionId ?? null,
+    preferredUsageContext: pickerCtx?.preferredUsageContext,
+  });
+  if (!pick) return null;
+  const full = getCredentialData(pick.credentialId);
+  if (!full) return null;
+  if (pickerCtx?.onPick) {
+    try {
+      const summary = listCredentials().find((c) => c.id === pick.credentialId);
+      pickerCtx.onPick({
+        credentialType: reqType,
+        credentialId: pick.credentialId,
+        credentialName: summary?.name ?? pick.credentialId,
+        reason: pick.reason,
+        candidateCount: pick.candidateCount,
+        detail: pick.detail,
+      });
+    } catch (err) {
+      console.warn(
+        "[credential-resolver] picker rationale callback failed:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+  return full.data;
+}
+
+/**
  * Resolve {{credentials.xxx}} placeholders in MCP env config.
  * Supports both simple refs ({{credentials.github}}) and field-specific
  * refs ({{credentials.n8n.apiUrl}}).
+ *
+ * `pickerContext` is optional and only meaningful when multiple credentials
+ * of the same type exist. MCP servers typically spawn once and reuse the
+ * resolved env, so the picker context is often spawn-time-only.
  */
 export function resolveEnvPlaceholders(
   env: Record<string, string> | undefined,
-  requiredCredentials: string[] | undefined
+  requiredCredentials: string[] | undefined,
+  pickerContext?: PickerContext
 ): Record<string, string> {
   if (!env) return {};
 
   const resolved: Record<string, string> = {};
-
-  // Pre-load credential data for required types
   const credentialsByType = new Map<string, Record<string, string>>();
   if (requiredCredentials) {
-    const allCreds = listCredentials();
     for (const reqType of requiredCredentials) {
-      const match = allCreds.find((c) => c.type === reqType);
-      if (match) {
-        const full = getCredentialData(match.id);
-        if (full) {
-          credentialsByType.set(reqType, full.data);
-        }
-      }
+      const data = loadPickedCredentialData(reqType, pickerContext);
+      if (data) credentialsByType.set(reqType, data);
     }
   }
 
@@ -86,19 +137,16 @@ export function resolveEnvPlaceholders(
  */
 export function resolveUrlPlaceholders(
   url: string,
-  requiredCredentials: string[] | undefined
+  requiredCredentials: string[] | undefined,
+  pickerContext?: PickerContext
 ): string {
   if (!url.includes("{{credentials.")) return url;
 
   const credentialsByType = new Map<string, Record<string, string>>();
   if (requiredCredentials) {
-    const allCreds = listCredentials();
     for (const reqType of requiredCredentials) {
-      const match = allCreds.find((c) => c.type === reqType);
-      if (match) {
-        const full = getCredentialData(match.id);
-        if (full) credentialsByType.set(reqType, full.data);
-      }
+      const data = loadPickedCredentialData(reqType, pickerContext);
+      if (data) credentialsByType.set(reqType, data);
     }
   }
 
