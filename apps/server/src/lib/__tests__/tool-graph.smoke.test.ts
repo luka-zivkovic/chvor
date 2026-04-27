@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,15 +25,8 @@ beforeAll(async () => {
 });
 
 describe("tool-graph — recordToolOutcome", () => {
-  beforeEach(() => {
-    // Wipe nodes between tests (DB tables persist within file → between describes
-    // they pile up). We reset by zeroing every existing node back to baseline.
-    for (const n of listNodes(1000)) {
-      // Easier: drop strength etc by re-creating via decay then setting via
-      // recordOutcome would be circular. We rely on unique tool names per test.
-      void n;
-    }
-  });
+  // Test isolation: each case uses a unique tool name (native__t_strength,
+  // native__t_hebb_a, ...) so DB rows never collide between tests.
 
   it("creates a node lazily on first observation, with trial-boost + initial strength", () => {
     const before = countNodes();

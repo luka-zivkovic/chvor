@@ -119,7 +119,7 @@ export interface ToolGraphObservedEvent {
   edgesBumped: Array<{ a: string; b: string }>;
   /** Whether the node is still in its trial-boost window. */
   inTrialBoost: boolean;
-};
+}
 
 /** Per-pick rationale for which credential ended up resolving `{{credentials.X}}`. */
 export interface CredentialResolvedEvent {
