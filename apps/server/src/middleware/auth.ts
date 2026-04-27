@@ -74,7 +74,18 @@ export function requiredScopeFor(method: string, path: string): string | null {
 
   // Auth endpoints already whitelisted upstream — no scope required.
   if (p.startsWith("/api/auth")) return null;
-  if (p.startsWith("/api/debug")) return "debug:read";
+
+  // /api/debug — destructive POSTs (e.g. /prune) need write scope, not read.
+  if (p.startsWith("/api/debug")) {
+    return method === "GET" || method === "HEAD" ? "debug:read" : "debug:write";
+  }
+
+  // /api/audit — running the security auditor has side effects (it writes an
+  // audit-log row and reads credential metadata + key list), so POST gets its
+  // own narrow scope distinct from the generic api:write default.
+  if (p.startsWith("/api/audit")) {
+    return method === "GET" || method === "HEAD" ? "audit:read" : "audit:run";
+  }
 
   // Tool execution (orchestrator ingress)
   if (p.startsWith("/api/sessions") && method === "POST") return "tool:execute:*";

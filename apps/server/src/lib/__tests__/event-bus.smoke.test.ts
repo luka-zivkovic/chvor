@@ -96,6 +96,64 @@ describe("Phase A + B smoke — typed events, audit log, scope matcher", () => {
     expect(requiredScopeFor("GET", "/api/health")).toBe("api:read");
   });
 
+  it("requires write scope for destructive /api/debug POSTs", () => {
+    expect(requiredScopeFor("GET", "/api/debug/events")).toBe("debug:read");
+    expect(requiredScopeFor("GET", "/api/debug/audit")).toBe("debug:read");
+    expect(requiredScopeFor("POST", "/api/debug/prune")).toBe("debug:write");
+    // a debug:read-only key must NOT satisfy debug:write
+    expect(scopeMatches(parseScopes("debug:read"), "debug:write")).toBe(false);
+  });
+
+  it("requires audit:run for POST /api/audit and audit:read for GET", () => {
+    expect(requiredScopeFor("POST", "/api/audit")).toBe("audit:run");
+    expect(requiredScopeFor("GET", "/api/audit")).toBe("audit:read");
+    // a generic api:write key should not satisfy audit:run
+    expect(scopeMatches(parseScopes("api:write"), "audit:run")).toBe(false);
+  });
+
+  it("redacts secrets in observation payloads before storage", () => {
+    const h = beginAction(
+      "synthesized_call",
+      "github__get_token",
+      { repo: "x" },
+      { sessionId: "sess-redact", actorType: "session", actorId: "sess-redact" }
+    );
+    // Embed a token-shaped string in the response body. SENSITIVE_PATTERNS
+    // matches `ghp_` PATs ≥36 chars; keep the structure.
+    const fakePat = "ghp_" + "A".repeat(40);
+    finishAction(h, {
+      status: 200,
+      body: { access_token: `Bearer ${"x".repeat(40)}`, note: fakePat },
+      truncated: false,
+    });
+
+    const traces = listTraces({ sessionId: "sess-redact", limit: 5 });
+    const found = traces.find((t) => t.action.id === h.actionId);
+    expect(found).toBeDefined();
+    expect(found!.observations).toHaveLength(1);
+    const stored = JSON.stringify(found!.observations[0].payload);
+    expect(stored).not.toContain(fakePat);
+    expect(stored).toContain("[REDACTED]");
+  });
+
+  it("redacts secrets in error messages from failAction", () => {
+    const h = beginAction(
+      "mcp_call",
+      "some__tool",
+      {},
+      { sessionId: "sess-err-redact", actorType: "session", actorId: "sess-err-redact" }
+    );
+    const fakeKey = "sk-" + "B".repeat(40);
+    failAction(h, new Error(`upstream rejected token ${fakeKey}`));
+
+    const traces = listTraces({ sessionId: "sess-err-redact", limit: 5 });
+    const found = traces.find((t) => t.action.id === h.actionId);
+    expect(found).toBeDefined();
+    const stored = JSON.stringify(found!.observations[0].payload);
+    expect(stored).not.toContain(fakeKey);
+    expect(stored).toContain("[REDACTED]");
+  });
+
   it("runs the security auditor without throwing", () => {
     const report = runSecurityAudit();
     expect(report.ranAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
