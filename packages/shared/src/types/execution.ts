@@ -99,7 +99,8 @@ export type ExecutionEvent =
   | { type: "execution.tokenBudget"; data: TokenBudgetInfo }
   | { type: "execution.completed"; data: { output: unknown } }
   | { type: "execution.failed"; data: { error: string } }
-  | { type: "tool.bag.resolved"; data: ToolBagResolvedEvent };
+  | { type: "tool.bag.resolved"; data: ToolBagResolvedEvent }
+  | { type: "security.verdict"; data: import("./security.js").SecurityVerdictEvent };
 
 /** Per-turn rationale for which tools landed in the LLM's choice set. */
 export interface ToolBagResolvedEvent {
