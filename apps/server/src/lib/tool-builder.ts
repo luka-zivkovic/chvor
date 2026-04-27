@@ -1,11 +1,12 @@
 import { tool } from "ai";
 import { z } from "zod";
-import type { Tool, SynthesizedEndpoint, SynthesizedEndpointParam } from "@chvor/shared";
+import type { Tool, SynthesizedEndpoint, SynthesizedEndpointParam, ToolBagScope } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
 import { mcpManager } from "./mcp-manager.ts";
 import { hasRequiredCredentials } from "./credential-resolver.ts";
 import { getNativeToolDefinitions } from "./native-tools.ts";
 import { buildCapabilityRegistry, invalidateCapabilityRegistry } from "./capability-resolver.ts";
+import { filterTools, applyScopeToDefs } from "./tool-groups.ts";
 
 const MAX_SCHEMA_DEPTH = 5;
 
@@ -95,10 +96,19 @@ function jsonSchemaObjectToZod(schema: Record<string, unknown>, depth = 0): z.Zo
 
 // Memoization: return the same tool definitions when tools haven't changed.
 // This helps prompt caching by keeping tool JSON stable across turns.
+// Hash combines tool IDs + scope signature so cache invalidates on scope change.
 let cachedToolHash: string | null = null;
 let cachedToolDefs: Record<string, ReturnType<typeof tool>> | null = null;
 // Dedup: return in-flight build promise to concurrent callers (only when hash matches)
 let inflightBuild: { hash: string; promise: Promise<Record<string, ReturnType<typeof tool>>> } | null = null;
+
+function scopeSignature(scope?: ToolBagScope): string {
+  if (!scope || scope.isPermissive) return "permissive";
+  const groups = Array.from(scope.groups).sort().join(",");
+  const required = Array.from(scope.requiredTools).sort().join(",");
+  const denied = Array.from(scope.deniedTools).sort().join(",");
+  return `g:${groups}|r:${required}|d:${denied}`;
+}
 
 /** Tools that failed MCP discovery on last build — surfaced to LLM via system prompt. */
 export interface FailedTool {
@@ -173,12 +183,16 @@ function buildSynthesizedToolDefs(t: Tool): Record<string, ReturnType<typeof too
 }
 
 export async function buildToolDefinitions(
-  tools: Tool[]
+  tools: Tool[],
+  scope?: ToolBagScope
 ): Promise<Record<string, ReturnType<typeof tool>>> {
-  const eligibleTools = tools.filter(
+  const credentialEligible = tools.filter(
     (t) => t.mcpServer && hasRequiredCredentials(t.metadata.requires?.credentials)
   );
-  const hash = eligibleTools.map((t) => t.id).sort().join(",");
+  // Apply skill-scoped group filter (no-op when scope is permissive).
+  const eligibleTools = scope ? filterTools(credentialEligible, scope) : credentialEligible;
+
+  const hash = `${eligibleTools.map((t) => t.id).sort().join(",")}|${scopeSignature(scope)}`;
 
   if (hash === cachedToolHash && cachedToolDefs) {
     return cachedToolDefs;
@@ -187,7 +201,7 @@ export async function buildToolDefinitions(
   // Dedup concurrent calls — only reuse if building for the same tool set
   if (inflightBuild && inflightBuild.hash === hash) return inflightBuild.promise;
 
-  const buildPromise = doBuild(eligibleTools, tools, hash);
+  const buildPromise = doBuild(eligibleTools, tools, hash, scope);
   inflightBuild = { hash, promise: buildPromise };
   try {
     return await buildPromise;
@@ -200,6 +214,7 @@ async function doBuild(
   eligibleTools: Tool[],
   allTools: Tool[],
   hash: string,
+  scope?: ToolBagScope,
 ): Promise<Record<string, ReturnType<typeof tool>>> {
   const toolDefs: Record<string, ReturnType<typeof tool>> = {};
   const discoveredMcpTools = new Map<string, Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>>();
@@ -273,15 +288,19 @@ async function doBuild(
     }
   }
 
-  // Merge native (built-in) tools
-  Object.assign(toolDefs, getNativeToolDefinitions());
+  // Merge native (built-in) tools — also filtered through the scope.
+  Object.assign(toolDefs, getNativeToolDefinitions(scope));
+
+  // Apply per-endpoint denied-list (covers synth endpoints whose enclosing
+  // tool was kept but specific endpoints should be excluded).
+  const finalDefs = scope ? applyScopeToDefs(toolDefs, scope).defs : toolDefs;
 
   // Only cache if all MCP discoveries succeeded — avoids caching incomplete tool sets
   if (!hadErrors) {
     cachedToolHash = hash;
-    cachedToolDefs = toolDefs;
+    cachedToolDefs = finalDefs;
   }
-  return toolDefs;
+  return finalDefs;
 }
 
 /** Invalidate tool definition cache (for repair tool after capability reload). */

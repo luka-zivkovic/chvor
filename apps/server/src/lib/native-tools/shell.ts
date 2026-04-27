@@ -371,6 +371,7 @@ const handleShellExecute: NativeToolHandler = async (
 };
 
 export const shellModule: NativeToolModule = {
+  group: "shell",
   defs: { [SHELL_EXECUTE_NAME]: shellExecuteToolDef },
   handlers: { [SHELL_EXECUTE_NAME]: handleShellExecute },
 };

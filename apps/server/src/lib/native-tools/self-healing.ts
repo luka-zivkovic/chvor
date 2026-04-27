@@ -283,6 +283,8 @@ const handleRepair: NativeToolHandler = async (args: Record<string, unknown>): P
 };
 
 export const selfHealingModule: NativeToolModule = {
+  group: "core",
+  criticality: "always-available",
   defs: {
     [DIAGNOSE_TOOL_NAME]: diagnoseToolDef,
     [REPAIR_TOOL_NAME]: repairToolDef,

@@ -7,6 +7,9 @@ type: workflow
 category: communication
 icon: calendar
 defaultEnabled: false
+requiredGroups:
+  - social
+  - daemon
 tags:
   - scheduling
   - social-media

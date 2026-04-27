@@ -147,6 +147,7 @@ const handleDeleteWebhook: NativeToolHandler = async (
 };
 
 export const webhookModule: NativeToolModule = {
+  group: "webhook",
   defs: {
     [CREATE_WEBHOOK_NAME]: createWebhookToolDef,
     [LIST_WEBHOOKS_NAME]: listWebhooksToolDef,

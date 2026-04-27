@@ -1,4 +1,5 @@
 import type { tool } from "ai";
+import type { ToolBagScope, ToolGroupId, ToolCriticality } from "@chvor/shared";
 import type { NativeToolContext, NativeToolHandler, NativeToolModule, NativeToolResult } from "./types.ts";
 
 import { webModule } from "./web.ts";
@@ -94,16 +95,73 @@ export function getNativeToolTarget(qualifiedName: string): { kind: "skill" | "t
   return nativeToolMapping.get(qualifiedName) ?? null;
 }
 
-/** All native tool definitions (for merging into the tool map). */
-export function getNativeToolDefinitions(): Record<string, ReturnType<typeof tool>> {
+/**
+ * All native tool definitions, optionally filtered to a skill-scoped bag.
+ *
+ * Filter rules (when `scope` is provided and not permissive):
+ *   - Tools tagged `criticality: always-available` ALWAYS pass (incl. denied list).
+ *   - Otherwise tool's effective group must be in `scope.groups`, OR
+ *     the qualified name must be in `scope.requiredTools`.
+ *   - Qualified name must NOT be in `scope.deniedTools`.
+ *   - `scope.groups` may include the literal "*" sentinel (everything passes).
+ */
+export function getNativeToolDefinitions(
+  scope?: ToolBagScope
+): Record<string, ReturnType<typeof tool>> {
   const result: Record<string, ReturnType<typeof tool>> = {};
   for (const mod of ALL_MODULES) {
     if (mod.enabled && !mod.enabled()) continue;
     for (const [name, def] of Object.entries(mod.defs)) {
+      if (!toolPassesScope(name, mod, scope)) continue;
       result[name] = def;
     }
   }
   return result;
+}
+
+function effectiveTagging(
+  name: string,
+  mod: NativeToolModule
+): { group: ToolGroupId; criticality: ToolCriticality } {
+  const override = mod.toolOverrides?.[name];
+  return {
+    group: override?.group ?? mod.group,
+    criticality: override?.criticality ?? mod.criticality ?? "normal",
+  };
+}
+
+function toolPassesScope(
+  name: string,
+  mod: NativeToolModule,
+  scope: ToolBagScope | undefined
+): boolean {
+  if (!scope || scope.isPermissive) return true;
+  const { group, criticality } = effectiveTagging(name, mod);
+
+  // Always-available survives every filter (including the denied list).
+  if (criticality === "always-available") return true;
+
+  if (scope.deniedTools.has(name)) return false;
+  if (scope.requiredTools.has(name)) return true;
+  if (scope.groups.has("*")) return true;
+  return scope.groups.has(group);
+}
+
+/**
+ * Inspect every native tool's effective group + criticality.
+ * Used by tests, the security audit, and tool-bag rationale events.
+ */
+export function getNativeToolGroupMap(): Record<
+  string,
+  { group: ToolGroupId; criticality: ToolCriticality }
+> {
+  const out: Record<string, { group: ToolGroupId; criticality: ToolCriticality }> = {};
+  for (const mod of ALL_MODULES) {
+    for (const name of Object.keys(mod.defs)) {
+      out[name] = effectiveTagging(name, mod);
+    }
+  }
+  return out;
 }
 
 /** Check if a qualified tool name is a native tool. */

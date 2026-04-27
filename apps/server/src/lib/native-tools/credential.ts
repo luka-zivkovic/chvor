@@ -31,6 +31,7 @@ export { resolveCredentialRequest } from "./credential/request.ts";
 export { resolveOAuthWizard } from "./credential/oauth-setup.ts";
 
 export const credentialModule: NativeToolModule = {
+  group: "credentials",
   defs: {
     [REQUEST_CREDENTIAL_NAME]: requestCredentialToolDef,
     [REQUEST_OAUTH_SETUP_NAME]: requestOAuthSetupToolDef,

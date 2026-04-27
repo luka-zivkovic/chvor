@@ -98,7 +98,26 @@ export type ExecutionEvent =
   | { type: "sandbox.failed"; data: { nodeId: string; error: string } }
   | { type: "execution.tokenBudget"; data: TokenBudgetInfo }
   | { type: "execution.completed"; data: { output: unknown } }
-  | { type: "execution.failed"; data: { error: string } };
+  | { type: "execution.failed"; data: { error: string } }
+  | { type: "tool.bag.resolved"; data: ToolBagResolvedEvent };
+
+/** Per-turn rationale for which tools landed in the LLM's choice set. */
+export interface ToolBagResolvedEvent {
+  /** Active group IDs contributing to the bag (may include "*" for permissive). */
+  groups: string[];
+  /** Explicit tool names required regardless of group. */
+  requiredTools: string[];
+  /** Tool names explicitly excluded. */
+  deniedTools: string[];
+  /** True when no skill declared scoping → fall back to legacy inject-all. */
+  isPermissive: boolean;
+  /** Why permissive (only set when isPermissive=true). */
+  permissiveReason?: string;
+  /** IDs of skills that contributed declarations to this scope. */
+  contributingSkills: string[];
+  /** Total tools in the final bag handed to the LLM. */
+  toolCount: number;
+};
 
 export interface TokenBudgetInfo {
   contextWindow: number;

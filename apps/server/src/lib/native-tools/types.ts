@@ -1,5 +1,5 @@
 import type { tool } from "ai";
-import type { ExecutionEvent } from "@chvor/shared";
+import type { ExecutionEvent, ToolGroupId, ToolCriticality } from "@chvor/shared";
 
 export type NativeToolContentItem =
   | { type: "text"; text: string }
@@ -36,4 +36,18 @@ export interface NativeToolModule {
   enabled?: () => boolean;
   /** Optional native-tool → capability mapping for canvas animation. */
   mappings?: Record<string, { kind: "skill" | "tool"; id: string }>;
+  /**
+   * Group all tools in this module belong to. Used by skill-scoped
+   * injection (Phase C). One module = one group keeps the model simple;
+   * if a module hosts mixed-purpose tools, split it.
+   */
+  group: ToolGroupId;
+  /**
+   * Per-tool overrides keyed by qualified tool name. Use this when a single
+   * module has one or two tools that don't fit the module's primary group
+   * (e.g. a "diagnose" tool inside a domain-specific module wants `core`).
+   */
+  toolOverrides?: Record<string, { group?: ToolGroupId; criticality?: ToolCriticality }>;
+  /** Default criticality for tools in this module. Defaults to "normal". */
+  criticality?: ToolCriticality;
 }

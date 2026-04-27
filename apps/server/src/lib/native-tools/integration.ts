@@ -122,6 +122,7 @@ const handleResearchIntegration: NativeToolHandler = async (
 };
 
 export const integrationModule: NativeToolModule = {
+  group: "credentials",
   defs: { [RESEARCH_INTEGRATION_NAME]: researchIntegrationToolDef },
   handlers: { [RESEARCH_INTEGRATION_NAME]: handleResearchIntegration },
   mappings: { [RESEARCH_INTEGRATION_NAME]: { kind: "tool", id: "credentials" } },

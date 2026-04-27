@@ -33,6 +33,7 @@ import { buildSystemPrompt } from "./orchestrator/system-prompt.ts";
 import { PC_INTERNAL_MEDIA_TOOLS, findCredentialForUrl, extractMedia, sanitizeResultForLLM, summarizeToolResult } from "./orchestrator/tool-result.ts";
 import { beginAction, finishAction, failAction } from "./event-bus.ts";
 import type { ActorType } from "@chvor/shared";
+import { resolveSkillBag, summarizeScope, filterTools as filterToolsByScope } from "./tool-groups.ts";
 
 export type EventEmitter = (event: ExecutionEvent) => void;
 
@@ -198,12 +199,35 @@ export async function executeConversation(
 
   const allTools = loadTools();
   const enabledTools = allTools.filter((t) => isCapabilityEnabled("tool", t.id, t.metadata.defaultEnabled));
-  const toolDefs = await buildToolDefinitions(enabledTools);
+
+  // Skill-scoped tool-bag floor (Phase C): only tools the active skills' groups
+  // include make it into the bag. Skills with no declarations trigger a
+  // permissive scope so legacy installs keep working.
+  const bagScope = resolveSkillBag(skills);
+  const toolDefs = await buildToolDefinitions(enabledTools, bagScope);
   if (options?.excludeTools) {
     for (const name of options.excludeTools) delete toolDefs[name];
   }
   const toolCount = Object.keys(toolDefs).length;
-  console.log(`[orchestrator] ${toolCount} tools available`);
+  console.log(
+    `[orchestrator] ${toolCount} tools available — bag: ${
+      bagScope.isPermissive ? `permissive (${bagScope.permissiveReason ?? "no scope"})` : `scoped via skills [${bagScope.contributingSkills.join(",")}]`
+    }`
+  );
+
+  const bagSummary = summarizeScope(bagScope);
+  emit({
+    type: "tool.bag.resolved",
+    data: {
+      groups: bagSummary.groups,
+      requiredTools: bagSummary.requiredTools,
+      deniedTools: bagSummary.deniedTools,
+      isPermissive: bagSummary.isPermissive,
+      permissiveReason: bagSummary.permissiveReason,
+      contributingSkills: bagSummary.contributingSkills,
+      toolCount,
+    },
+  });
   // ── Cognitive memory retrieval (DRR + composite scoring + graph activation) ──
   const memConfig = getCognitiveMemoryConfig();
   let memoryFacts: string[] = [];
@@ -384,7 +408,10 @@ export async function executeConversation(
     }
   }
 
-  const { stable: stablePrompt, volatile: volatilePrompt } = buildSystemPrompt(skills, enabledTools, memoryFacts, personaCfg, sessionSummary, options?.voiceContext, emotionHistory, options?.channelType);
+  // Only show the LLM tool descriptions for tools it can actually call this
+  // turn — keeps the prompt honest with the bag and saves tokens.
+  const promptVisibleTools = filterToolsByScope(enabledTools, bagScope);
+  const { stable: stablePrompt, volatile: volatilePrompt } = buildSystemPrompt(skills, promptVisibleTools, memoryFacts, personaCfg, sessionSummary, options?.voiceContext, emotionHistory, options?.channelType);
 
   // Append advanced emotion context to volatile prompt if enabled
   let fullVolatilePrompt = volatilePrompt;
@@ -958,7 +985,9 @@ export async function executeConversation(
     );
     if (credentialChanged) {
       const refreshed = loadTools().filter((t) => isCapabilityEnabled("tool", t.id, t.metadata.defaultEnabled));
-      const newDefs = await buildToolDefinitions(refreshed);
+      // Reuse the same skill-scoped bag for the rebuild so newly-credentialed
+      // tools land in the same scope as the original turn.
+      const newDefs = await buildToolDefinitions(refreshed, bagScope);
       for (const key of Object.keys(toolDefs)) delete toolDefs[key];
       Object.assign(toolDefs, newDefs);
       if (options?.excludeTools) {

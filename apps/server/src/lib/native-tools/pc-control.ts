@@ -325,6 +325,7 @@ const handlePcShell: NativeToolHandler = async (
 };
 
 export const pcControlModule: NativeToolModule = {
+  group: "pc",
   defs: {
     [PC_DO_NAME]: pcDoToolDef,
     [PC_OBSERVE_NAME]: pcObserveToolDef,

@@ -215,6 +215,7 @@ const handleRegistryUninstall: NativeToolHandler = async (
 };
 
 export const registryModule: NativeToolModule = {
+  group: "registry",
   defs: {
     [REGISTRY_SEARCH_NAME]: registrySearchToolDef,
     [REGISTRY_INSTALL_NAME]: registryInstallToolDef,
