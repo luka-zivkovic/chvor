@@ -358,6 +358,7 @@ const handleRepairSynthesizedTool: NativeToolHandler = async (
 export const synthesizedModule: NativeToolModule = {
   group: "core",
   criticality: "always-available",
+  riskTag: "moderate",
   defs: {
     [SYNTHESIZE_TOOL_NAME]: synthesizeToolDef,
     [REPAIR_SYNTHESIZED_TOOL_NAME]: repairSynthesizedToolDef,

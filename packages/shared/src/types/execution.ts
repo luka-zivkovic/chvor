@@ -102,7 +102,8 @@ export type ExecutionEvent =
   | { type: "tool.bag.resolved"; data: ToolBagResolvedEvent }
   | { type: "credential.resolved"; data: CredentialResolvedEvent }
   | { type: "security.verdict"; data: import("./security.js").SecurityVerdictEvent }
-  | { type: "tool.graph.observed"; data: ToolGraphObservedEvent };
+  | { type: "tool.graph.observed"; data: ToolGraphObservedEvent }
+  | { type: "tool.bag.emotion-gated"; data: import("./emotion-gate.js").EmotionGatedToolsEvent };
 
 /** Per-call rationale from the Cognitive Tool Graph (Phase G). */
 export interface ToolGraphObservedEvent {

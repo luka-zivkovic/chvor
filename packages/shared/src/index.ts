@@ -30,6 +30,7 @@ export * from "./types/daemon.js";
 export * from "./types/action-event.js";
 export * from "./types/tool-group.js";
 export * from "./types/security.js";
+export * from "./types/emotion-gate.js";
 
 // Lib
 export * from "./lib/validate-skill.js";

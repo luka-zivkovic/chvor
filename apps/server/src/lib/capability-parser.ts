@@ -16,6 +16,7 @@ import type {
   SynthesizedEndpointParam,
   ToolGroupId,
   ToolCriticality,
+  RiskTag,
 } from "@chvor/shared";
 import { isToolGroupId } from "@chvor/shared";
 
@@ -205,6 +206,11 @@ function parseCriticality(raw: unknown): ToolCriticality | undefined {
   return undefined;
 }
 
+function parseRiskTag(raw: unknown): RiskTag | undefined {
+  if (raw === "safe" || raw === "moderate" || raw === "destructive") return raw;
+  return undefined;
+}
+
 function parseProvides(raw: unknown): Record<string, string> | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
   const result: Record<string, string> = {};
@@ -264,6 +270,7 @@ export function parseCapabilityMd(
       preferredUsageContext: parseStringList(fm.preferredUsageContext ?? fm.preferred_usage_context),
       group: parseGroup(fm.group, filePath),
       criticality: parseCriticality(fm.criticality),
+      riskTag: parseRiskTag(fm.riskTag ?? fm.risk_tag),
     };
 
     const instructions = body.trim();

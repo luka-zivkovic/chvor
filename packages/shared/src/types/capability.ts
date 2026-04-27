@@ -97,6 +97,12 @@ export interface CapabilityMetadata {
   /** Tool-only — when set, tool survives every scope filter (decay, group
    *  scoping, denied list). Use sparingly. */
   criticality?: import("./tool-group.js").ToolCriticality;
+
+  /** Tool-only — risk classification used by the emotion-modulated gate
+   *  (Phase H). Defaults are derived from the tool's group when omitted;
+   *  override here when a single tool in a moderate group does something
+   *  destructive (or vice versa). */
+  riskTag?: import("./emotion-gate.js").RiskTag;
 }
 
 export interface CredentialFieldSchema {
