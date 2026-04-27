@@ -8,6 +8,7 @@ import type {
 } from "@chvor/shared";
 import { getDb } from "./database.ts";
 import { encrypt, decrypt } from "./crypto.ts";
+import { purgePinsForCredential } from "./session-pin-store.ts";
 
 interface CredentialRow {
   id: string;
@@ -169,6 +170,15 @@ export function createCredential(
 export function deleteCredential(id: string): boolean {
   const db = getDb();
   const result = db.prepare("DELETE FROM credentials WHERE id = ?").run(id);
+  if (result.changes > 0) {
+    // Drop any session pins that referenced this credential so future picks
+    // fall through cleanly.
+    try {
+      purgePinsForCredential(id);
+    } catch (err) {
+      console.warn("[credential-store] purgePinsForCredential failed:", err instanceof Error ? err.message : String(err));
+    }
+  }
   return result.changes > 0;
 }
 

@@ -87,6 +87,13 @@ export function requiredScopeFor(method: string, path: string): string | null {
     return method === "GET" || method === "HEAD" ? "audit:read" : "audit:run";
   }
 
+  // Session credential pins — credential-domain decision, not tool execution.
+  // Match before the broader `/api/sessions` POST rule so pinning routes to
+  // the credential scope grammar.
+  if (/^\/api\/sessions\/[^/]+\/credential-pins(\/.*)?$/.test(p)) {
+    return method === "GET" || method === "HEAD" ? "credential:read" : "credential:write";
+  }
+
   // Tool execution (orchestrator ingress)
   if (p.startsWith("/api/sessions") && method === "POST") return "tool:execute:*";
   if (p.startsWith("/api/gateway") && method === "POST") return "tool:execute:*";

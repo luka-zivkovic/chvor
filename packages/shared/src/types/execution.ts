@@ -100,7 +100,31 @@ export type ExecutionEvent =
   | { type: "execution.completed"; data: { output: unknown } }
   | { type: "execution.failed"; data: { error: string } }
   | { type: "tool.bag.resolved"; data: ToolBagResolvedEvent }
+  | { type: "credential.resolved"; data: CredentialResolvedEvent }
   | { type: "security.verdict"; data: import("./security.js").SecurityVerdictEvent };
+
+/** Per-pick rationale for which credential ended up resolving `{{credentials.X}}`. */
+export interface CredentialResolvedEvent {
+  /** Credential type (e.g. "github", "openai"). */
+  credentialType: string;
+  /** ID of the credential the picker chose. */
+  credentialId: string;
+  /** Human-readable name of the credential ("Work GitHub"). */
+  credentialName: string;
+  /** Why the picker landed here. */
+  reason:
+    | "tool-pinned"
+    | "session-pin"
+    | "context-match"
+    | "single-match"
+    | "first-match-fallback";
+  /** Total candidates of this type the picker chose from. */
+  candidateCount: number;
+  /** Whether this happened on the synth-call hot path or at MCP spawn. */
+  surface: "synthesized" | "mcp" | "native";
+  /** Optional short detail for the canvas — never includes secret values. */
+  detail?: string;
+};
 
 /** Per-turn rationale for which tools landed in the LLM's choice set. */
 export interface ToolBagResolvedEvent {

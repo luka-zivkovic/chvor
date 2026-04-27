@@ -846,6 +846,27 @@ export function getDb(): Database.Database {
     console.log("[db] migration v23 applied: action_events, observation_events, audit_log (typed audit trail)");
   }
 
+  if (currentVersion < 24) {
+    // ── Session credential pins (Phase E — multi-credential picker) ────
+    // When multiple credentials of the same type exist, a session pin lets
+    // the user say "this session, GitHub means *Work GitHub*". Survives
+    // restart so the same conversation keeps using the same identity.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_credential_pins (
+        session_id TEXT NOT NULL,
+        credential_type TEXT NOT NULL,
+        credential_id TEXT NOT NULL,
+        pinned_at TEXT NOT NULL,
+        PRIMARY KEY (session_id, credential_type)
+      )
+    `);
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_session_pins_credential ON session_credential_pins(credential_id)"
+    );
+    db.pragma("user_version = 24");
+    console.log("[db] migration v24 applied: session_credential_pins for multi-credential picker");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }

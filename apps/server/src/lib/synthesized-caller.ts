@@ -29,6 +29,7 @@ import {
 import { refreshAccessToken, type OAuthProviderConfig } from "./oauth-engine.ts";
 import { getDirectOAuthProvider } from "./oauth-providers.ts";
 import { SynthesizedToolError } from "./errors.ts";
+import { pickCredential, type PickResult } from "./credential-picker.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 600_000;
@@ -39,6 +40,17 @@ const ALLOW_PRIVATE = process.env.CHVOR_SYNTH_ALLOW_PRIVATE === "1";
 export interface CallContext {
   sessionId?: string;
   originClientId?: string;
+  /** Skill-aggregated `preferredUsageContext` used by the multi-credential picker. */
+  preferredUsageContext?: string[];
+  /** Optional sink for picker rationale; orchestrator wires this to a canvas event. */
+  onCredentialResolved?: (info: {
+    credentialType: string;
+    credentialId: string;
+    credentialName: string;
+    reason: PickResult["reason"];
+    candidateCount: number;
+    detail?: string;
+  }) => void;
 }
 
 export type CallResult =
@@ -61,18 +73,22 @@ export interface AuthDiagnosis {
 
 // ── Credential lookup ──────────────────────────────────────────
 
-function findCredentialId(credentialType: string, pinnedId?: string): string | null {
+function pickCredentialForCall(
+  credentialType: string,
+  context: CallContext,
+  toolPinnedId?: string
+): PickResult | null {
   try {
-    const creds = listCredentials();
-    if (pinnedId) {
-      const pinned = creds.find((c) => c.id === pinnedId && c.type === credentialType);
-      if (pinned) return pinned.id;
-      // Fall through to type-match if the pinned id no longer exists / was replaced.
-    }
-    const match = creds.find((c) => c.type === credentialType);
-    return match?.id ?? null;
+    return pickCredential(credentialType, {
+      sessionId: context.sessionId ?? null,
+      toolPinnedId,
+      preferredUsageContext: context.preferredUsageContext,
+    });
   } catch (err) {
-    console.warn("[synthesized-caller] listCredentials failed:", err instanceof Error ? err.message : String(err));
+    console.warn(
+      "[synthesized-caller] pickCredential failed:",
+      err instanceof Error ? err.message : String(err)
+    );
     return null;
   }
 }
@@ -537,16 +553,17 @@ export async function callSynthesizedEndpoint(
     };
   }
 
-  // Resolve credential (optionally pinned by id)
+  // Resolve credential via tiered picker (Phase E).
   const credType = tool.synthesized.credentialType;
-  const credId = findCredentialId(credType, tool.synthesized.credentialId);
-  if (!credId) {
+  const pick = pickCredentialForCall(credType, context, tool.synthesized.credentialId);
+  if (!pick) {
     return {
       ok: false,
       error: `no credential of type "${credType}" found — ask the user to add one via native__request_credential`,
       durationMs: Date.now() - started,
     };
   }
+  const credId = pick.credentialId;
   const cred = getCredentialData(credId);
   if (!cred) {
     return {
@@ -554,6 +571,27 @@ export async function callSynthesizedEndpoint(
       error: `credential ${credId} could not be decrypted`,
       durationMs: Date.now() - started,
     };
+  }
+  // Surface rationale so the orchestrator can emit a canvas event.
+  // We pass the credential NAME (safe — UI shows it already) but never
+  // values. listCredentials() returns the name without decrypting.
+  if (context.onCredentialResolved) {
+    try {
+      const summary = listCredentials().find((c) => c.id === credId);
+      context.onCredentialResolved({
+        credentialType: credType,
+        credentialId: credId,
+        credentialName: summary?.name ?? credId,
+        reason: pick.reason,
+        candidateCount: pick.candidateCount,
+        detail: pick.detail,
+      });
+    } catch (err) {
+      console.warn(
+        "[synthesized-caller] credential rationale callback failed:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
   }
 
   const connection = cred.cred.connectionConfig;
