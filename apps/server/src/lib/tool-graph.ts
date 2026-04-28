@@ -135,6 +135,12 @@ export interface ScoreContext {
   activeGroups?: string[];
   /** Per-tool group lookup; if omitted, category contribution is 0. */
   groupOf?: (toolName: string) => string | undefined;
+  /**
+   * Phase F semantic signal — pre-computed cosine similarity for each
+   * candidate against the current user query. Pass an empty / omitted map
+   * to skip the signal (cold start with no embedder).
+   */
+  semanticScores?: Map<string, number>;
 }
 
 export interface ScoreBreakdown {
@@ -142,19 +148,32 @@ export interface ScoreBreakdown {
   strength: number;
   coActivation: number;
   category: number;
+  semantic: number;
   composite: number;
 }
 
-const W_STRENGTH = 0.5;
-const W_CO_ACTIVATION = 0.3;
-const W_CATEGORY = 0.2;
+// Weights sum to 1.0 — `semantic` carries enough mass to surface a brand-new
+// tool (zero history, no edges) but not enough to override a clearly stronger
+// tool the graph has actually learned.
+const W_STRENGTH = 0.4;
+const W_CO_ACTIVATION = 0.25;
+const W_SEMANTIC = 0.2;
+const W_CATEGORY = 0.15;
 
 /**
  * Compute a composite score for a single tool given the current context.
- * Range is roughly 0..2 — useful for relative ordering, not absolute meaning.
+ * Range is 0..1 with the weights summing to 1.0 — useful for relative
+ * ordering, not absolute meaning.
  *
- * NOTE on coverage: semantic-match (Phase F) and emotion-risk (Phase H) are
- * intentionally absent. They'll plug in later as additional weighted signals.
+ * Signals:
+ *   - strength       — Hebbian node strength, normalised to [0, 1]
+ *   - coActivation   — average edge weight to recently-used tools
+ *   - semantic       — cosine similarity to the user's query (Phase F)
+ *   - category       — 1 when tool's group is in the active scope
+ *
+ * The Phase H emotion-modulated risk gate runs as a separate filter step
+ * (it removes tools entirely rather than re-weighting them) and is not
+ * part of this score.
  */
 export function scoreTool(
   node: ToolNode | null,
@@ -182,6 +201,11 @@ export function scoreTool(
     coActivation = counted > 0 ? sum / counted : 0;
   }
 
+  // Semantic match against the user's query (Phase F). Falls through to 0
+  // when we don't have an embedding for this tool (cold-start) or when the
+  // embedder isn't available — strength + co-activation still rank.
+  const semantic = ctx.semanticScores?.get(toolName) ?? 0;
+
   // Category match: 1 when the tool's group is in the active set, else 0.
   let category = 0;
   if (ctx.activeGroups?.length && ctx.groupOf) {
@@ -190,9 +214,12 @@ export function scoreTool(
   }
 
   const composite =
-    W_STRENGTH * strength + W_CO_ACTIVATION * coActivation + W_CATEGORY * category;
+    W_STRENGTH * strength +
+    W_CO_ACTIVATION * coActivation +
+    W_SEMANTIC * semantic +
+    W_CATEGORY * category;
 
-  return { toolName, strength, coActivation, category, composite };
+  return { toolName, strength, coActivation, category, semantic, composite };
 }
 
 function clamp01(x: number): number {

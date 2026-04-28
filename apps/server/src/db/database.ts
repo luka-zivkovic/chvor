@@ -915,6 +915,43 @@ export function getDb(): Database.Database {
     console.log("[db] migration v25 applied: tool_nodes + tool_edges (Cognitive Tool Graph)");
   }
 
+  if (currentVersion < 26) {
+    // ── Cognitive Tool Graph — semantic embeddings (Phase F) ──────────
+    // `tool_embedding_meta` tracks the source-text hash + last-synced
+    // timestamp per tool so we only re-embed when the underlying name +
+    // description + group actually changes (cheap incremental sync).
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tool_embedding_meta (
+        tool_name TEXT PRIMARY KEY,
+        text_hash TEXT NOT NULL,
+        last_synced_at TEXT NOT NULL
+      )
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_tem_synced ON tool_embedding_meta(last_synced_at DESC)");
+
+    // Vec0 virtual table for KNN search. Dimension matches the active
+    // embedder. If embedder swap changes the dimension, callers should
+    // fall back to `rebuildVecTable`-style logic before continuing.
+    if (vecAvailable) {
+      db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS tool_vec USING vec0(
+          id TEXT PRIMARY KEY,
+          embedding float[384]
+        )
+      `);
+    }
+
+    // Hourly tool-embedding sync — hash-dedup makes the steady state cheap.
+    const seedNow26 = new Date().toISOString();
+    const ONE_HOUR = 60 * 60 * 1000;
+    db.prepare(
+      "INSERT OR IGNORE INTO system_jobs (job_id, interval_ms, next_run_at, status) VALUES (?, ?, ?, 'idle')"
+    ).run("tool-embedding-sync", ONE_HOUR, seedNow26);
+
+    db.pragma("user_version = 26");
+    console.log("[db] migration v26 applied: tool_embedding_meta + tool_vec (Phase F semantic router)");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }
