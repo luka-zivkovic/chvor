@@ -103,7 +103,27 @@ export type ExecutionEvent =
   | { type: "credential.resolved"; data: CredentialResolvedEvent }
   | { type: "security.verdict"; data: import("./security.js").SecurityVerdictEvent }
   | { type: "tool.graph.observed"; data: ToolGraphObservedEvent }
-  | { type: "tool.bag.emotion-gated"; data: import("./emotion-gate.js").EmotionGatedToolsEvent };
+  | { type: "tool.bag.emotion-gated"; data: import("./emotion-gate.js").EmotionGatedToolsEvent }
+  | { type: "tool.bag.ranked"; data: ToolBagRankedEvent };
+
+/** Per-turn rationale for graph-driven bag ordering (Phase G+). */
+export interface ToolBagRankedEvent {
+  /** Top-N entries with their per-signal score breakdown — useful for the canvas debug drawer. */
+  top: Array<{
+    toolName: string;
+    composite: number;
+    strength: number;
+    coActivation: number;
+    semantic: number;
+    category: number;
+  }>;
+  /** Total tools the resolver considered. */
+  totalRanked: number;
+  /** Recent successful tool names used for co-activation scoring. */
+  recentTools: string[];
+  /** True when the embedder contributed at least one semantic score. */
+  semanticActive: boolean;
+}
 
 /** Per-call rationale from the Cognitive Tool Graph (Phase G). */
 export interface ToolGraphObservedEvent {
