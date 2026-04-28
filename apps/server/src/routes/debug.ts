@@ -8,6 +8,12 @@ import {
   getNode,
   listNodes,
 } from "../db/tool-graph-store.ts";
+import {
+  countCheckpoints,
+  getCheckpoint,
+  getLatestCheckpointForSession,
+  listCheckpointSummaries,
+} from "../db/checkpoint-store.ts";
 import type { ActionKind } from "@chvor/shared";
 
 const debugRoute = new Hono();
@@ -110,6 +116,38 @@ debugRoute.get("/tool-graph", (c) => {
       totals: { nodes: countNodes(), edges: countEdges() },
     },
   });
+});
+
+/**
+ * GET /api/debug/checkpoints — paginated round snapshots.
+ * Query params: session, limit, offset, latest=1 (returns just the most
+ * recent for the session, useful for the resume UI preview).
+ */
+debugRoute.get("/checkpoints", (c) => {
+  const sessionId = c.req.query("session");
+  const latest = c.req.query("latest");
+  const limitRaw = c.req.query("limit");
+  const offsetRaw = c.req.query("offset");
+
+  if (latest && sessionId) {
+    const checkpoint = getLatestCheckpointForSession(sessionId);
+    return c.json({ data: { checkpoint, totalStored: countCheckpoints() } });
+  }
+
+  const summaries = listCheckpointSummaries({
+    sessionId: sessionId ?? undefined,
+    limit: limitRaw ? Number(limitRaw) : undefined,
+    offset: offsetRaw ? Number(offsetRaw) : undefined,
+  });
+  return c.json({ data: { summaries, totalStored: countCheckpoints() } });
+});
+
+/** GET /api/debug/checkpoints/:id — full snapshot for a single round. */
+debugRoute.get("/checkpoints/:id", (c) => {
+  const id = c.req.param("id");
+  const checkpoint = getCheckpoint(id);
+  if (!checkpoint) return c.json({ error: "not found" }, 404);
+  return c.json({ data: { checkpoint } });
 });
 
 export default debugRoute;

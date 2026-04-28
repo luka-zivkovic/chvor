@@ -43,6 +43,7 @@ import {
 import type { SecurityActionContext, SecurityActionKind } from "@chvor/shared";
 import { appendAudit } from "../db/audit-log-store.ts";
 import { recordToolOutcome } from "./tool-graph.ts";
+import { snapshotRound } from "./checkpoint-manager.ts";
 import { applyEmotionGate, getSessionVAD, isEmotionGateEnabled } from "./emotion-gate.ts";
 import {
   resolveBagOrdering,
@@ -237,10 +238,18 @@ export async function executeConversation(
   // frustrated/hostile bucket, mask destructive (and on hostile, also moderate)
   // tools from the bag. `criticality: always-available` tools bypass.
   let toolDefs: typeof builtToolDefs = builtToolDefs;
+  // Hoisted for the Phase D3 checkpointer — captures the per-turn emotion
+  // bucket so each round snapshot includes the gate's view of the world.
+  let snapshotEmotion: import("@chvor/shared").OrchestratorCheckpointSnapshot["emotion"] = null;
   if (isEmotionGateEnabled()) {
     const sessionVad = getSessionVAD(options?.sessionId);
     const gateResult = applyEmotionGate({ defs: builtToolDefs, vad: sessionVad });
     toolDefs = gateResult.defs;
+    snapshotEmotion = {
+      bucket: gateResult.bucket,
+      vad: sessionVad,
+      maskedToolCount: gateResult.masked.length,
+    };
     if (gateResult.event) {
       emit({ type: "tool.bag.emotion-gated", data: gateResult.event });
       console.log(
@@ -457,6 +466,10 @@ export async function executeConversation(
   // removed. Puts the highest-composite-score tools first in the system
   // prompt so small models pick the right one without scanning the bag.
   let promptVisibleTools = visibleTools;
+  // Hoisted for Phase D3 checkpoints — captures the per-turn ranking +
+  // recent-tools window so round snapshots include the bag's rationale.
+  let snapshotRanking: import("@chvor/shared").OrchestratorCheckpointSnapshot["ranking"] = [];
+  let snapshotRecentTools: string[] = [];
   try {
     const queryText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content : "";
     const nativeNamesInBag = Object.keys(toolDefs).filter((n) => n.startsWith("native__"));
@@ -471,6 +484,11 @@ export async function executeConversation(
     const reordered = reorderDefsByRanking(toolDefs, ordering.ranking);
     for (const k of Object.keys(toolDefs)) delete toolDefs[k];
     Object.assign(toolDefs, reordered);
+    snapshotRanking = ordering.ranking.slice(0, 12).map((r) => ({
+      toolName: r.toolName,
+      composite: Number(r.composite.toFixed(4)),
+    }));
+    snapshotRecentTools = ordering.recentTools;
 
     emit({
       type: "tool.bag.ranked",
@@ -691,6 +709,39 @@ export async function executeConversation(
       console.log(`[orchestrator] tools: ${toolCalls.map((tc) => tc.toolName).join(", ")}`);
     }
 
+    // Phase D3 — persist a snapshot for this round. Defined here so every
+    // exit path (final-answer, auth-bail, no-progress-bail, end-of-loop)
+    // gets a row, not just rounds that completed tool processing.
+    const persistRoundSnapshot = (
+      outcomes: Array<{ toolName: string; success: boolean }>
+    ): void => {
+      try {
+        const activeConfig = configChain[activeConfigIndex];
+        snapshotRound({
+          sessionId: options?.sessionId,
+          round,
+          bagScope,
+          bagToolCount: Object.keys(toolDefs).length,
+          emotion: snapshotEmotion,
+          model: {
+            providerId: activeConfig.providerId,
+            model: activeConfig.model,
+            wasFallback: activeConfigIndex > 0,
+          },
+          ranking: snapshotRanking,
+          toolOutcomes: outcomes,
+          recentTools: snapshotRecentTools,
+          messages: { total: messages.length, fitted: budgetedMessages.length },
+          memoryIds: retrievedMemoryIds,
+        });
+      } catch (err) {
+        console.warn(
+          "[orchestrator] checkpoint snapshot failed:",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    };
+
     // No tool calls — final response
     if (toolCalls.length === 0) {
       // Process emotion through engine if available
@@ -762,6 +813,8 @@ export async function executeConversation(
       }
       const allMedia = allActions.flatMap((a) => a.media ?? []);
       const activeConfig = configChain[activeConfigIndex];
+      // Final-answer round had no tool calls by definition, so outcomes are [].
+      persistRoundSnapshot([]);
       return {
         text: fullText,
         actions: allActions,
@@ -796,6 +849,10 @@ export async function executeConversation(
     // form Hebbian co-activation edges between tools used together.
     const turnSuccessSet = new Set<string>();
 
+    // Phase D3 — per-round tool outcomes for the checkpoint snapshot. Resets
+    // each round so a snapshot only reflects calls made in *this* round.
+    const roundToolOutcomes: Array<{ toolName: string; success: boolean }> = [];
+
     /**
      * Record a tool outcome in the Cognitive Tool Graph and emit a canvas
      * event. Called after every tool call (success or failure) on every
@@ -803,6 +860,7 @@ export async function executeConversation(
      * graph-store hiccup never breaks the actual tool result.
      */
     function observeToolOutcome(toolName: string, success: boolean): void {
+      roundToolOutcomes.push({ toolName, success });
       try {
         const peers = success ? Array.from(turnSuccessSet).filter((t) => t !== toolName) : [];
         const result = recordToolOutcome({
@@ -1264,6 +1322,7 @@ export async function executeConversation(
         const hint = authDiagnoses[0].userFacingHint ?? "An auth error is blocking these calls.";
         if (onChunk) onChunk(hint);
         const activeConfig = configChain[activeConfigIndex];
+        persistRoundSnapshot(roundToolOutcomes);
         return {
           text: lastFullText.trim() ? lastFullText + "\n\n" + hint : hint,
           actions: allActions,
@@ -1288,6 +1347,7 @@ export async function executeConversation(
         if (onChunk) onChunk(bailText);
         const allMedia = allActions.flatMap((a) => a.media ?? []);
         const activeConfig = configChain[activeConfigIndex];
+        persistRoundSnapshot(roundToolOutcomes);
         return {
           text: lastFullText.trim() ? lastFullText + "\n\n" + bailText : bailText,
           actions: allActions,
@@ -1324,6 +1384,9 @@ export async function executeConversation(
         })),
       },
     ];
+
+    // Phase D3 — end-of-round snapshot for the normal continue-to-next-round path.
+    persistRoundSnapshot(roundToolOutcomes);
 
     // Reset client streaming content before next LLM round
     onStreamReset?.();

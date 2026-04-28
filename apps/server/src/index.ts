@@ -93,6 +93,7 @@ import { startSkillWatcher, stopSkillWatcher } from "./lib/skill-watcher.ts";
 import { startAutoUpdate, stopAutoUpdate } from "./lib/registry-updater.ts";
 import { startMemoryDecay, stopMemoryDecay } from "./lib/memory-decay.ts";
 import { startToolGraphDecay, stopToolGraphDecay } from "./lib/tool-graph-decay.ts";
+import { startCheckpointPrune, stopCheckpointPrune } from "./lib/checkpoint-manager.ts";
 import { startToolEmbeddingSync, stopToolEmbeddingSync, bootstrapToolEmbeddings } from "./lib/tool-embedding-job.ts";
 import { startConsolidation, stopConsolidation } from "./lib/memory-consolidation.ts";
 import { initJobRunner, stopAllPeriodicJobs } from "./lib/job-runner.ts";
@@ -661,6 +662,7 @@ startMediaCleanup();
 initJobRunner();
 startMemoryDecay();
 startToolGraphDecay();
+startCheckpointPrune();
 startToolEmbeddingSync();
 // Best-effort: kick off a sync now so newly-installed tools get embeddings
 // before the first turn fires. Hash dedup means it's a near-noop when up to date.
