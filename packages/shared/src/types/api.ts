@@ -153,6 +153,7 @@ export type GatewayClientEvent =
   | { type: "credential.respond"; data: CredentialResponseData }
   | { type: "synthesized.respond"; data: SynthesizedResponseData }
   | { type: "oauth.synthesized.respond"; data: OAuthSynthesizedWizardResponse }
+  | { type: "approval.respond"; data: import("./approval.js").ApprovalResponseData }
   | { type: "heartbeat"; data: Record<string, never> };
 
 export type GatewayServerEvent =
@@ -171,6 +172,8 @@ export type GatewayServerEvent =
   | { type: "credential.request"; data: CredentialRequestData }
   | { type: "oauth.synthesized.wizard"; data: OAuthSynthesizedWizardData }
   | { type: "synthesized.confirm"; data: SynthesizedConfirmData }
+  | { type: "approval.requested"; data: import("./approval.js").ApprovalRequestedEvent }
+  | { type: "approval.resolved"; data: { approvalId: string; status: "allowed" | "denied" | "expired"; decision: import("./approval.js").ApprovalDecision | null } }
   | { type: "chat.stopped"; data: Record<string, never> }
   | { type: "chat.welcome"; data: { content: string; aiName: string } }
   | { type: "chat.modelInfo"; data: { providerId: string; model: string; wasFallback: boolean } }

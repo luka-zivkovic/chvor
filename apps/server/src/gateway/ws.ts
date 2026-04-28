@@ -33,9 +33,12 @@ function isValidClientEvent(event: unknown): event is GatewayClientEvent {
         && (!d.messageId || (typeof d.messageId === "string" && UUID_RE.test(d.messageId)));
     case "chat.stop":
       return true;
-    case "approval.respond":
     case "command.respond":
       return typeof d.requestId === "string" && typeof d.approved === "boolean";
+    case "approval.respond":
+      // Phase D4 — HITL approvals: { approvalId, decision }.
+      return typeof d.approvalId === "string" &&
+        (d.decision === "allow-once" || d.decision === "allow-session" || d.decision === "deny");
     case "credential.respond":
       return typeof d.requestId === "string" && typeof d.cancelled === "boolean";
     case "synthesized.respond":

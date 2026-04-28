@@ -68,6 +68,8 @@ import daemonRoute from "./routes/daemon.ts";
 import integrationsRoute from "./routes/integrations.ts";
 import debugRoute from "./routes/debug.ts";
 import auditRoute from "./routes/audit.ts";
+import approvalsRoute from "./routes/approvals.ts";
+import resumeRoute from "./routes/orchestrator-resume.ts";
 import sessionPinsRoute from "./routes/session-pins.ts";
 import adminRoute, { registerShutdownHandler } from "./routes/admin.ts";
 import { initDocker } from "./lib/sandbox.ts";
@@ -94,6 +96,7 @@ import { startAutoUpdate, stopAutoUpdate } from "./lib/registry-updater.ts";
 import { startMemoryDecay, stopMemoryDecay } from "./lib/memory-decay.ts";
 import { startToolGraphDecay, stopToolGraphDecay } from "./lib/tool-graph-decay.ts";
 import { startCheckpointPrune, stopCheckpointPrune } from "./lib/checkpoint-manager.ts";
+import { startApprovalExpire, stopApprovalExpire, resolveHITLApproval } from "./lib/approval-gate-hitl.ts";
 import { startToolEmbeddingSync, stopToolEmbeddingSync, bootstrapToolEmbeddings } from "./lib/tool-embedding-job.ts";
 import { startConsolidation, stopConsolidation } from "./lib/memory-consolidation.ts";
 import { initJobRunner, stopAllPeriodicJobs } from "./lib/job-runner.ts";
@@ -210,6 +213,21 @@ wsManager.onClientMessage((clientId, event) => {
         wsManager.sendTo(clientId, {
           type: "error",
           data: { message: "No pending synthesized-tool confirmation with that ID (may have timed out, or another client originated it)" },
+        });
+      }
+      break;
+    }
+    case "approval.respond": {
+      const result = resolveHITLApproval({
+        id: event.data.approvalId,
+        decision: event.data.decision,
+        decidedBy: "user",
+        responderClientId: clientId,
+      });
+      if (!result.ok) {
+        wsManager.sendTo(clientId, {
+          type: "error",
+          data: { message: `Approval not actionable: ${result.reason}` },
         });
       }
       break;
@@ -371,6 +389,8 @@ app.route("/api/daemon", daemonRoute);
 app.route("/api/integrations", integrationsRoute);
 app.route("/api/debug", debugRoute);
 app.route("/api/audit", auditRoute);
+app.route("/api/approvals", approvalsRoute);
+app.route("/api/orchestrator/resume", resumeRoute);
 app.route("/api/admin", adminRoute);
 
 // Serve TTS audio files (no auth — ephemeral UUIDs)
@@ -663,6 +683,7 @@ initJobRunner();
 startMemoryDecay();
 startToolGraphDecay();
 startCheckpointPrune();
+startApprovalExpire();
 startToolEmbeddingSync();
 // Best-effort: kick off a sync now so newly-installed tools get embeddings
 // before the first turn fires. Hash dedup means it's a near-noop when up to date.

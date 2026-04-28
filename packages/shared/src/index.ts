@@ -32,6 +32,7 @@ export * from "./types/tool-group.js";
 export * from "./types/security.js";
 export * from "./types/emotion-gate.js";
 export * from "./types/checkpoint.js";
+export * from "./types/approval.js";
 
 // Lib
 export * from "./lib/validate-skill.js";
