@@ -709,6 +709,39 @@ export async function executeConversation(
       console.log(`[orchestrator] tools: ${toolCalls.map((tc) => tc.toolName).join(", ")}`);
     }
 
+    // Phase D3 — persist a snapshot for this round. Defined here so every
+    // exit path (final-answer, auth-bail, no-progress-bail, end-of-loop)
+    // gets a row, not just rounds that completed tool processing.
+    const persistRoundSnapshot = (
+      outcomes: Array<{ toolName: string; success: boolean }>
+    ): void => {
+      try {
+        const activeConfig = configChain[activeConfigIndex];
+        snapshotRound({
+          sessionId: options?.sessionId,
+          round,
+          bagScope,
+          bagToolCount: Object.keys(toolDefs).length,
+          emotion: snapshotEmotion,
+          model: {
+            providerId: activeConfig.providerId,
+            model: activeConfig.model,
+            wasFallback: activeConfigIndex > 0,
+          },
+          ranking: snapshotRanking,
+          toolOutcomes: outcomes,
+          recentTools: snapshotRecentTools,
+          messages: { total: messages.length, fitted: budgetedMessages.length },
+          memoryIds: retrievedMemoryIds,
+        });
+      } catch (err) {
+        console.warn(
+          "[orchestrator] checkpoint snapshot failed:",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    };
+
     // No tool calls — final response
     if (toolCalls.length === 0) {
       // Process emotion through engine if available
@@ -780,6 +813,8 @@ export async function executeConversation(
       }
       const allMedia = allActions.flatMap((a) => a.media ?? []);
       const activeConfig = configChain[activeConfigIndex];
+      // Final-answer round had no tool calls by definition, so outcomes are [].
+      persistRoundSnapshot([]);
       return {
         text: fullText,
         actions: allActions,
@@ -1287,6 +1322,7 @@ export async function executeConversation(
         const hint = authDiagnoses[0].userFacingHint ?? "An auth error is blocking these calls.";
         if (onChunk) onChunk(hint);
         const activeConfig = configChain[activeConfigIndex];
+        persistRoundSnapshot(roundToolOutcomes);
         return {
           text: lastFullText.trim() ? lastFullText + "\n\n" + hint : hint,
           actions: allActions,
@@ -1311,6 +1347,7 @@ export async function executeConversation(
         if (onChunk) onChunk(bailText);
         const allMedia = allActions.flatMap((a) => a.media ?? []);
         const activeConfig = configChain[activeConfigIndex];
+        persistRoundSnapshot(roundToolOutcomes);
         return {
           text: lastFullText.trim() ? lastFullText + "\n\n" + bailText : bailText,
           actions: allActions,
@@ -1348,33 +1385,8 @@ export async function executeConversation(
       },
     ];
 
-    // Phase D3 — persist a round snapshot for replay/debug. Best-effort: if
-    // the DB hiccups, we don't break the actual turn.
-    try {
-      const activeConfig = configChain[activeConfigIndex];
-      snapshotRound({
-        sessionId: options?.sessionId,
-        round,
-        bagScope,
-        bagToolCount: Object.keys(toolDefs).length,
-        emotion: snapshotEmotion,
-        model: {
-          providerId: activeConfig.providerId,
-          model: activeConfig.model,
-          wasFallback: activeConfigIndex > 0,
-        },
-        ranking: snapshotRanking,
-        toolOutcomes: roundToolOutcomes,
-        recentTools: snapshotRecentTools,
-        messages: { total: messages.length, fitted: budgetedMessages.length },
-        memoryIds: retrievedMemoryIds,
-      });
-    } catch (err) {
-      console.warn(
-        "[orchestrator] checkpoint snapshot failed:",
-        err instanceof Error ? err.message : String(err)
-      );
-    }
+    // Phase D3 — end-of-round snapshot for the normal continue-to-next-round path.
+    persistRoundSnapshot(roundToolOutcomes);
 
     // Reset client streaming content before next LLM round
     onStreamReset?.();

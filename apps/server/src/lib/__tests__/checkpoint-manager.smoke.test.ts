@@ -10,15 +10,17 @@ process.env.CHVOR_DATA_DIR = tmp;
 
 let snapshotRound: typeof import("../checkpoint-manager.ts").snapshotRound;
 let isCheckpointingEnabled: typeof import("../checkpoint-manager.ts").isCheckpointingEnabled;
+let getRetentionMs: typeof import("../checkpoint-manager.ts").getRetentionMs;
 let appendCheckpoint: typeof import("../../db/checkpoint-store.ts").appendCheckpoint;
 let getCheckpoint: typeof import("../../db/checkpoint-store.ts").getCheckpoint;
 let getLatestCheckpointForSession: typeof import("../../db/checkpoint-store.ts").getLatestCheckpointForSession;
 let listCheckpointSummaries: typeof import("../../db/checkpoint-store.ts").listCheckpointSummaries;
 let pruneCheckpointsOlderThan: typeof import("../../db/checkpoint-store.ts").pruneCheckpointsOlderThan;
 let countCheckpoints: typeof import("../../db/checkpoint-store.ts").countCheckpoints;
+let getDb: typeof import("../../db/database.ts").getDb;
 
 beforeAll(async () => {
-  ({ snapshotRound, isCheckpointingEnabled } = await import(
+  ({ snapshotRound, isCheckpointingEnabled, getRetentionMs } = await import(
     "../checkpoint-manager.ts"
   ));
   ({
@@ -29,6 +31,7 @@ beforeAll(async () => {
     pruneCheckpointsOlderThan,
     countCheckpoints,
   } = await import("../../db/checkpoint-store.ts"));
+  ({ getDb } = await import("../../db/database.ts"));
 });
 
 function makeScope(): ToolBagScope {
@@ -250,5 +253,49 @@ describe("checkpoint-manager — snapshotRound", () => {
     const removed = pruneCheckpointsOlderThan(-1);
     expect(removed).toBe(totalBefore);
     expect(countCheckpoints()).toBe(0);
+  });
+
+  it("getCheckpoint returns an empty-shaped snapshot when state JSON is corrupt", () => {
+    // Inject a row with malformed JSON in the state column directly via the DB.
+    // Mirrors the failure mode of a torn write or manual edit.
+    const db = getDb();
+    const id = "corrupt-row-id";
+    db.prepare(
+      `INSERT INTO orchestrator_checkpoints (id, session_id, round, state, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(id, "sess-corrupt", 0, "{not valid json", Date.now());
+
+    const ck = getCheckpoint(id);
+    expect(ck).not.toBeNull();
+    expect(ck!.id).toBe(id);
+    expect(ck!.state.bag.toolCount).toBe(0);
+    expect(ck!.state.ranking).toEqual([]);
+    expect(ck!.state.toolOutcomes).toEqual([]);
+    expect(ck!.state.model.providerId).toBe("unknown");
+  });
+
+  it("getRetentionMs falls back to 7 days for invalid env values", () => {
+    const original = process.env.CHVOR_CHECKPOINT_RETENTION_DAYS;
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    try {
+      delete process.env.CHVOR_CHECKPOINT_RETENTION_DAYS;
+      expect(getRetentionMs()).toBe(SEVEN_DAYS_MS);
+
+      for (const bad of ["", "abc", "0", "-1", "NaN", "Infinity"]) {
+        process.env.CHVOR_CHECKPOINT_RETENTION_DAYS = bad;
+        expect(getRetentionMs()).toBe(SEVEN_DAYS_MS);
+      }
+
+      process.env.CHVOR_CHECKPOINT_RETENTION_DAYS = "1";
+      expect(getRetentionMs()).toBe(ONE_DAY_MS);
+
+      // Fractional days are honored (Number.isFinite + > 0).
+      process.env.CHVOR_CHECKPOINT_RETENTION_DAYS = "0.5";
+      expect(getRetentionMs()).toBe(ONE_DAY_MS / 2);
+    } finally {
+      if (original === undefined) delete process.env.CHVOR_CHECKPOINT_RETENTION_DAYS;
+      else process.env.CHVOR_CHECKPOINT_RETENTION_DAYS = original;
+    }
   });
 });

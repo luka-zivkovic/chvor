@@ -36,8 +36,13 @@ function rowToCheckpoint(r: CheckpointRow): OrchestratorCheckpoint {
   let state: OrchestratorCheckpointSnapshot;
   try {
     state = JSON.parse(r.state) as OrchestratorCheckpointSnapshot;
-  } catch {
+  } catch (err) {
     // Corrupt row — return an empty-shaped snapshot so callers don't crash.
+    // Logged so silent corruption (truncated writes, manual edits) is visible.
+    console.warn(
+      `[checkpoint-store] corrupt row id=${r.id} session=${r.session_id}:`,
+      err instanceof Error ? err.message : String(err)
+    );
     state = {
       round: r.round,
       bag: {

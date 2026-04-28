@@ -76,7 +76,7 @@ export function snapshotRound(args: SnapshotRoundArgs): string | null {
 // ── Periodic prune job ────────────────────────────────────────
 
 /** Default 7 days; override via CHVOR_CHECKPOINT_RETENTION_DAYS. */
-function getRetentionMs(): number {
+export function getRetentionMs(): number {
   const raw = process.env.CHVOR_CHECKPOINT_RETENTION_DAYS;
   const days = raw ? Number(raw) : 7;
   const safe = Number.isFinite(days) && days > 0 ? days : 7;
