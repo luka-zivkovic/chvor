@@ -17,6 +17,7 @@ let decideApproval: typeof import("../../db/approval-store.ts").decideApproval;
 let getApproval: typeof import("../../db/approval-store.ts").getApproval;
 let listApprovals: typeof import("../../db/approval-store.ts").listApprovals;
 let expireStaleApprovals: typeof import("../../db/approval-store.ts").expireStaleApprovals;
+let expireApprovalById: typeof import("../../db/approval-store.ts").expireApprovalById;
 let pruneApprovalsOlderThan: typeof import("../../db/approval-store.ts").pruneApprovalsOlderThan;
 let countApprovals: typeof import("../../db/approval-store.ts").countApprovals;
 let countPendingApprovals: typeof import("../../db/approval-store.ts").countPendingApprovals;
@@ -31,6 +32,7 @@ beforeAll(async () => {
     getApproval,
     listApprovals,
     expireStaleApprovals,
+    expireApprovalById,
     pruneApprovalsOlderThan,
     countApprovals,
     countPendingApprovals,
@@ -159,6 +161,28 @@ describe("approval-store", () => {
     expect(getApproval(decided)).toBeNull();
   });
 
+  it("expireApprovalById flips a single pending row to expired and is one-shot", () => {
+    const id = appendPendingApproval({
+      sessionId: "sess-expire-by-id", actionId: null, toolName: "z", kind: "native", args: {},
+      risk: "high", reasons: [], checkpointId: null, ttlMs: 60_000,
+    });
+    const expired = expireApprovalById(id);
+    expect(expired).not.toBeNull();
+    expect(expired!.status).toBe("expired");
+    expect(expired!.decidedBy).toBe("auto-expire");
+
+    // Already-final rows can't be re-expired.
+    expect(expireApprovalById(id)).toBeNull();
+    // And a decided row is also untouchable via this helper.
+    const decidedId = appendPendingApproval({
+      sessionId: "sess-expire-by-id", actionId: null, toolName: "z2", kind: "native", args: {},
+      risk: "high", reasons: [], checkpointId: null, ttlMs: 60_000,
+    });
+    decideApproval({ id: decidedId, decision: "allow-once", decidedBy: "user" });
+    expect(expireApprovalById(decidedId)).toBeNull();
+    expect(getApproval(decidedId)!.status).toBe("allowed");
+  });
+
   it("countApprovals + countPendingApprovals reflect the table", () => {
     const totalBefore = countApprovals();
     const pendingBefore = countPendingApprovals();
@@ -235,7 +259,7 @@ describe("approval-gate-hitl — request/resolve flow", () => {
     if (!outcome.allowed) expect(outcome.reason).toBe("denied");
   });
 
-  it("the auto-expire timer closes a stale pending request", async () => {
+  it("the auto-expire timer closes a stale pending request as status='expired'", async () => {
     const promise = requestNativeApproval({
       sessionId: "sess-expire",
       actionId: null,
@@ -252,6 +276,11 @@ describe("approval-gate-hitl — request/resolve flow", () => {
       // Either "expired" (WS available) or "no-ws" (which also implies the
       // gate ran the timeout path) — both are acceptable terminal states.
       expect(["expired", "no-ws"]).toContain(outcome.reason);
+      // The DB row must always land as `expired` (not `denied`), regardless
+      // of whether the in-memory timer or the periodic sweep won the race.
+      expect(outcome.record).not.toBeNull();
+      expect(outcome.record!.status).toBe("expired");
+      expect(outcome.record!.decidedBy).toBe("auto-expire");
     }
   }, 6_000);
 
@@ -263,5 +292,43 @@ describe("approval-gate-hitl — request/resolve flow", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("not-found");
+  });
+
+  it("resolveHITLApproval rejects responder-mismatch when origin and responder differ", async () => {
+    const promise = requestNativeApproval({
+      sessionId: "sess-responder",
+      actionId: null,
+      toolName: "native__shell_execute",
+      kind: "native",
+      args: {},
+      risk: "high",
+      reasons: ["test"],
+      checkpointId: null,
+      originClientId: "client-A",
+    });
+    // Let the gate persist the row + register the in-memory handle.
+    await new Promise((r) => setTimeout(r, 10));
+    const pending = listApprovals({ sessionId: "sess-responder", status: "pending" });
+    expect(pending.length).toBeGreaterThanOrEqual(1);
+    const id = pending[0].id;
+
+    // A different client trying to answer the same prompt is rejected and
+    // does NOT mutate the row.
+    const wrong = resolveHITLApproval({
+      id, decision: "allow-once", decidedBy: "user", responderClientId: "client-B",
+    });
+    expect(wrong.ok).toBe(false);
+    if (!wrong.ok) expect(wrong.reason).toBe("responder-mismatch");
+    expect(getApproval(id)!.status).toBe("pending");
+
+    // The originating client succeeds, and the awaiting promise resolves.
+    const right = resolveHITLApproval({
+      id, decision: "allow-once", decidedBy: "user", responderClientId: "client-A",
+    });
+    expect(right.ok).toBe(true);
+
+    const outcome = await promise;
+    expect(outcome.allowed).toBe(true);
+    if (outcome.allowed) expect(outcome.decision).toBe("allow-once");
   });
 });

@@ -9,6 +9,7 @@ import type {
 import {
   appendPendingApproval,
   decideApproval,
+  expireApprovalById,
   expireStaleApprovals,
   getApproval,
 } from "../db/approval-store.ts";
@@ -148,9 +149,11 @@ export async function requestNativeApproval(args: RequestNativeApprovalArgs): Pr
   });
 
   if (decision === "expired") {
-    // The DB row may already be marked expired by the periodic job, or it
-    // may still be pending. Force the transition either way.
-    decideApproval({ id, decision: "deny", decidedBy: "auto-expire" });
+    // Conditional pending → expired. If the periodic sweep got there first
+    // the row is already in the right terminal state; otherwise this writes
+    // it. Either way the row never lands as `denied` from a timeout, which
+    // matters for the audit trail.
+    expireApprovalById(id);
     const record = getApproval(id);
     return {
       allowed: false,

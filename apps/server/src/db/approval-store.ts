@@ -200,6 +200,27 @@ export function expireStaleApprovals(): number {
 }
 
 /**
+ * Conditional update of a single row to status='expired'. Used by the
+ * in-memory timeout path so a timed-out prompt always lands in the same
+ * terminal state the periodic sweep would write — `decideApproval` can't
+ * be reused here because its `decision` parameter only models user-visible
+ * choices (allow-once / allow-session / deny), not auto-expiry.
+ */
+export function expireApprovalById(id: string): ApprovalRecord | null {
+  const db = getDb();
+  const now = Date.now();
+  const result = db
+    .prepare(
+      `UPDATE approvals
+         SET status = 'expired', decided_at = ?, decided_by = 'auto-expire'
+         WHERE id = ? AND status = 'pending'`
+    )
+    .run(now, id);
+  if ((result.changes as number) === 0) return null;
+  return getApproval(id);
+}
+
+/**
  * Drop fully decided rows older than `olderThanMs`. Pending rows are never
  * touched — the expire pass handles them. Used by the same retention window
  * as checkpoints / events so audit history stays correlated.

@@ -586,10 +586,14 @@ export async function executeConversation(
   let noProgressRounds = 0;
   const NO_PROGRESS_THRESHOLD = 3;
 
-  // Phase D4 — per-session HITL cache. Tools the user approved with
-  // `allow-session` skip the prompt for the rest of this turn (and for
-  // the rest of this server process — restart re-prompts on purpose).
-  const hitlAllowSession = new Set<string>();
+  // Phase D4 — per-turn HITL cache. Tools the user approved with
+  // `allow-session` skip the prompt for the rest of this turn (this Set
+  // is local to one `executeConversation` invocation — the next user
+  // message starts a fresh turn and re-prompts). The naming follows the
+  // user-facing button label ("allow for this session"); the lifetime is
+  // intentionally narrower so a long-lived turn doesn't accumulate
+  // implicit approvals across unrelated tool calls.
+  const hitlAllowTurn = new Set<string>();
   const hitlKey = (kind: string, toolName: string): string =>
     `${options?.sessionId ?? ""}::${kind}::${toolName}`;
 
@@ -935,7 +939,7 @@ export async function executeConversation(
       const isHigh = verdict.risk === "high";
       const canPromptHITL = isHigh && isHITLEnabled() && Boolean(options?.sessionId);
       const cachedSessionAllow =
-        isHigh && hitlAllowSession.has(hitlKey(kind, tc.toolName));
+        isHigh && hitlAllowTurn.has(hitlKey(kind, tc.toolName));
       const block = isHigh && !canPromptHITL && !cachedSessionAllow && isBlockHighRiskEnabled();
 
       if (verdict.risk !== "low" || isVerdictEventVerbose()) {
@@ -1006,7 +1010,7 @@ export async function executeConversation(
 
         if (outcome.allowed) {
           if (outcome.decision === "allow-session") {
-            hitlAllowSession.add(hitlKey(kind, tc.toolName));
+            hitlAllowTurn.add(hitlKey(kind, tc.toolName));
           }
           emit({
             type: "security.approval.resolved",
