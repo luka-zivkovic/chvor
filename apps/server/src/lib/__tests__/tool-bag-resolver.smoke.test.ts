@@ -12,12 +12,15 @@ let resolveBagOrdering: typeof import("../tool-bag-resolver.ts").resolveBagOrder
 let reorderDefsByRanking: typeof import("../tool-bag-resolver.ts").reorderDefsByRanking;
 let reorderToolsByRanking: typeof import("../tool-bag-resolver.ts").reorderToolsByRanking;
 let recordToolOutcome: typeof import("../tool-graph.ts").recordToolOutcome;
+let appendAction: typeof import("../../db/event-store.ts").appendAction;
+let appendObservation: typeof import("../../db/event-store.ts").appendObservation;
 
 beforeAll(async () => {
   ({ resolveBagOrdering, reorderDefsByRanking, reorderToolsByRanking } = await import(
     "../tool-bag-resolver.ts"
   ));
   ({ recordToolOutcome } = await import("../tool-graph.ts"));
+  ({ appendAction, appendObservation } = await import("../../db/event-store.ts"));
 });
 
 function makeTool(id: string, group?: ToolGroupId, description = ""): Tool {
@@ -80,8 +83,9 @@ describe("tool-bag-resolver — resolveBagOrdering", () => {
     expect(result.ranking[0].composite).toBeGreaterThan(result.ranking[1].composite);
   });
 
-  it("co-activation peer in recent-tools history boosts the focus tool's score", async () => {
-    // Build co-activation between focus + peer.
+  it("co-activation is zero when no sessionId is supplied (no recent-tools window)", async () => {
+    // Edges exist in the graph, but without a sessionId we never look up the
+    // recent-tools window so the focus tool gets coActivation = 0.
     for (let i = 0; i < 5; i++) {
       recordToolOutcome({ toolName: "native__bag_focus", success: true });
       recordToolOutcome({
@@ -91,7 +95,6 @@ describe("tool-bag-resolver — resolveBagOrdering", () => {
       });
     }
 
-    // No session id → no recent-tools history → co-activation = 0
     const noPeer = await resolveBagOrdering({
       candidates: [],
       nativeNames: ["native__bag_focus"],
@@ -99,10 +102,49 @@ describe("tool-bag-resolver — resolveBagOrdering", () => {
       scope: makeScope(["core"]),
     });
 
-    // Recent-tools come from action_events (which we haven't populated here)
-    // but resolveBagOrdering also accepts a pre-computed list via no-op fall.
-    // Verify by spying on the underlying ranker via direct test in tool-graph.
     expect(noPeer.ranking.find((r) => r.toolName === "native__bag_focus")!.coActivation).toBe(0);
+  });
+
+  it("recent-tools window pulls a co-activated peer's score onto the focus tool", async () => {
+    // Build a Hebbian edge between focus + peer in the graph.
+    for (let i = 0; i < 5; i++) {
+      recordToolOutcome({ toolName: "native__coact_focus", success: true });
+      recordToolOutcome({
+        toolName: "native__coact_peer",
+        success: true,
+        recentlySucceeded: ["native__coact_focus"],
+      });
+    }
+
+    // Seed a session with a successful peer call so the recent-tools query
+    // returns ["native__coact_peer"]. resolveBagOrdering should then surface
+    // the focus↔peer edge as a non-zero coActivation on the focus tool.
+    const sessionId = "test-session-coact";
+    const action = appendAction({
+      sessionId,
+      kind: "native",
+      tool: "native__coact_peer",
+      args: {},
+    });
+    appendObservation({
+      sessionId,
+      actionId: action.id,
+      kind: "result",
+      payload: { ok: true },
+      durationMs: 10,
+    });
+
+    const withPeer = await resolveBagOrdering({
+      candidates: [],
+      nativeNames: ["native__coact_focus"],
+      query: "",
+      scope: makeScope(["core"]),
+      sessionId,
+    });
+
+    expect(withPeer.recentTools).toContain("native__coact_peer");
+    const focus = withPeer.ranking.find((r) => r.toolName === "native__coact_focus")!;
+    expect(focus.coActivation).toBeGreaterThan(0);
   });
 
   it("category match contributes when scope is non-permissive", async () => {
