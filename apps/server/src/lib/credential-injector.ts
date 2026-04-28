@@ -33,7 +33,8 @@
  * Every other module imports the redactor.
  */
 
-const PLACEHOLDER_RE = /\{\{credentials\.([^}]+)\}\}/g;
+/** Single source of truth for the placeholder syntax. */
+export const PLACEHOLDER_RE = /\{\{credentials\.([^}]+)\}\}/g;
 
 const REDACT_MARKER = "«credential»";
 /** Don't bother redacting tiny secrets — too many false positives. */
@@ -46,11 +47,18 @@ const activeSecrets = new Set<string>();
  * Field names whose values are non-secret connection metadata (URLs,
  * usernames, regions, etc.). Excluded from the seal so common words like
  * "admin" or "us-east-1" don't get scrubbed in unrelated audit text.
+ *
+ * Sourced from the actual provider field set in `provider-registry.ts`:
+ * Matrix (`homeserverUrl`, `userId`), Obsidian (`vaultPath`),
+ * GitLab/Home Assistant (`instanceUrl`), OAuth apps (`clientId` — the
+ * public side of the pair; `clientSecret` is intentionally NOT here).
  */
 const NON_SECRET_FIELD_NAMES = new Set<string>([
   "username", "user", "email", "tenant", "tenantId", "tenant_id",
   "region", "host", "hostname", "port", "endpoint", "domain", "name",
   "apiUrl", "api_url", "baseUrl", "base_url", "url", "issuer", "audience",
+  "homeserverUrl", "userId", "user_id", "vaultPath", "vault_path",
+  "instanceUrl", "instance_url", "clientId", "client_id",
 ]);
 
 /**
@@ -72,7 +80,11 @@ export function extractSecretValues(data: Record<string, string>): string[] {
 /** Internal: ref-count so nested seals don't drop a still-active secret. */
 const secretRefcount = new Map<string, number>();
 
-function parseCredRef(ref: string): { type: string; field?: string } {
+/**
+ * Split a placeholder ref like `github` or `n8n.apiUrl` into `{ type, field }`.
+ * Multi-dot refs are not currently supported — the first dot is the separator.
+ */
+export function parseCredRef(ref: string): { type: string; field?: string } {
   const dotIdx = ref.indexOf(".");
   if (dotIdx === -1) return { type: ref };
   return { type: ref.slice(0, dotIdx), field: ref.slice(dotIdx + 1) };
@@ -187,6 +199,38 @@ export function withSecretSealSync<T>(secrets: Iterable<string>, fn: () => T): T
       }
     }
   }
+}
+
+/**
+ * Register additional secrets on top of an already-open seal and return a
+ * release function. Use this for paths that mint *new* credential values
+ * mid-call (e.g. an OAuth refresh swapping the access token) — the existing
+ * `withSecretSeal` only sealed the original `cred.data` snapshot.
+ *
+ * Always pair with try/finally so the release runs even on throw:
+ *
+ *   const release = addSecretsToSeal(extractSecretValues(refreshed.data));
+ *   try { ...retry... } finally { release(); }
+ */
+export function addSecretsToSeal(secrets: Iterable<string>): () => void {
+  const added: string[] = [];
+  for (const raw of secrets) {
+    if (!raw || raw.length < MIN_SCRUB_LENGTH) continue;
+    activeSecrets.add(raw);
+    secretRefcount.set(raw, (secretRefcount.get(raw) ?? 0) + 1);
+    added.push(raw);
+  }
+  return () => {
+    for (const raw of added) {
+      const next = (secretRefcount.get(raw) ?? 1) - 1;
+      if (next <= 0) {
+        secretRefcount.delete(raw);
+        activeSecrets.delete(raw);
+      } else {
+        secretRefcount.set(raw, next);
+      }
+    }
+  };
 }
 
 /** True when at least one secret is currently sealed. */

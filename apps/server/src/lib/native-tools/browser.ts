@@ -6,6 +6,8 @@ import {
   extractSecretValues,
   hasCredentialPlaceholder,
   injectPlaceholders,
+  parseCredRef,
+  PLACEHOLDER_RE,
   withSecretSeal,
 } from "../credential-injector.ts";
 import { pickCredential } from "../credential-picker.ts";
@@ -63,9 +65,10 @@ async function evictIfBrowserDead(err: unknown, sessionId: string): Promise<void
 
 const browserNavigateToolDef = tool({
   description:
-    "[Web Agent] Navigate to a URL. Use this as the first step when browsing the web. Returns the page title and final URL.",
+    "[Web Agent] Navigate to a URL. Use this as the first step when browsing the web. Returns the page title and final URL. " +
+    "If a URL needs to embed a credential (e.g. a token query param), reference it with `{{credentials.<type>}}` — the value is URL-encoded and substituted at the browser boundary; the recorded URL keeps the placeholder.",
   parameters: z.object({
-    url: z.string().describe("The URL to navigate to (e.g. 'https://google.com')"),
+    url: z.string().describe("The URL to navigate to (e.g. 'https://google.com'). May contain {{credentials.<type>}} placeholders for tokens that must appear in the URL."),
   }),
 });
 
@@ -76,40 +79,54 @@ const handleBrowserNavigate: NativeToolHandler = async (
   const sessionId = requireSessionId(context);
   const rawUrl = String(args.url);
 
-  // SSRF protection: validate URL before navigating (same rules as http_fetch)
+  let expanded: string;
+  let secretsToSeal: string[];
   try {
-    await validateFetchUrl(rawUrl);
+    ({ expanded, secretsToSeal } = expandBrowserCredentials(rawUrl, sessionId, { urlEncode: true }));
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+    };
+  }
+
+  // SSRF protection: validate URL after expansion (same rules as http_fetch)
+  try {
+    await validateFetchUrl(expanded);
   } catch (err) {
     return {
       content: [{ type: "text", text: `Browser navigate blocked: ${err instanceof Error ? err.message : String(err)}` }],
     };
   }
 
-  try {
-    const { getBrowser } = await import("../browser-manager.ts");
-    const stagehand = await getBrowser(sessionId);
-    await withTimeout(
-      stagehand.page.goto(rawUrl, { waitUntil: "domcontentloaded" }),
-      BROWSER_OP_TIMEOUT,
-      "Navigation",
-    );
-    const title = await stagehand.page.title();
-    const url = stagehand.page.url();
-    return {
-      content: [{ type: "text", text: `Navigated to: ${url}\nPage title: ${title}` }],
-    };
-  } catch (err) {
-    await evictIfBrowserDead(err, sessionId);
-    return {
-      content: [{ type: "text", text: `Browser navigate failed: ${err instanceof Error ? err.message : String(err)}` }],
-    };
-  }
+  return withSecretSeal(secretsToSeal, async () => {
+    try {
+      const { getBrowser } = await import("../browser-manager.ts");
+      const stagehand = await getBrowser(sessionId);
+      await withTimeout(
+        stagehand.page.goto(expanded, { waitUntil: "domcontentloaded" }),
+        BROWSER_OP_TIMEOUT,
+        "Navigation",
+      );
+      const title = await stagehand.page.title();
+      const url = stagehand.page.url();
+      return {
+        content: [{ type: "text", text: `Navigated to: ${url}\nPage title: ${title}` }],
+      };
+    } catch (err) {
+      await evictIfBrowserDead(err, sessionId);
+      return {
+        content: [{ type: "text", text: `Browser navigate failed: ${err instanceof Error ? err.message : String(err)}` }],
+      };
+    }
+  });
 };
 
 const browserActToolDef = tool({
   description:
     "[Web Agent] Perform an action on the current page using natural language. Examples: 'click the Sign In button', 'type {{credentials.github}} in the password field', 'scroll down', 'select the second item from the dropdown'. " +
-    "For credentials: ALWAYS reference them with `{{credentials.<type>}}` placeholders (e.g. `type {{credentials.github}} in the password field`) — never paste raw passwords or tokens. The placeholder is expanded at the browser boundary so secret values never reach the chat history.",
+    "For credentials: ALWAYS reference them with `{{credentials.<type>}}` placeholders — never paste raw passwords or tokens. The placeholder is expanded at the browser boundary so secret values never reach the chat history. " +
+    "✓ Good: `type {{credentials.github}} in the password field`. " +
+    "✗ Bad: `type ghp_abc123xyz... in the password field`.",
   parameters: z.object({
     instruction: z
       .string()
@@ -119,59 +136,60 @@ const browserActToolDef = tool({
 
 /**
  * Phase E2 — expand `{{credentials.<type>[.field]}}` placeholders in a
- * browser instruction at the very last moment before it reaches Stagehand.
+ * browser-tool argument (instruction or URL) at the very last moment before
+ * it reaches Stagehand / Playwright.
  *
  * Returns:
- *   - `instruction`: the placeholder string the LLM produced. Used for
- *     logging / event-store / the orchestrator's ActionEvent.args (so the
- *     persisted record never contains the raw secret).
- *   - `expandedInstruction`: the placeholder-substituted string handed to
- *     `page.act()`. Held for the lifetime of the call only.
+ *   - `expanded`: the placeholder-substituted string handed to the boundary
+ *     API. Held for the lifetime of the call only.
  *   - `secretsToSeal`: raw values to register with `withSecretSeal` so any
  *     downstream logging that does see the expanded value gets scrubbed.
+ *   - `expandedTypes`: the credential types that were substituted, used to
+ *     surface a non-secret note in the tool's text result.
+ *
+ * The original (placeholder) string is what the orchestrator records in
+ * `ActionEvent.args`, so the persisted row never contains the raw secret.
  */
 function expandBrowserCredentials(
-  instruction: string,
+  text: string,
   sessionId: string,
+  opts: { urlEncode?: boolean } = {},
 ): { expanded: string; secretsToSeal: string[]; expandedTypes: string[] } {
-  if (!hasCredentialPlaceholder(instruction)) {
-    return { expanded: instruction, secretsToSeal: [], expandedTypes: [] };
+  if (!hasCredentialPlaceholder(text)) {
+    return { expanded: text, secretsToSeal: [], expandedTypes: [] };
   }
   // Pull every `{{credentials.<type>[.field]}}` into a Map<type → data>.
   // The picker honours session pin → context match → tier ordering — same
   // path the synthesized-caller takes, so credential resolution stays
   // consistent across surfaces.
-  const PLACEHOLDER_RE = /\{\{credentials\.([^}]+)\}\}/g;
   const credentialTypes = new Set<string>();
-  for (const m of instruction.matchAll(PLACEHOLDER_RE)) {
-    const ref = m[1];
-    const dot = ref.indexOf(".");
-    credentialTypes.add(dot === -1 ? ref : ref.slice(0, dot));
+  for (const m of text.matchAll(PLACEHOLDER_RE)) {
+    credentialTypes.add(parseCredRef(m[1]).type);
   }
   const byType = new Map<string, Record<string, string>>();
   const seal: string[] = [];
-  const expanded: string[] = [];
+  const expandedTypes: string[] = [];
   for (const credType of credentialTypes) {
     const pick = pickCredential(credType, { sessionId });
     if (!pick) {
       throw new Error(
-        `[browser_act] no credential of type "${credType}" available — add one in Settings > Credentials before referencing it`,
+        `[browser_tools] no credential of type "${credType}" available — add one in Settings > Credentials before referencing it`,
       );
     }
     const full = getCredentialData(pick.credentialId);
     if (!full) {
       throw new Error(
-        `[browser_act] credential ${pick.credentialId} could not be decrypted`,
+        `[browser_tools] credential ${pick.credentialId} could not be decrypted`,
       );
     }
     byType.set(credType, full.data);
     seal.push(...extractSecretValues(full.data));
-    expanded.push(credType);
+    expandedTypes.push(credType);
   }
   return {
-    expanded: injectPlaceholders(instruction, { byType }),
+    expanded: injectPlaceholders(text, { byType, urlEncode: opts.urlEncode }),
     secretsToSeal: seal,
-    expandedTypes: expanded,
+    expandedTypes,
   };
 }
 

@@ -15,6 +15,9 @@ let withSecretSealSync: typeof import("../credential-injector.ts").withSecretSea
 let redactKnownSecrets: typeof import("../credential-injector.ts").redactKnownSecrets;
 let redactKnownSecretsInString: typeof import("../credential-injector.ts").redactKnownSecretsInString;
 let hasActiveSecrets: typeof import("../credential-injector.ts").hasActiveSecrets;
+let addSecretsToSeal: typeof import("../credential-injector.ts").addSecretsToSeal;
+let parseCredRef: typeof import("../credential-injector.ts").parseCredRef;
+let PLACEHOLDER_RE: typeof import("../credential-injector.ts").PLACEHOLDER_RE;
 
 beforeAll(async () => {
   ({
@@ -26,6 +29,9 @@ beforeAll(async () => {
     redactKnownSecrets,
     redactKnownSecretsInString,
     hasActiveSecrets,
+    addSecretsToSeal,
+    parseCredRef,
+    PLACEHOLDER_RE,
   } = await import("../credential-injector.ts"));
 });
 
@@ -116,6 +122,28 @@ describe("credential-injector — extractSecretValues", () => {
     const out = extractSecretValues({ apiKey: "abc" }); // 3 chars — too short
     expect(out).toEqual([]);
   });
+
+  it("excludes provider connection-metadata fields from the seal", () => {
+    // Real field names from provider-registry.ts (Matrix/Obsidian/GitLab/OAuth apps)
+    // — these are not secrets and shouldn't be scrubbed out of unrelated audit text.
+    const out = extractSecretValues({
+      homeserverUrl: "https://matrix.example.org",
+      userId: "@alice:matrix.example.org",
+      vaultPath: "/Users/alice/Documents/Obsidian Vault",
+      instanceUrl: "https://gitlab.example.com",
+      clientId: "1234567890-abc.apps.googleusercontent.com",
+      // These ARE secrets and must still be sealed.
+      accessToken: "mxa_abcdefghijklmnop",
+      clientSecret: "GOCSPX-supersecret_value",
+    });
+    expect(out).toContain("mxa_abcdefghijklmnop");
+    expect(out).toContain("GOCSPX-supersecret_value");
+    expect(out).not.toContain("https://matrix.example.org");
+    expect(out).not.toContain("@alice:matrix.example.org");
+    expect(out).not.toContain("/Users/alice/Documents/Obsidian Vault");
+    expect(out).not.toContain("https://gitlab.example.com");
+    expect(out).not.toContain("1234567890-abc.apps.googleusercontent.com");
+  });
 });
 
 describe("credential-injector — seal + redact", () => {
@@ -197,5 +225,78 @@ describe("credential-injector — seal + redact", () => {
         "a=abc, b=«credential»",
       );
     });
+  });
+});
+
+describe("credential-injector — addSecretsToSeal (OAuth refresh path)", () => {
+  it("registers additional secrets on top of an open seal and releases on call", () => {
+    const ORIGINAL = "original_access_token_xxxxx";
+    const REFRESHED = "refreshed_access_token_yyyyy";
+    withSecretSealSync([ORIGINAL], () => {
+      // Both original sealed; refreshed not yet.
+      expect(redactKnownSecretsInString(`a=${ORIGINAL} b=${REFRESHED}`)).toBe(
+        `a=«credential» b=${REFRESHED}`,
+      );
+      const release = addSecretsToSeal([REFRESHED]);
+      try {
+        // Both sealed during retry pipeline.
+        expect(redactKnownSecretsInString(`a=${ORIGINAL} b=${REFRESHED}`)).toBe(
+          "a=«credential» b=«credential»",
+        );
+      } finally {
+        release();
+      }
+      // Refreshed released; outer seal still active for original.
+      expect(redactKnownSecretsInString(`a=${ORIGINAL} b=${REFRESHED}`)).toBe(
+        `a=«credential» b=${REFRESHED}`,
+      );
+    });
+    expect(hasActiveSecrets()).toBe(false);
+  });
+
+  it("ref-counts when refreshed value overlaps with original", () => {
+    const SHARED = "shared_long_secret_value";
+    withSecretSealSync([SHARED], () => {
+      const release = addSecretsToSeal([SHARED]);
+      release();
+      // Outer seal still keeps SHARED active even though add+release ran.
+      expect(redactKnownSecretsInString(`x=${SHARED}`)).toBe("x=«credential»");
+    });
+    expect(hasActiveSecrets()).toBe(false);
+  });
+
+  it("skips empty + below-threshold values like withSecretSeal does", () => {
+    const release = addSecretsToSeal(["", "abc", "long_enough_value"]);
+    try {
+      expect(redactKnownSecretsInString("a=abc b=long_enough_value")).toBe(
+        "a=abc b=«credential»",
+      );
+    } finally {
+      release();
+    }
+    expect(hasActiveSecrets()).toBe(false);
+  });
+});
+
+describe("credential-injector — exported regex + parser", () => {
+  it("PLACEHOLDER_RE matches the documented syntax", () => {
+    // Regex has /g — reset lastIndex to test repeatedly.
+    PLACEHOLDER_RE.lastIndex = 0;
+    expect("hello {{credentials.github}}".match(PLACEHOLDER_RE)?.[0]).toBe(
+      "{{credentials.github}}",
+    );
+    PLACEHOLDER_RE.lastIndex = 0;
+    expect("a={{credentials.n8n.apiUrl}}".match(PLACEHOLDER_RE)?.[0]).toBe(
+      "{{credentials.n8n.apiUrl}}",
+    );
+    PLACEHOLDER_RE.lastIndex = 0;
+    expect("plain text".match(PLACEHOLDER_RE)).toBeNull();
+  });
+
+  it("parseCredRef splits on the first dot only", () => {
+    expect(parseCredRef("github")).toEqual({ type: "github" });
+    expect(parseCredRef("n8n.apiUrl")).toEqual({ type: "n8n", field: "apiUrl" });
+    // Multi-dot is preserved in `field` (first dot is the separator).
+    expect(parseCredRef("a.b.c")).toEqual({ type: "a", field: "b.c" });
   });
 });

@@ -31,6 +31,7 @@ import { getDirectOAuthProvider } from "./oauth-providers.ts";
 import { SynthesizedToolError } from "./errors.ts";
 import { pickCredential, type PickResult } from "./credential-picker.ts";
 import {
+  addSecretsToSeal,
   extractSecretValues,
   redactKnownSecrets,
   withSecretSeal,
@@ -784,87 +785,98 @@ export async function callSynthesizedEndpoint(
   if (response.status === 401 && cred.data.refreshToken) {
     const refreshed = await tryRefreshOAuthToken(credId, cred.cred.name, cred.data);
     if (refreshed) {
-      // Rebuild headers with the new access token and re-fire the request
-      // against the same already-resolved target (no second DNS round-trip,
-      // so SSRF gates remain enforced from the original lookup).
-      const retryHeaders: Record<string, string> = {
-        "Accept": "application/json",
-      };
-      if (bodyValue !== undefined) retryHeaders["Content-Type"] = "application/json";
-      if (connection.headers) {
-        for (const [k, v] of Object.entries(connection.headers)) {
-          retryHeaders[stripCrlf(k)] = stripCrlf(v);
-        }
-      }
-      applyAuth(retryHeaders, target.url, connection.auth, refreshed.data);
-
+      // Phase E2 — the outer seal opened with `extractSecretValues(cred.data)`
+      // captured only the *original* credential's values. The refresh just
+      // minted a new access token (and possibly a new refresh token); register
+      // those on top of the seal so any logging that incidentally sees them
+      // (audit rows, error context, etc.) gets scrubbed. Released after the
+      // retry block regardless of how it exits.
+      const releaseRefreshedSeal = addSecretsToSeal(extractSecretValues(refreshed.data));
       try {
-        response = await pinnedHttpsRequest({
-          target,
-          method: endpoint.method,
-          headers: retryHeaders,
-          body: bodyValue !== undefined ? Buffer.from(JSON.stringify(bodyValue), "utf-8") : undefined,
-          timeoutMs,
-          maxBytes: MAX_RESPONSE_BYTES,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        recordFailure(context.sessionId, tool.id, endpoint.name);
-        return { ok: false, error: `network error after token refresh: ${msg}`, durationMs: Date.now() - started };
-      }
-
-      const refreshedRawText = response.body.toString("utf-8");
-      const refreshedTruncated = response.truncated;
-      const refreshedSize = response.size;
-      const refreshedContentType = response.headers["content-type"] ?? "";
-      let refreshedParsed: unknown;
-      if (refreshedContentType.includes("application/json")) {
-        try { refreshedParsed = JSON.parse(refreshedRawText); } catch { refreshedParsed = refreshedRawText; }
-      } else {
-        refreshedParsed = refreshedRawText;
-      }
-      const refreshedFinalBody = refreshedTruncated
-        ? { truncated: true as const, preview: refreshedRawText.slice(0, TRUNCATION_PREVIEW_BYTES), size: refreshedSize }
-        : refreshedParsed;
-
-      logError("mcp_crash" as const, "", {
-        kind: "synthesized_call",
-        callId,
-        toolId: tool.id,
-        endpoint: endpoint.name,
-        method: endpoint.method,
-        host: target.hostname,
-        status: response.status,
-        durationMs: Date.now() - started,
-        refreshed: true,
-      });
-
-      if (response.status >= 200 && response.status < 300) {
-        recordSuccess(context.sessionId, tool.id, endpoint.name);
-        if (endpoint.method !== "GET") {
-          recordSynthesizedMutationAudit({
-            tool,
-            endpoint,
-            resolvedUrl: target.url.toString(),
-            pathParams,
-            queryParams,
-            body: bodyValue,
-            responseStatus: response.status,
-            responseBody: refreshedFinalBody,
-            durationMs: Date.now() - started,
-          });
-        }
-        return {
-          ok: true,
-          status: response.status,
-          body: refreshedFinalBody,
-          truncated: refreshedTruncated,
-          size: refreshedSize,
-          durationMs: Date.now() - started,
+        // Rebuild headers with the new access token and re-fire the request
+        // against the same already-resolved target (no second DNS round-trip,
+        // so SSRF gates remain enforced from the original lookup).
+        const retryHeaders: Record<string, string> = {
+          "Accept": "application/json",
         };
+        if (bodyValue !== undefined) retryHeaders["Content-Type"] = "application/json";
+        if (connection.headers) {
+          for (const [k, v] of Object.entries(connection.headers)) {
+            retryHeaders[stripCrlf(k)] = stripCrlf(v);
+          }
+        }
+        applyAuth(retryHeaders, target.url, connection.auth, refreshed.data);
+
+        try {
+          response = await pinnedHttpsRequest({
+            target,
+            method: endpoint.method,
+            headers: retryHeaders,
+            body: bodyValue !== undefined ? Buffer.from(JSON.stringify(bodyValue), "utf-8") : undefined,
+            timeoutMs,
+            maxBytes: MAX_RESPONSE_BYTES,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          recordFailure(context.sessionId, tool.id, endpoint.name);
+          return { ok: false, error: `network error after token refresh: ${msg}`, durationMs: Date.now() - started };
+        }
+
+        const refreshedRawText = response.body.toString("utf-8");
+        const refreshedTruncated = response.truncated;
+        const refreshedSize = response.size;
+        const refreshedContentType = response.headers["content-type"] ?? "";
+        let refreshedParsed: unknown;
+        if (refreshedContentType.includes("application/json")) {
+          try { refreshedParsed = JSON.parse(refreshedRawText); } catch { refreshedParsed = refreshedRawText; }
+        } else {
+          refreshedParsed = refreshedRawText;
+        }
+        const refreshedFinalBody = refreshedTruncated
+          ? { truncated: true as const, preview: refreshedRawText.slice(0, TRUNCATION_PREVIEW_BYTES), size: refreshedSize }
+          : refreshedParsed;
+
+        logError("mcp_crash" as const, "", {
+          kind: "synthesized_call",
+          callId,
+          toolId: tool.id,
+          endpoint: endpoint.name,
+          method: endpoint.method,
+          host: target.hostname,
+          status: response.status,
+          durationMs: Date.now() - started,
+          refreshed: true,
+        });
+
+        if (response.status >= 200 && response.status < 300) {
+          recordSuccess(context.sessionId, tool.id, endpoint.name);
+          if (endpoint.method !== "GET") {
+            recordSynthesizedMutationAudit({
+              tool,
+              endpoint,
+              resolvedUrl: target.url.toString(),
+              pathParams,
+              queryParams,
+              body: bodyValue,
+              responseStatus: response.status,
+              responseBody: refreshedFinalBody,
+              durationMs: Date.now() - started,
+            });
+          }
+          return {
+            ok: true,
+            status: response.status,
+            body: refreshedFinalBody,
+            truncated: refreshedTruncated,
+            size: refreshedSize,
+            durationMs: Date.now() - started,
+          };
+        }
+        // Refresh succeeded but the retry still failed — fall through to the
+        // standard error pipeline so the user gets a real diagnosis.
+      } finally {
+        releaseRefreshedSeal();
       }
-      // Refresh succeeded but the retry still failed — fall through to the
-      // standard error pipeline so the user gets a real diagnosis.
     }
   }
 
