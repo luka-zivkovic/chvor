@@ -984,6 +984,48 @@ export function getDb(): Database.Database {
     console.log("[db] migration v27 applied: orchestrator_checkpoints (Phase D3 snapshots)");
   }
 
+  if (currentVersion < 28) {
+    // ── Durable HITL approvals (Phase D4) ─────────────────────────────
+    // One row per HIGH-risk action that needed user approval. The row is
+    // created `pending` before the orchestrator pauses, then transitioned
+    // to `allowed`/`denied`/`expired` when the user (or the periodic
+    // expire job) decides. Surviving server restarts is the whole point —
+    // an in-flight pending row is rehydrated as still-pending so the UI
+    // can decide it after a crash.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS approvals (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        action_id TEXT,
+        tool_name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        args TEXT NOT NULL,
+        risk TEXT NOT NULL,
+        reasons TEXT NOT NULL,
+        checkpoint_id TEXT,
+        status TEXT NOT NULL,
+        decision TEXT,
+        decided_at INTEGER,
+        decided_by TEXT,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      )
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_approvals_session_status ON approvals(session_id, status, created_at DESC)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_approvals_status_expires ON approvals(status, expires_at)");
+
+    // Periodic job: every 5 minutes, transition expired pending rows so the
+    // UI never shows a stale "waiting" prompt after the gate timed out.
+    const seedNow28 = new Date().toISOString();
+    const FIVE_MIN = 5 * 60 * 1000;
+    db.prepare(
+      "INSERT OR IGNORE INTO system_jobs (job_id, interval_ms, next_run_at, status) VALUES (?, ?, ?, 'idle')"
+    ).run("approval-expire", FIVE_MIN, seedNow28);
+
+    db.pragma("user_version = 28");
+    console.log("[db] migration v28 applied: approvals (Phase D4 durable HITL)");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }

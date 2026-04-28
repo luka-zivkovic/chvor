@@ -44,6 +44,8 @@ import type { SecurityActionContext, SecurityActionKind } from "@chvor/shared";
 import { appendAudit } from "../db/audit-log-store.ts";
 import { recordToolOutcome } from "./tool-graph.ts";
 import { snapshotRound } from "./checkpoint-manager.ts";
+import { getLatestCheckpointForSession } from "../db/checkpoint-store.ts";
+import { isHITLEnabled, requestNativeApproval } from "./approval-gate-hitl.ts";
 import { applyEmotionGate, getSessionVAD, isEmotionGateEnabled } from "./emotion-gate.ts";
 import {
   resolveBagOrdering,
@@ -584,6 +586,17 @@ export async function executeConversation(
   let noProgressRounds = 0;
   const NO_PROGRESS_THRESHOLD = 3;
 
+  // Phase D4 — per-turn HITL cache. Tools the user approved with
+  // `allow-session` skip the prompt for the rest of this turn (this Set
+  // is local to one `executeConversation` invocation — the next user
+  // message starts a fresh turn and re-prompts). The naming follows the
+  // user-facing button label ("allow for this session"); the lifetime is
+  // intentionally narrower so a long-lived turn doesn't accumulate
+  // implicit approvals across unrelated tool calls.
+  const hitlAllowTurn = new Set<string>();
+  const hitlKey = (kind: string, toolName: string): string =>
+    `${options?.sessionId ?? ""}::${kind}::${toolName}`;
+
   // Extended Thinking config (re-evaluated per active model in fallback loop)
   const thinkingConfig = getExtendedThinking();
 
@@ -893,8 +906,15 @@ export async function executeConversation(
     /**
      * Run all registered security analyzers over a tool call. Emits a
      * security.verdict canvas event for HIGH-risk (or always when verbose
-     * mode is on). When policy says to block HIGH-risk, returns a synthetic
-     * tool error result so the LLM sees the refusal and can react.
+     * mode is on).
+     *
+     * Policy ladder when verdict is HIGH-risk:
+     *   1. HITL on + sessionId present (Phase D4) → request user approval.
+     *      If user has already chosen "allow-session" earlier in this turn,
+     *      skip the prompt and run the tool. Denial / timeout → synthetic
+     *      error to the LLM, identical shape to the static-block path.
+     *   2. HITL off OR no sessionId → fall back to `block-high-risk`
+     *      static behavior (synthetic error, no prompt).
      */
     async function runSecurityGate(
       tc: { toolCallId: string; toolName: string; args: Record<string, unknown> },
@@ -916,7 +936,11 @@ export async function executeConversation(
       };
 
       const verdict = await analyzeAction(ctx);
-      const block = verdict.risk === "high" && isBlockHighRiskEnabled();
+      const isHigh = verdict.risk === "high";
+      const canPromptHITL = isHigh && isHITLEnabled() && Boolean(options?.sessionId);
+      const cachedSessionAllow =
+        isHigh && hitlAllowTurn.has(hitlKey(kind, tc.toolName));
+      const block = isHigh && !canPromptHITL && !cachedSessionAllow && isBlockHighRiskEnabled();
 
       if (verdict.risk !== "low" || isVerdictEventVerbose()) {
         emit({
@@ -935,6 +959,106 @@ export async function executeConversation(
         });
       }
 
+      // Path 1: HIGH risk, HITL on, session known, no cached allow yet.
+      if (isHigh && canPromptHITL && !cachedSessionAllow) {
+        const checkpointId = options?.sessionId
+          ? getLatestCheckpointForSession(options.sessionId)?.id ?? null
+          : null;
+        const reasons = verdict.highest.map((v) => `[${v.analyzer}] ${v.reason}`);
+        emit({
+          type: "security.approval.requested",
+          data: {
+            toolName: tc.toolName,
+            kind,
+            risk: verdict.risk,
+            reasons: verdict.highest.map((v) => ({
+              analyzer: v.analyzer,
+              risk: v.risk,
+              reason: v.reason,
+            })),
+            checkpointId,
+          },
+        });
+
+        const outcome = await requestNativeApproval({
+          sessionId: options?.sessionId ?? null,
+          actionId: null,
+          toolName: tc.toolName,
+          kind,
+          args: tc.args,
+          risk: verdict.risk,
+          reasons,
+          checkpointId,
+          originClientId: options?.originClientId,
+        });
+
+        try {
+          appendAudit({
+            eventType: outcome.allowed ? "security.approval.allowed" : "security.approval.denied",
+            actorType: actorCtx.actorType,
+            actorId: actorCtx.actorId,
+            resourceType: "tool",
+            resourceId: tc.toolName,
+            action: outcome.allowed ? "allow" : "deny",
+            error: outcome.allowed
+              ? null
+              : `${outcome.reason}: ${reasons.join(" | ")}`,
+          });
+        } catch (err) {
+          console.warn("[orchestrator] security audit write failed:", err instanceof Error ? err.message : String(err));
+        }
+
+        if (outcome.allowed) {
+          if (outcome.decision === "allow-session") {
+            hitlAllowTurn.add(hitlKey(kind, tc.toolName));
+          }
+          emit({
+            type: "security.approval.resolved",
+            data: {
+              toolName: tc.toolName,
+              kind,
+              status: "allowed",
+              decision: outcome.decision,
+            },
+          });
+          return { allowed: true };
+        }
+
+        emit({
+          type: "security.approval.resolved",
+          data: {
+            toolName: tc.toolName,
+            kind,
+            status: outcome.reason === "denied" ? "denied" : "expired",
+            decision: outcome.record?.decision ?? null,
+          },
+        });
+        const messages = verdict.highest.map((v) => `${v.analyzer}: ${v.reason}`).join("; ");
+        const errorPayload = {
+          error:
+            outcome.reason === "denied"
+              ? `User denied the action. Reasons: ${messages}. Continue without this tool.`
+              : `Approval prompt timed out (${outcome.reason}). Reasons: ${messages}. Continue without this tool.`,
+          security: { risk: verdict.risk, reasons: verdict.highest, approval: outcome.reason },
+        };
+        if (emotionEngine) toolOutcomeResults.push({ success: false, severity: toolSeverity(tc.toolName) });
+        observeToolOutcome(tc.toolName, false);
+        return {
+          allowed: false,
+          result: { toolCallId: tc.toolCallId, toolName: tc.toolName, result: errorPayload },
+        };
+      }
+
+      // Path 2: cached "allow-session" — skip prompt + audit.
+      if (isHigh && cachedSessionAllow) {
+        emit({
+          type: "security.approval.resolved",
+          data: { toolName: tc.toolName, kind, status: "allowed", decision: "allow-session" },
+        });
+        return { allowed: true };
+      }
+
+      // Path 3: classic static block.
       if (block) {
         try {
           appendAudit({

@@ -102,9 +102,29 @@ export type ExecutionEvent =
   | { type: "tool.bag.resolved"; data: ToolBagResolvedEvent }
   | { type: "credential.resolved"; data: CredentialResolvedEvent }
   | { type: "security.verdict"; data: import("./security.js").SecurityVerdictEvent }
+  | { type: "security.approval.requested"; data: SecurityApprovalRequestedCanvasEvent }
+  | { type: "security.approval.resolved"; data: SecurityApprovalResolvedCanvasEvent }
   | { type: "tool.graph.observed"; data: ToolGraphObservedEvent }
   | { type: "tool.bag.emotion-gated"; data: import("./emotion-gate.js").EmotionGatedToolsEvent }
   | { type: "tool.bag.ranked"; data: ToolBagRankedEvent };
+
+/** Canvas event payload for an in-flight HIGH-risk approval prompt. */
+export interface SecurityApprovalRequestedCanvasEvent {
+  toolName: string;
+  kind: import("./security.js").SecurityActionKind;
+  risk: import("./security.js").SecurityRisk;
+  reasons: Array<{ analyzer: string; risk: import("./security.js").SecurityRisk; reason: string }>;
+  /** OrchestratorCheckpoint id captured at the moment the gate fired. */
+  checkpointId: string | null;
+}
+
+/** Canvas event payload for a resolved approval (allowed / denied / expired). */
+export interface SecurityApprovalResolvedCanvasEvent {
+  toolName: string;
+  kind: import("./security.js").SecurityActionKind;
+  status: "allowed" | "denied" | "expired";
+  decision: import("./approval.js").ApprovalDecision | null;
+}
 
 /** Per-turn rationale for graph-driven bag ordering (Phase G+). */
 export interface ToolBagRankedEvent {
