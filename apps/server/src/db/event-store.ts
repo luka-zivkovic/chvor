@@ -245,6 +245,32 @@ export function pruneEventsOlderThan(olderThanMs: number): number {
   return tx();
 }
 
+/**
+ * Last N tool names that produced a successful observation in this session.
+ * Used by the Cognitive Tool Graph (Phase G+) to drive co-activation scoring.
+ * Ordered most-recent first; deduped so a tool that fired multiple times in
+ * a row only counts once in the recency window.
+ */
+export function getRecentSuccessfulToolsForSession(
+  sessionId: string,
+  limit = 10
+): string[] {
+  const db = getDb();
+  const cap = Math.min(Math.max(limit, 1), 100);
+  const rows = db
+    .prepare(
+      `SELECT a.tool, MAX(o.ts) AS ts
+         FROM observation_events o
+         JOIN action_events a ON a.id = o.action_id
+         WHERE o.session_id = ? AND o.kind = 'result'
+         GROUP BY a.tool
+         ORDER BY ts DESC
+         LIMIT ?`
+    )
+    .all(sessionId, cap) as Array<{ tool: string; ts: number }>;
+  return rows.map((r) => r.tool);
+}
+
 export function countActionEvents(): number {
   const db = getDb();
   const row = db.prepare("SELECT COUNT(*) as n FROM action_events").get() as { n: number };

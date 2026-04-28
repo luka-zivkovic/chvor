@@ -44,6 +44,11 @@ import type { SecurityActionContext, SecurityActionKind } from "@chvor/shared";
 import { appendAudit } from "../db/audit-log-store.ts";
 import { recordToolOutcome } from "./tool-graph.ts";
 import { applyEmotionGate, getSessionVAD, isEmotionGateEnabled } from "./emotion-gate.ts";
+import {
+  resolveBagOrdering,
+  reorderDefsByRanking,
+  reorderToolsByRanking,
+} from "./tool-bag-resolver.ts";
 
 export type EventEmitter = (event: ExecutionEvent) => void;
 
@@ -446,7 +451,51 @@ export async function executeConversation(
 
   // Only show the LLM tool descriptions for tools it can actually call this
   // turn — keeps the prompt honest with the bag and saves tokens.
-  const promptVisibleTools = filterToolsByScope(enabledTools, bagScope);
+  const visibleTools = filterToolsByScope(enabledTools, bagScope);
+
+  // Phase G+ — graph-driven bag ordering. Pure ordering: no tools added or
+  // removed. Puts the highest-composite-score tools first in the system
+  // prompt so small models pick the right one without scanning the bag.
+  let promptVisibleTools = visibleTools;
+  try {
+    const queryText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content : "";
+    const nativeNamesInBag = Object.keys(toolDefs).filter((n) => n.startsWith("native__"));
+    const ordering = await resolveBagOrdering({
+      candidates: visibleTools,
+      nativeNames: nativeNamesInBag,
+      query: queryText,
+      scope: bagScope,
+      sessionId: options?.sessionId,
+    });
+    promptVisibleTools = reorderToolsByRanking(visibleTools, ordering.ranking);
+    const reordered = reorderDefsByRanking(toolDefs, ordering.ranking);
+    for (const k of Object.keys(toolDefs)) delete toolDefs[k];
+    Object.assign(toolDefs, reordered);
+
+    emit({
+      type: "tool.bag.ranked",
+      data: {
+        top: ordering.ranking.slice(0, 12).map((r) => ({
+          toolName: r.toolName,
+          composite: Number(r.composite.toFixed(4)),
+          strength: Number(r.strength.toFixed(4)),
+          coActivation: Number(r.coActivation.toFixed(4)),
+          semantic: Number(r.semantic.toFixed(4)),
+          category: Number(r.category.toFixed(4)),
+        })),
+        totalRanked: ordering.ranking.length,
+        recentTools: ordering.recentTools,
+        semanticActive: ordering.semanticActive,
+      },
+    });
+  } catch (err) {
+    // Graph-driven ordering is a soft enhancement — never block the turn.
+    console.warn(
+      "[orchestrator] tool-bag ordering failed; falling back to scope-default order:",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+
   const { stable: stablePrompt, volatile: volatilePrompt } = buildSystemPrompt(skills, promptVisibleTools, memoryFacts, personaCfg, sessionSummary, options?.voiceContext, emotionHistory, options?.channelType);
 
   // Append advanced emotion context to volatile prompt if enabled
