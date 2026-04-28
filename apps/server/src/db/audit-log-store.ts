@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ActorType, AuditLogEntry } from "@chvor/shared";
 import { getDb } from "./database.ts";
+import { redactKnownSecretsInString } from "../lib/credential-injector.ts";
 
 interface AuditRow {
   id: string;
@@ -77,7 +78,7 @@ export function appendAudit(input: AppendAuditInput): string | null {
       input.httpMethod ?? null,
       input.httpPath ?? null,
       input.httpStatusCode ?? null,
-      input.error ?? null,
+      input.error == null ? null : redactKnownSecretsInString(input.error),
       input.durationMs ?? null,
       now
     );

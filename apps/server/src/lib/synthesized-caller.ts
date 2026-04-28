@@ -30,6 +30,11 @@ import { refreshAccessToken, type OAuthProviderConfig } from "./oauth-engine.ts"
 import { getDirectOAuthProvider } from "./oauth-providers.ts";
 import { SynthesizedToolError } from "./errors.ts";
 import { pickCredential, type PickResult } from "./credential-picker.ts";
+import {
+  extractSecretValues,
+  redactKnownSecrets,
+  withSecretSeal,
+} from "./credential-injector.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 600_000;
@@ -512,7 +517,11 @@ function recordSynthesizedMutationAudit(args: {
     insertActivity({
       source: "synthesized-write",
       title: `${args.tool.metadata.name} · ${args.endpoint.name}`,
-      content: lines.join("\n"),
+      // Phase E2 — defensive scrub of any credential value that somehow
+      // landed in the request/response preview. The seal opened by the
+      // caller registers the active credential's secret values; this strips
+      // them before the activity row hits disk.
+      content: redactKnownSecrets(lines.join("\n")),
     });
   } catch (err) {
     console.warn(
@@ -603,6 +612,17 @@ export async function callSynthesizedEndpoint(
     };
   }
 
+  // Capture narrowed values so the closure below doesn't relose the types
+  // when TS treats `tool` / `connection` as potentially-mutated closures.
+  const baseUrl = connection.baseUrl;
+  const synth = tool.synthesized;
+
+  // Phase E2 — seal raw credential values for the duration of the call.
+  // Anywhere downstream that calls `redactKnownSecrets` (event store, audit
+  // log, error context) sees them replaced with «credential» so a stray
+  // value never leaks into a persisted row.
+  return withSecretSeal(extractSecretValues(cred.data), async () => {
+
   // Partition args into pathParams, queryParams, body
   const pathParams: Record<string, string | number> = {};
   for (const p of endpoint.pathParams ?? []) {
@@ -639,7 +659,7 @@ export async function callSynthesizedEndpoint(
   // Build + resolve target (DNS lookup happens once here)
   let target: ResolvedTarget;
   try {
-    const urlStr = buildUrl(connection.baseUrl, endpoint.path, pathParams, queryParams);
+    const urlStr = buildUrl(baseUrl, endpoint.path, pathParams, queryParams);
     target = await resolveSafeSynthesizedTarget(urlStr);
   } catch (err) {
     return {
@@ -682,8 +702,8 @@ export async function callSynthesizedEndpoint(
       pathParams: Object.keys(pathParams).length > 0 ? pathParams : undefined,
       queryParams: Object.keys(queryParams).length > 0 ? queryParams : undefined,
       body: bodyValue,
-      verified: tool.synthesized.verified,
-      source: tool.synthesized.source,
+      verified: synth.verified,
+      source: synth.source,
     });
 
     if (!approval.allowed) {
@@ -898,6 +918,7 @@ export async function callSynthesizedEndpoint(
     size,
     durationMs: Date.now() - started,
   };
+  });
 }
 
 // ── Generic credential probe (Track 0.3) ───────────────────────
@@ -941,11 +962,13 @@ export async function probeCredentialConfig(args: {
   if (!connection.baseUrl) {
     return { ok: false, error: "connectionConfig.baseUrl is required for probe", durationMs: 0 };
   }
+  const baseUrl = connection.baseUrl;
 
+  return withSecretSeal(extractSecretValues(data), async () => {
   const path = probePath && probePath.trim() ? probePath.trim() : "/";
   let target: ResolvedTarget;
   try {
-    const urlStr = buildUrl(connection.baseUrl, path, {}, {});
+    const urlStr = buildUrl(baseUrl, path, {}, {});
     target = await resolveSafeSynthesizedTarget(urlStr);
   } catch (err) {
     return {
@@ -1017,4 +1040,5 @@ export async function probeCredentialConfig(args: {
     error: `HTTP ${status} ${response.statusText}`,
     durationMs: Date.now() - started,
   };
+  });
 }

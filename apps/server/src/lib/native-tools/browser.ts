@@ -2,6 +2,14 @@ import { tool } from "ai";
 import { z } from "zod";
 import { logError } from "../error-logger.ts";
 import { validateFetchUrl } from "./security.ts";
+import {
+  extractSecretValues,
+  hasCredentialPlaceholder,
+  injectPlaceholders,
+  withSecretSeal,
+} from "../credential-injector.ts";
+import { pickCredential } from "../credential-picker.ts";
+import { getCredentialData } from "../../db/credential-store.ts";
 import type { NativeToolContext, NativeToolHandler, NativeToolModule, NativeToolResult } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -100,36 +108,116 @@ const handleBrowserNavigate: NativeToolHandler = async (
 
 const browserActToolDef = tool({
   description:
-    "[Web Agent] Perform an action on the current page using natural language. Examples: 'click the Sign In button', 'type hello@example.com in the email field', 'scroll down', 'select the second item from the dropdown'.",
+    "[Web Agent] Perform an action on the current page using natural language. Examples: 'click the Sign In button', 'type {{credentials.github}} in the password field', 'scroll down', 'select the second item from the dropdown'. " +
+    "For credentials: ALWAYS reference them with `{{credentials.<type>}}` placeholders (e.g. `type {{credentials.github}} in the password field`) — never paste raw passwords or tokens. The placeholder is expanded at the browser boundary so secret values never reach the chat history.",
   parameters: z.object({
     instruction: z
       .string()
-      .describe("Natural language instruction for the action to perform"),
+      .describe("Natural language instruction. Use {{credentials.<type>}} placeholders for any password/token; never inline raw secret values."),
   }),
 });
+
+/**
+ * Phase E2 — expand `{{credentials.<type>[.field]}}` placeholders in a
+ * browser instruction at the very last moment before it reaches Stagehand.
+ *
+ * Returns:
+ *   - `instruction`: the placeholder string the LLM produced. Used for
+ *     logging / event-store / the orchestrator's ActionEvent.args (so the
+ *     persisted record never contains the raw secret).
+ *   - `expandedInstruction`: the placeholder-substituted string handed to
+ *     `page.act()`. Held for the lifetime of the call only.
+ *   - `secretsToSeal`: raw values to register with `withSecretSeal` so any
+ *     downstream logging that does see the expanded value gets scrubbed.
+ */
+function expandBrowserCredentials(
+  instruction: string,
+  sessionId: string,
+): { expanded: string; secretsToSeal: string[]; expandedTypes: string[] } {
+  if (!hasCredentialPlaceholder(instruction)) {
+    return { expanded: instruction, secretsToSeal: [], expandedTypes: [] };
+  }
+  // Pull every `{{credentials.<type>[.field]}}` into a Map<type → data>.
+  // The picker honours session pin → context match → tier ordering — same
+  // path the synthesized-caller takes, so credential resolution stays
+  // consistent across surfaces.
+  const PLACEHOLDER_RE = /\{\{credentials\.([^}]+)\}\}/g;
+  const credentialTypes = new Set<string>();
+  for (const m of instruction.matchAll(PLACEHOLDER_RE)) {
+    const ref = m[1];
+    const dot = ref.indexOf(".");
+    credentialTypes.add(dot === -1 ? ref : ref.slice(0, dot));
+  }
+  const byType = new Map<string, Record<string, string>>();
+  const seal: string[] = [];
+  const expanded: string[] = [];
+  for (const credType of credentialTypes) {
+    const pick = pickCredential(credType, { sessionId });
+    if (!pick) {
+      throw new Error(
+        `[browser_act] no credential of type "${credType}" available — add one in Settings > Credentials before referencing it`,
+      );
+    }
+    const full = getCredentialData(pick.credentialId);
+    if (!full) {
+      throw new Error(
+        `[browser_act] credential ${pick.credentialId} could not be decrypted`,
+      );
+    }
+    byType.set(credType, full.data);
+    seal.push(...extractSecretValues(full.data));
+    expanded.push(credType);
+  }
+  return {
+    expanded: injectPlaceholders(instruction, { byType }),
+    secretsToSeal: seal,
+    expandedTypes: expanded,
+  };
+}
 
 const handleBrowserAct: NativeToolHandler = async (
   args: Record<string, unknown>,
   context?: NativeToolContext
 ): Promise<NativeToolResult> => {
   const sessionId = requireSessionId(context);
+  const instruction = String(args.instruction ?? "");
+  let expanded: string;
+  let secretsToSeal: string[];
+  let expandedTypes: string[];
   try {
-    const { getBrowser } = await import("../browser-manager.ts");
-    const stagehand = await getBrowser(sessionId);
-    const result = await withTimeout(
-      stagehand.page.act(String(args.instruction)),
-      BROWSER_OP_TIMEOUT,
-      "Action",
-    );
-    return {
-      content: [{ type: "text", text: result ? `Action completed: ${JSON.stringify(result)}` : "Action completed successfully." }],
-    };
+    ({ expanded, secretsToSeal, expandedTypes } = expandBrowserCredentials(instruction, sessionId));
   } catch (err) {
-    await evictIfBrowserDead(err, sessionId);
     return {
-      content: [{ type: "text", text: `Browser action failed: ${err instanceof Error ? err.message : String(err)}` }],
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
     };
   }
+  return withSecretSeal(secretsToSeal, async () => {
+    try {
+      const { getBrowser } = await import("../browser-manager.ts");
+      const stagehand = await getBrowser(sessionId);
+      const result = await withTimeout(
+        stagehand.page.act(expanded),
+        BROWSER_OP_TIMEOUT,
+        "Action",
+      );
+      const note = expandedTypes.length > 0
+        ? ` [credentials substituted: ${expandedTypes.join(", ")}]`
+        : "";
+      return {
+        content: [{
+          type: "text",
+          text: result
+            ? `Action completed: ${JSON.stringify(result)}${note}`
+            : `Action completed successfully.${note}`,
+        }],
+      };
+    } catch (err) {
+      await evictIfBrowserDead(err, sessionId);
+      return {
+        content: [{ type: "text", text: `Browser action failed: ${err instanceof Error ? err.message : String(err)}` }],
+      };
+    }
+  });
 };
 
 const browserExtractToolDef = tool({

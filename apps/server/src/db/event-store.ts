@@ -7,6 +7,7 @@ import type {
   ObservationKind,
 } from "@chvor/shared";
 import { getDb } from "./database.ts";
+import { redactKnownSecrets } from "../lib/credential-injector.ts";
 
 interface ActionRow {
   id: string;
@@ -91,7 +92,7 @@ export function appendAction(input: AppendActionInput): { id: string; ts: number
     input.sessionId,
     input.kind,
     input.tool,
-    JSON.stringify(input.args ?? {}),
+    JSON.stringify(redactKnownSecrets(input.args ?? {})),
     ts,
     input.actorType ?? "session",
     input.actorId ?? null,
@@ -122,7 +123,7 @@ export function appendObservation(input: AppendObservationInput): { id: string; 
     input.sessionId,
     input.actionId,
     input.kind,
-    input.payload === undefined ? null : JSON.stringify(truncateForStorage(input.payload)),
+    input.payload === undefined ? null : JSON.stringify(truncateForStorage(redactKnownSecrets(input.payload))),
     ts,
     input.durationMs
   );
