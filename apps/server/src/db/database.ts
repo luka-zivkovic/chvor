@@ -952,6 +952,38 @@ export function getDb(): Database.Database {
     console.log("[db] migration v26 applied: tool_embedding_meta + tool_vec (Phase F semantic router)");
   }
 
+  if (currentVersion < 27) {
+    // ── Orchestrator round checkpoints (Phase D3, snapshot-only) ──────
+    // One row per LLM round. State is JSON-serialized OrchestratorSnapshot
+    // (round number, bag scope summary, emotion bucket, model used, tool
+    // outcomes for this round, recent-tool window, etc.). Snapshots are
+    // observation-only in this PR — they enable replay/forensics; full
+    // pause/resume from a checkpoint is a separate refactor.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS orchestrator_checkpoints (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        round INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    `);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_orch_ck_session_round ON orchestrator_checkpoints(session_id, round DESC)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_orch_ck_created ON orchestrator_checkpoints(created_at DESC)");
+
+    // Daily prune job — drops checkpoints older than the configured retention
+    // window (default 7 days). Re-uses the existing system_jobs / job-runner
+    // infrastructure rather than adding a new scheduler.
+    const seedNow27 = new Date().toISOString();
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    db.prepare(
+      "INSERT OR IGNORE INTO system_jobs (job_id, interval_ms, next_run_at, status) VALUES (?, ?, ?, 'idle')"
+    ).run("orchestrator-checkpoint-prune", TWENTY_FOUR_HOURS, seedNow27);
+
+    db.pragma("user_version = 27");
+    console.log("[db] migration v27 applied: orchestrator_checkpoints (Phase D3 snapshots)");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }
