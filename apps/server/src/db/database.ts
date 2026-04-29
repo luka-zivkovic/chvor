@@ -1062,8 +1062,8 @@ export function getDb(): Database.Database {
     `);
     try {
       db.exec("ALTER TABLE daemon_tasks ADD COLUMN loop_id TEXT");
-    } catch {
-      // Column may already exist after a partial migration.
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
     }
     db.exec("CREATE INDEX IF NOT EXISTS idx_daemon_tasks_loop ON daemon_tasks(loop_id)");
     db.pragma("user_version = 29");

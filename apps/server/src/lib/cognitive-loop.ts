@@ -83,6 +83,13 @@ function componentMap(entries: A2UIComponentEntry[]): Record<string, A2UICompone
   return Object.fromEntries(entries.map((entry) => [entry.id, entry]));
 }
 
+// Track which loops have already had their A2UI surface schema published.
+// The schema (component tree) is identical for every event in a given loop —
+// only `bindings` change as events accrue. By republishing the schema once
+// (or on toast), follow-up events do a cheap bindings-only DB write + a
+// single `a2ui.data` broadcast instead of two writes + two broadcasts.
+const surfacePublished = new Set<string>();
+
 function refreshLoopDashboard(loopId: string, opts: { toast?: boolean } = {}): void {
   const run = getCognitiveLoopRun(loopId);
   if (!run) return;
@@ -95,25 +102,34 @@ function refreshLoopDashboard(loopId: string, opts: { toast?: boolean } = {}): v
     events: eventTableRows(events),
   };
 
+  const isFinalStatus = run.status === "completed" || run.status === "failed";
+  const needsSchema = opts.toast || !surfacePublished.has(surfaceId);
+
   try {
-    upsertSurface({
-      surfaceId,
-      title: run.title,
-      root: "root",
-      components: componentMap(components),
-      rendering: true,
-    });
+    if (needsSchema) {
+      upsertSurface({
+        surfaceId,
+        title: run.title,
+        root: "root",
+        components: componentMap(components),
+        rendering: true,
+      });
+      surfacePublished.add(surfaceId);
+    }
     updateBindings(surfaceId, bindings);
   } catch (err) {
     console.warn("[cognitive-loop] dashboard persistence skipped:", err instanceof Error ? err.message : String(err));
   }
 
   const ws = getWSInstance();
-  ws?.broadcast({ type: "a2ui.surface", data: { surfaceId, title: run.title, components, root: "root" } });
+  if (needsSchema) {
+    ws?.broadcast({ type: "a2ui.surface", data: { surfaceId, title: run.title, components, root: "root" } });
+  }
   ws?.broadcast({ type: "a2ui.data", data: { surfaceId, bindings } });
   if (opts.toast) {
     ws?.broadcast({ type: "a2ui.toast", data: { surfaceId, title: "Cognitive loop started" } });
   }
+  if (isFinalStatus) surfacePublished.delete(surfaceId);
 }
 
 export function startPulseCognitiveLoop(resultText: string, healthContext: string): CognitiveLoopRun {

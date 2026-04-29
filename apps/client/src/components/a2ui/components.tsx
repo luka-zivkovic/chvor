@@ -23,13 +23,26 @@ const A2UIFormContext = createContext<{
   setValue: (key: string, value: string) => void;
 } | null>(null);
 
+// Cap individual form values before re-encoding so a single oversized field
+// can't dominate the daemon prompt's <a2ui-payload> block (server still
+// re-truncates the JSON to 2KB, but per-field clamping keeps every field at
+// least minimally visible and bounds prompt-injection surface).
+const FORM_VALUE_MAX_CHARS = 512;
+function clampFormValues(values: FormValues): FormValues {
+  const out: FormValues = {};
+  for (const [key, value] of Object.entries(values)) {
+    out[key] = typeof value === "string" ? value.slice(0, FORM_VALUE_MAX_CHARS) : "";
+  }
+  return out;
+}
+
 function mergeFormValuesIntoAction(raw: string, values: FormValues): string {
   const parsed = parseA2UIAction(raw);
   if (!parsed || parsed.kind !== "emit") return raw;
   const payload = parsed.payload && typeof parsed.payload === "object" && !Array.isArray(parsed.payload)
     ? parsed.payload as Record<string, unknown>
     : {};
-  return `emit:${parsed.eventName}?${encodeURIComponent(JSON.stringify({ ...payload, form: values }))}`;
+  return `emit:${parsed.eventName}?${encodeURIComponent(JSON.stringify({ ...payload, form: clampFormValues(values) }))}`;
 }
 
 /* ─── Shared child renderer ─── */

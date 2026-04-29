@@ -12,12 +12,14 @@ let wsRef: WSManager | null = null;
 let currentTask: DaemonTask | null = null;
 let consecutiveIdle = 0;
 let lastPruneDate: string | null = null;
+let lastStaleLoopSweepAt = 0;
 let taskTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
 const DAEMON_JOB_ID = "daemon-tick";
 const TICK_INTERVAL_MS = 60_000; // 60 seconds
 const TASK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max per task
 const STUCK_TASK_THRESHOLD_MS = TASK_TIMEOUT_MS * 2; // 10 minutes
+const STALE_LOOP_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_RETRIES = 2;
 const MAX_ESCALATION_TASKS_PER_WINDOW = 3;
 const ESCALATION_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
@@ -99,6 +101,14 @@ async function daemonTick(): Promise<void> {
     lastPruneDate = today;
     const pruned = pruneDaemonTasks(7);
     if (pruned > 0) console.log(`[daemon] pruned ${pruned} old tasks`);
+  }
+
+  // Cognitive-loop staleness sweep — runs every 5 minutes so a hung loop
+  // (e.g. daemon crashed mid-task) gets marked failed within ~30 minutes
+  // of its last activity, not whenever the daily prune happens to fire.
+  const now = Date.now();
+  if (now - lastStaleLoopSweepAt >= STALE_LOOP_SWEEP_INTERVAL_MS) {
+    lastStaleLoopSweepAt = now;
     const staleLoops = recoverStaleCognitiveLoops();
     if (staleLoops > 0) console.log(`[daemon] recovered ${staleLoops} stale cognitive loop(s)`);
   }
