@@ -7,21 +7,24 @@ import { getSessionPin } from "../db/session-pin-store.ts";
  * When `{{credentials.X}}` references a type with multiple instances, this
  * function decides which one to use. Order:
  *
- *   1. **Pinned by tool config** — synth tools may declare a hard-coded
+ *   1. **LLM-picked** — a synthesized tool call may pass a safe metadata-only
+ *      `credentialId` enum chosen from the exposed options.
+ *   2. **Pinned by tool config** — synth tools may declare a hard-coded
  *      `credentialId` in their frontmatter; honoured first.
- *   2. **Session pin** — user pinned `(session, type)` via Settings or the
+ *   3. **Session pin** — user pinned `(session, type)` via Settings or the
  *      AI's prior turn (durable, survives restart).
- *   3. **Skill `preferredUsageContext` match** — score each candidate by
+ *   4. **Skill `preferredUsageContext` match** — score each candidate by
  *      token-overlap between the credential's `usage_context` and the
  *      union of `preferredUsageContext` from active skills. Wins only when
  *      one candidate strictly beats the rest.
- *   4. **First-match fallback** — alphabetical-by-name to keep the choice
+ *   5. **First-match fallback** — alphabetical-by-name to keep the choice
  *      deterministic across runs (replaces the old DB-order heuristic).
  *
  * Returns `null` when no credential of the requested type exists at all.
  */
 
 export type PickReason =
+  | "llm-picked"
   | "tool-pinned"
   | "session-pin"
   | "context-match"
@@ -29,6 +32,12 @@ export type PickReason =
   | "first-match-fallback";
 
 export interface PickContext {
+  /** Safe explicit choice from an LLM-visible credentialId enum. */
+  llmPickedId?: string;
+  /** Optional whitelist of credential IDs allowed in this call. */
+  allowedCredentialIds?: string[];
+  /** Optional whitelist of credential types allowed in this turn. */
+  allowedCredentialTypes?: string[];
   /** Optional session id — required for "session-pin" tier. */
   sessionId?: string | null;
   /** Optional pinning by tool frontmatter (synth tools). */
@@ -70,17 +79,41 @@ function overlap(a: Set<string>, b: Set<string>): number {
  * Pick a credential for a type given the current call context.
  * Returns null when no candidate of the requested type exists.
  */
-export function pickCredential(
-  credentialType: string,
-  ctx: PickContext = {}
-): PickResult | null {
+export function pickCredential(credentialType: string, ctx: PickContext = {}): PickResult | null {
+  if (
+    ctx.allowedCredentialTypes &&
+    ctx.allowedCredentialTypes.length > 0 &&
+    !ctx.allowedCredentialTypes.includes(credentialType)
+  ) {
+    return null;
+  }
+
   const all = listCredentials();
-  const candidates = all.filter((c) => c.type === credentialType);
+  let candidates = all.filter((c) => c.type === credentialType);
+  if (ctx.allowedCredentialIds && ctx.allowedCredentialIds.length > 0) {
+    const allowed = new Set(ctx.allowedCredentialIds);
+    candidates = candidates.filter((c) => allowed.has(c.id));
+  }
   if (candidates.length === 0) {
     return null;
   }
 
-  // Tier 1 — explicit tool pin (synth credentialId in frontmatter)
+  // Tier 1 — explicit LLM choice from a schema enum. Invalid choices fall
+  // through so legacy callers can recover through pins/context/fallback;
+  // synthesized-caller performs a stricter preflight and returns a clean error.
+  if (ctx.llmPickedId) {
+    const m = candidates.find((c) => c.id === ctx.llmPickedId);
+    if (m) {
+      return {
+        credentialId: m.id,
+        reason: "llm-picked",
+        candidateCount: candidates.length,
+        detail: `LLM selected credential "${m.name}"`,
+      };
+    }
+  }
+
+  // Tier 2 — explicit tool pin (synth credentialId in frontmatter)
   if (ctx.toolPinnedId) {
     const m = candidates.find((c) => c.id === ctx.toolPinnedId);
     if (m) {
@@ -94,7 +127,7 @@ export function pickCredential(
     // Pinned id no longer matches — fall through.
   }
 
-  // Tier 2 — session pin
+  // Tier 3 — session pin
   if (ctx.sessionId) {
     try {
       const pin = getSessionPin(ctx.sessionId, credentialType);
@@ -130,7 +163,7 @@ export function pickCredential(
     };
   }
 
-  // Tier 3 — context-match: score by usage_context token overlap
+  // Tier 4 — context-match: score by usage_context token overlap
   const wanted = new Set<string>();
   for (const t of ctx.preferredUsageContext ?? []) {
     for (const tok of tokenize(t)) wanted.add(tok);
@@ -150,12 +183,10 @@ export function pickCredential(
     }
   }
 
-  // Tier 4 — first-match fallback (alphabetical by name → deterministic).
+  // Tier 5 — first-match fallback (alphabetical by name → deterministic).
   // Byte-wise compare (not localeCompare) so the same data dir picks the
   // same credential regardless of which machine's locale runs the server.
-  const sorted = [...candidates].sort((a, b) =>
-    a.name < b.name ? -1 : a.name > b.name ? 1 : 0
-  );
+  const sorted = [...candidates].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const chosen = sorted[0];
   return {
     credentialId: chosen.id,

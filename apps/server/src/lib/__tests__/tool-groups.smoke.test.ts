@@ -55,9 +55,7 @@ describe("tool-groups — resolveSkillBag", () => {
   });
 
   it("strict scope when only requiredTools declared (no requiredGroups)", () => {
-    const scope = resolveSkillBag([
-      makeSkill("tool-only", { requiredTools: ["native__pc_do"] }),
-    ]);
+    const scope = resolveSkillBag([makeSkill("tool-only", { requiredTools: ["native__pc_do"] })]);
     expect(scope.isPermissive).toBe(false);
     // core is implicitly added even when nothing else is declared
     expect(scope.groups.has("core")).toBe(true);
@@ -75,10 +73,22 @@ describe("tool-groups — resolveSkillBag", () => {
     expect(Array.from(scope.deniedTools)).toEqual(["native__shell_execute"]);
   });
 
+  it("collects allowedCredentialTypes without forcing strict tool scope", () => {
+    const scope = resolveSkillBag([
+      makeSkill("github-helper", { allowedCredentialTypes: ["github"] }),
+    ]);
+    expect(scope.isPermissive).toBe(true);
+    expect(Array.from(scope.allowedCredentialTypes ?? [])).toEqual(["github"]);
+    expect(summarizeScope(scope).allowedCredentialTypes).toEqual(["github"]);
+  });
+
   it("unions groups across multiple declaring skills + accumulates required/denied", () => {
     const skills = [
       makeSkill("a", { requiredGroups: ["pc", "browser"], requiredTools: ["native__pc_do"] }),
-      makeSkill("b", { requiredGroups: ["browser", "knowledge"], deniedTools: ["native__shell_execute"] }),
+      makeSkill("b", {
+        requiredGroups: ["browser", "knowledge"],
+        deniedTools: ["native__shell_execute"],
+      }),
     ];
     const scope = resolveSkillBag(skills);
     expect(Array.from(scope.groups).sort()).toEqual(["browser", "core", "knowledge", "pc"]);
@@ -114,9 +124,7 @@ describe("tool-groups — filterTools (MCP / synth)", () => {
 
   it("strict scope keeps tools whose group is active and drops the rest", () => {
     const tools = [makeTool("twitter", "social"), makeTool("github", "git"), makeTool("misc")];
-    const scope = resolveSkillBag([
-      makeSkill("twitter-poster", { requiredGroups: ["social"] }),
-    ]);
+    const scope = resolveSkillBag([makeSkill("twitter-poster", { requiredGroups: ["social"] })]);
     const kept = filterTools(tools, scope);
     expect(kept.map((t) => t.id).sort()).toEqual(["twitter"]);
   });
@@ -166,9 +174,7 @@ describe("tool-groups — getNativeToolDefinitions(scope)", () => {
     for (const name of kept) {
       const tag = groupMap[name];
       const ok =
-        tag.criticality === "always-available" ||
-        tag.group === "web" ||
-        tag.group === "core";
+        tag.criticality === "always-available" || tag.group === "web" || tag.group === "core";
       expect(ok).toBe(true);
     }
   });

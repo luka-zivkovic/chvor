@@ -14,14 +14,13 @@ const MAX_SEGMENTS = 20;
 const FONT_THOUGHT = "11px 'IBM Plex Sans', sans-serif";
 const FONT_MONO = "10px 'IBM Plex Mono', monospace";
 
-function segmentType(
-  eventType: string,
-): ThoughtSegment["type"] | null {
+function segmentType(eventType: string): ThoughtSegment["type"] | null {
   if (eventType === "brain.thinking") return "thought";
   if (eventType === "brain.decision") return "decision";
   if (eventType.startsWith("skill.")) return "skill";
   if (eventType.startsWith("tool.")) return "tool";
   if (eventType.startsWith("memory.")) return "memory";
+  if (eventType === "credential.resolved") return "tool";
   return null;
 }
 
@@ -43,6 +42,20 @@ function extractText(eventType: string, data: Record<string, unknown>): string {
       return `done: ${data.nodeId || "tool"}`;
     case "tool.failed":
       return `error: ${data.error || "unknown"}`;
+    case "credential.resolved": {
+      const pickedBy = String(data.pickedBy || data.reason || "");
+      const label =
+        pickedBy === "llm-picked"
+          ? "LLM picked"
+          : pickedBy === "session-pin"
+            ? "Session pin"
+            : pickedBy === "tool-pinned"
+              ? "Tool pin"
+              : pickedBy === "context-match"
+                ? "Context match"
+                : "Auto";
+      return `${label}: ${data.credentialName || data.credentialType || "credential"}`;
+    }
     case "memory.recalled":
       return `recalled: ${data.abstract || ""}`;
     case "memory.created":
@@ -135,9 +148,9 @@ export function useThoughtStream(): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, streamingThought]);
 
-  const isActive = executionEvents.some(
-    (e) => e.type === "execution.started",
-  ) && !executionEvents.some((e) => e.type === "execution.completed" || e.type === "execution.failed");
+  const isActive =
+    executionEvents.some((e) => e.type === "execution.started") &&
+    !executionEvents.some((e) => e.type === "execution.completed" || e.type === "execution.failed");
 
   // Clear pretext caches when execution finishes
   const prevActiveRef = useRef(false);

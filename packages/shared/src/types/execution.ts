@@ -1,16 +1,6 @@
-export type ExecutionStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export type ExecutionStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
-export type NodeExecutionStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped";
+export type NodeExecutionStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 
 export interface NodeExecutionState {
   nodeId: string;
@@ -65,20 +55,43 @@ export interface MemoryRetrievalTrace {
 export type ExecutionEvent =
   | { type: "execution.started"; data: { executionId: string } }
   | { type: "brain.thinking"; data: { thought: string } }
-  | { type: "brain.decision"; data: { skillId?: string; toolId?: string; capabilityKind: "skill" | "tool"; reason: string } }
+  | {
+      type: "brain.decision";
+      data: { skillId?: string; toolId?: string; capabilityKind: "skill" | "tool"; reason: string };
+    }
   | { type: "brain.emotion"; data: EmotionState | EmotionSnapshot }
   | { type: "skill.invoked"; data: { nodeId: string; skillId: string; isApiConnection?: boolean } }
   | { type: "skill.output"; data: { nodeId: string; chunk: string } }
-  | { type: "skill.completed"; data: { nodeId: string; output: unknown; media?: import("./message.js").MediaArtifact[] } }
+  | {
+      type: "skill.completed";
+      data: { nodeId: string; output: unknown; media?: import("./message.js").MediaArtifact[] };
+    }
   | { type: "skill.failed"; data: { nodeId: string; error: string } }
   | { type: "tool.invoked"; data: { nodeId: string; toolId: string } }
   | { type: "tool.output"; data: { nodeId: string; chunk: string } }
-  | { type: "tool.completed"; data: { nodeId: string; output: unknown; media?: import("./message.js").MediaArtifact[] } }
+  | {
+      type: "tool.completed";
+      data: { nodeId: string; output: unknown; media?: import("./message.js").MediaArtifact[] };
+    }
   | { type: "tool.failed"; data: { nodeId: string; error: string } }
   // Memory events (cognitive memory system)
-  | { type: "memory.recalled"; data: { memoryId: string; abstract: string; strength: number; source: "direct" | "associated" } }
-  | { type: "memory.created"; data: { memoryId: string; abstract: string; category: MemoryCategory } }
-  | { type: "memory.consolidated"; data: { newMemoryId: string; sourceCount: number; insight: string } }
+  | {
+      type: "memory.recalled";
+      data: {
+        memoryId: string;
+        abstract: string;
+        strength: number;
+        source: "direct" | "associated";
+      };
+    }
+  | {
+      type: "memory.created";
+      data: { memoryId: string; abstract: string; category: MemoryCategory };
+    }
+  | {
+      type: "memory.consolidated";
+      data: { newMemoryId: string; sourceCount: number; insight: string };
+    }
   | { type: "memory.contradiction"; data: { oldId: string; newId: string; abstract: string } }
   | { type: "memory.decayed"; data: { memoryId: string; oldStrength: number; newStrength: number } }
   | { type: "memory.retrieval_trace"; data: MemoryRetrievalTrace }
@@ -87,13 +100,33 @@ export type ExecutionEvent =
   | { type: "shell.denied"; data: { nodeId: string } }
   | { type: "pipeline.step"; data: { edgeId: string; toNodeId: string } }
   | { type: "pipeline.stepCompleted"; data: { edgeId: string; nodeId: string } }
-  | { type: "pc.action"; data: { agentId: string; action: import("./pc-control.js").PcActionType; coordinate?: [number, number] } }
+  | {
+      type: "pc.action";
+      data: {
+        agentId: string;
+        action: import("./pc-control.js").PcActionType;
+        coordinate?: [number, number];
+      };
+    }
   | { type: "pc.screenshot"; data: { agentId: string } }
   | { type: "pc.actionCompleted"; data: { agentId: string; success: boolean; error?: string } }
   | { type: "pc.pipeline.start"; data: { targetId: string; task: string } }
-  | { type: "pc.pipeline.layer"; data: { targetId: string; layer: import("./pc-control.js").PipelineLayer; status: "trying" | "success" | "fallthrough" } }
-  | { type: "pc.pipeline.complete"; data: { targetId: string; layer: import("./pc-control.js").PipelineLayer; success: boolean } }
-  | { type: "sandbox.started"; data: { nodeId: string; language: import("./sandbox.js").SandboxLanguage } }
+  | {
+      type: "pc.pipeline.layer";
+      data: {
+        targetId: string;
+        layer: import("./pc-control.js").PipelineLayer;
+        status: "trying" | "success" | "fallthrough";
+      };
+    }
+  | {
+      type: "pc.pipeline.complete";
+      data: { targetId: string; layer: import("./pc-control.js").PipelineLayer; success: boolean };
+    }
+  | {
+      type: "sandbox.started";
+      data: { nodeId: string; language: import("./sandbox.js").SandboxLanguage };
+    }
   | { type: "sandbox.completed"; data: { nodeId: string; exitCode: number; durationMs: number } }
   | { type: "sandbox.failed"; data: { nodeId: string; error: string } }
   | { type: "execution.tokenBudget"; data: TokenBudgetInfo }
@@ -172,6 +205,15 @@ export interface CredentialResolvedEvent {
   credentialName: string;
   /** Why the picker landed here. */
   reason:
+    | "llm-picked"
+    | "tool-pinned"
+    | "session-pin"
+    | "context-match"
+    | "single-match"
+    | "first-match-fallback";
+  /** Which picker tier won; duplicated from reason for UI readability/backcompat. */
+  pickedBy:
+    | "llm-picked"
     | "tool-pinned"
     | "session-pin"
     | "context-match"
@@ -199,6 +241,8 @@ export interface ToolBagResolvedEvent {
   permissiveReason?: string;
   /** IDs of skills that contributed declarations to this scope. */
   contributingSkills: string[];
+  /** Credential types active skills allow this turn. Empty ⇒ legacy unscoped. */
+  allowedCredentialTypes?: string[];
   /** Total tools in the final bag handed to the LLM. */
   toolCount: number;
 }

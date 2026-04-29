@@ -20,12 +20,7 @@ import { getCredentialData, listCredentials, updateCredential } from "../db/cred
 import { isPrivateIp, isPrivateHostname } from "./url-safety.ts";
 import { logError } from "./error-logger.ts";
 import { insertActivity } from "../db/activity-store.ts";
-import {
-  requestApproval,
-  recordSuccess,
-  recordFailure,
-  getSessionStats,
-} from "./approval-gate.ts";
+import { requestApproval, recordSuccess, recordFailure, getSessionStats } from "./approval-gate.ts";
 import { refreshAccessToken, type OAuthProviderConfig } from "./oauth-engine.ts";
 import { getDirectOAuthProvider } from "./oauth-providers.ts";
 import { SynthesizedToolError } from "./errors.ts";
@@ -48,6 +43,8 @@ export interface CallContext {
   originClientId?: string;
   /** Skill-aggregated `preferredUsageContext` used by the multi-credential picker. */
   preferredUsageContext?: string[];
+  /** Skill-scoped credential whitelist for this turn. Undefined/empty ⇒ legacy unscoped. */
+  allowedCredentialTypes?: string[];
   /** Optional sink for picker rationale; orchestrator wires this to a canvas event. */
   onCredentialResolved?: (info: {
     credentialType: string;
@@ -56,11 +53,19 @@ export interface CallContext {
     reason: PickResult["reason"];
     candidateCount: number;
     detail?: string;
+    pickedBy: PickResult["reason"];
   }) => void;
 }
 
 export type CallResult =
-  | { ok: true; status: number; body: unknown; truncated: boolean; size: number; durationMs: number }
+  | {
+      ok: true;
+      status: number;
+      body: unknown;
+      truncated: boolean;
+      size: number;
+      durationMs: number;
+    }
   | { ok: false; error: string; status?: number; durationMs: number; diagnosis?: AuthDiagnosis };
 
 export interface AuthDiagnosis {
@@ -82,13 +87,16 @@ export interface AuthDiagnosis {
 function pickCredentialForCall(
   credentialType: string,
   context: CallContext,
-  toolPinnedId?: string
+  toolPinnedId?: string,
+  llmPickedId?: string
 ): PickResult | null {
   try {
     return pickCredential(credentialType, {
+      llmPickedId,
       sessionId: context.sessionId ?? null,
       toolPinnedId,
       preferredUsageContext: context.preferredUsageContext,
+      allowedCredentialTypes: context.allowedCredentialTypes,
     });
   } catch (err) {
     console.warn(
@@ -101,10 +109,7 @@ function pickCredentialForCall(
 
 // ── URL construction ───────────────────────────────────────────
 
-function substitutePathParams(
-  path: string,
-  pathParams: Record<string, string | number>,
-): string {
+function substitutePathParams(path: string, pathParams: Record<string, string | number>): string {
   return path.replace(/\{([^}]+)\}/g, (match, key: string) => {
     const k = key.trim();
     if (!(k in pathParams)) return match;
@@ -120,7 +125,7 @@ function buildUrl(
   baseUrl: string,
   endpointPath: string,
   pathParams: Record<string, string | number>,
-  queryParams: Record<string, string | number | boolean>,
+  queryParams: Record<string, string | number | boolean>
 ): string {
   const path = substitutePathParams(endpointPath, pathParams);
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
@@ -159,7 +164,7 @@ export async function resolveSafeSynthesizedTarget(rawUrl: string): Promise<Reso
   if (parsed.protocol !== "https:") {
     throw new SynthesizedToolError(
       `non-HTTPS blocked (got ${parsed.protocol}) — synthesized tool calls require HTTPS`,
-      { code: "synth.url_blocked", context: { rawUrl, reason: "non_https" }, userFacing: true },
+      { code: "synth.url_blocked", context: { rawUrl, reason: "non_https" }, userFacing: true }
     );
   }
   const hostname = parsed.hostname;
@@ -180,14 +185,11 @@ export async function resolveSafeSynthesizedTarget(rawUrl: string): Promise<Reso
   }
   const { address } = await lookup(hostname);
   if (!ALLOW_PRIVATE && isPrivateIp(address)) {
-    throw new SynthesizedToolError(
-      `private/link-local address blocked: ${hostname} → ${address}`,
-      {
-        code: "synth.url_blocked",
-        context: { hostname, address, reason: "private_resolution" },
-        userFacing: true,
-      },
-    );
+    throw new SynthesizedToolError(`private/link-local address blocked: ${hostname} → ${address}`, {
+      code: "synth.url_blocked",
+      context: { hostname, address, reason: "private_resolution" },
+      userFacing: true,
+    });
   }
   return { url: parsed, resolvedIp: address, hostname };
 }
@@ -291,7 +293,7 @@ function applyAuth(
   headers: Record<string, string>,
   url: URL,
   auth: ConnectionConfig["auth"],
-  data: Record<string, string>,
+  data: Record<string, string>
 ): void {
   const apiKey = data.apiKey ?? data.token ?? data.accessToken ?? "";
 
@@ -306,12 +308,16 @@ function applyAuth(
       headers["Authorization"] = renderTemplate(auth.headerTemplate, `Bearer ${apiKey}`);
       break;
     case "api-key-header":
-      headers[stripCrlf(auth.headerName ?? "x-api-key")] = renderTemplate(auth.headerTemplate, apiKey);
+      headers[stripCrlf(auth.headerName ?? "x-api-key")] = renderTemplate(
+        auth.headerTemplate,
+        apiKey
+      );
       break;
     case "basic": {
       const user = data.username ?? "";
       const pass = data.password ?? apiKey;
-      headers["Authorization"] = `Basic ${Buffer.from(`${stripCrlf(user)}:${stripCrlf(pass)}`).toString("base64")}`;
+      headers["Authorization"] =
+        `Basic ${Buffer.from(`${stripCrlf(user)}:${stripCrlf(pass)}`).toString("base64")}`;
       break;
     }
     case "query-param":
@@ -354,7 +360,8 @@ function diagnoseAuthError(args: {
       status,
       likelyCause: "expired_token",
       userFacingHint: `Your ${tool.metadata.name} credential looks expired. Generate a fresh token and re-enter it.`,
-      aiGuidance: "Call native__request_credential with existingCredentialId set so the user can refresh the token.",
+      aiGuidance:
+        "Call native__request_credential with existingCredentialId set so the user can refresh the token.",
     };
   }
 
@@ -364,7 +371,8 @@ function diagnoseAuthError(args: {
       status,
       likelyCause: "missing_scope",
       userFacingHint: `Your ${tool.metadata.name} credential is valid but lacks a scope/permission this endpoint (${endpoint.name}) needs. Check the ${tool.metadata.name} API docs for the required scope, then generate a new token with it.`,
-      aiGuidance: "Do not prompt for credential re-entry. Relay userFacingHint and suggest a read-only alternative or different endpoint.",
+      aiGuidance:
+        "Do not prompt for credential re-entry. Relay userFacingHint and suggest a read-only alternative or different endpoint.",
     };
   }
 
@@ -374,7 +382,8 @@ function diagnoseAuthError(args: {
       status,
       likelyCause: "wrong_auth_scheme",
       userFacingHint: `Can't authenticate to ${tool.metadata.name} with the current credential. The auth scheme in the tool config may be wrong — try calling native__repair_synthesized_tool, or check the ${tool.metadata.name} docs.`,
-      aiGuidance: "Try native__repair_synthesized_tool once before asking the user to re-enter credentials.",
+      aiGuidance:
+        "Try native__repair_synthesized_tool once before asking the user to re-enter credentials.",
     };
   }
 
@@ -393,7 +402,8 @@ function diagnoseAuthError(args: {
     status,
     likelyCause: "unknown",
     userFacingHint: `${tool.metadata.name} rejected the call (${status}). Double-check that the credential is correct and has the needed permissions.`,
-    aiGuidance: "Consider native__repair_synthesized_tool before prompting for credential re-entry.",
+    aiGuidance:
+      "Consider native__repair_synthesized_tool before prompting for credential re-entry.",
   };
 }
 
@@ -412,7 +422,7 @@ interface RefreshResult {
 async function tryRefreshOAuthToken(
   credId: string,
   credName: string,
-  data: Record<string, string>,
+  data: Record<string, string>
 ): Promise<RefreshResult | null> {
   const refreshToken = data.refreshToken;
   const clientId = data.clientId;
@@ -438,7 +448,9 @@ async function tryRefreshOAuthToken(
       try {
         const { getClientSecretForProvider } = await import("../routes/oauth.ts");
         clientSecret = clientSecret ?? getClientSecretForProvider(data.provider);
-      } catch { /* best-effort */ }
+      } catch {
+        /* best-effort */
+      }
     }
   }
   if (!providerConfig || !providerConfig.tokenUrl) return null;
@@ -455,7 +467,10 @@ async function tryRefreshOAuthToken(
     updateCredential(credId, credName, updated);
     return { data: updated };
   } catch (err) {
-    console.warn("[synthesized-caller] OAuth refresh failed:", err instanceof Error ? err.message : String(err));
+    console.warn(
+      "[synthesized-caller] OAuth refresh failed:",
+      err instanceof Error ? err.message : String(err)
+    );
     return null;
   }
 }
@@ -527,7 +542,7 @@ function recordSynthesizedMutationAudit(args: {
   } catch (err) {
     console.warn(
       "[synthesized-caller] audit log insert failed:",
-      err instanceof Error ? err.message : String(err),
+      err instanceof Error ? err.message : String(err)
     );
   }
 }
@@ -546,7 +561,7 @@ export async function callSynthesizedEndpoint(
   tool: Tool,
   endpointName: string,
   args: Record<string, unknown>,
-  context: CallContext = {},
+  context: CallContext = {}
 ): Promise<CallResult> {
   const started = Date.now();
 
@@ -563,9 +578,49 @@ export async function callSynthesizedEndpoint(
     };
   }
 
+  // `credentialId` is a synthesized-tool meta-arg exposed only so the LLM can
+  // choose between same-type credentials. If an endpoint has a real param by
+  // that name, tool-builder does not expose the meta-arg and we leave it alone.
+  const endpointHasCredentialIdParam =
+    (endpoint.pathParams ?? []).some((p) => p.name === "credentialId") ||
+    (endpoint.queryParams ?? []).some((p) => p.name === "credentialId") ||
+    Boolean(
+      endpoint.bodySchema &&
+      endpoint.method !== "GET" &&
+      typeof (endpoint.bodySchema.properties as Record<string, unknown> | undefined)
+        ?.credentialId !== "undefined"
+    );
+  const llmPickedId =
+    !endpointHasCredentialIdParam && typeof args.credentialId === "string"
+      ? args.credentialId
+      : undefined;
+  const callArgs: Record<string, unknown> = { ...args };
+  if (llmPickedId) delete callArgs.credentialId;
+
   // Resolve credential via tiered picker (Phase E).
   const credType = tool.synthesized.credentialType;
-  const pick = pickCredentialForCall(credType, context, tool.synthesized.credentialId);
+  if (
+    context.allowedCredentialTypes &&
+    context.allowedCredentialTypes.length > 0 &&
+    !context.allowedCredentialTypes.includes(credType)
+  ) {
+    return {
+      ok: false,
+      error: `credential type "${credType}" is not allowed by the active skill scope`,
+      durationMs: Date.now() - started,
+    };
+  }
+  if (llmPickedId) {
+    const validLlmPick = listCredentials().some((c) => c.id === llmPickedId && c.type === credType);
+    if (!validLlmPick) {
+      return {
+        ok: false,
+        error: `invalid credentialId for "${credType}"; use one of the exposed enum values or omit credentialId`,
+        durationMs: Date.now() - started,
+      };
+    }
+  }
+  const pick = pickCredentialForCall(credType, context, tool.synthesized.credentialId, llmPickedId);
   if (!pick) {
     return {
       ok: false,
@@ -595,6 +650,7 @@ export async function callSynthesizedEndpoint(
         reason: pick.reason,
         candidateCount: pick.candidateCount,
         detail: pick.detail,
+        pickedBy: pick.reason,
       });
     } catch (err) {
       console.warn(
@@ -623,313 +679,344 @@ export async function callSynthesizedEndpoint(
   // log, error context) sees them replaced with «credential» so a stray
   // value never leaks into a persisted row.
   return withSecretSeal(extractSecretValues(cred.data), async () => {
-
-  // Partition args into pathParams, queryParams, body
-  const pathParams: Record<string, string | number> = {};
-  for (const p of endpoint.pathParams ?? []) {
-    const v = args[p.name];
-    if (v === undefined || v === null) {
-      if (p.required) {
-        return { ok: false, error: `missing required path param: ${p.name}`, durationMs: Date.now() - started };
+    // Partition args into pathParams, queryParams, body
+    const pathParams: Record<string, string | number> = {};
+    for (const p of endpoint.pathParams ?? []) {
+      const v = callArgs[p.name];
+      if (v === undefined || v === null) {
+        if (p.required) {
+          return {
+            ok: false,
+            error: `missing required path param: ${p.name}`,
+            durationMs: Date.now() - started,
+          };
+        }
+        continue;
       }
-      continue;
+      pathParams[p.name] = p.type === "integer" ? Number(v) : String(v);
     }
-    pathParams[p.name] = p.type === "integer" ? Number(v) : String(v);
-  }
 
-  const queryParams: Record<string, string | number | boolean> = {};
-  for (const p of endpoint.queryParams ?? []) {
-    const v = args[p.name];
-    if (v === undefined || v === null) {
-      if (p.required) {
-        return { ok: false, error: `missing required query param: ${p.name}`, durationMs: Date.now() - started };
+    const queryParams: Record<string, string | number | boolean> = {};
+    for (const p of endpoint.queryParams ?? []) {
+      const v = callArgs[p.name];
+      if (v === undefined || v === null) {
+        if (p.required) {
+          return {
+            ok: false,
+            error: `missing required query param: ${p.name}`,
+            durationMs: Date.now() - started,
+          };
+        }
+        continue;
       }
-      continue;
+      if (p.type === "boolean") queryParams[p.name] = Boolean(v);
+      else if (p.type === "integer" || p.type === "number") queryParams[p.name] = Number(v);
+      else queryParams[p.name] = String(v);
     }
-    if (p.type === "boolean") queryParams[p.name] = Boolean(v);
-    else if (p.type === "integer" || p.type === "number") queryParams[p.name] = Number(v);
-    else queryParams[p.name] = String(v);
-  }
 
-  let bodyValue: unknown;
-  if (endpoint.bodySchema && endpoint.method !== "GET") {
-    const bodyArg = args.body ?? args;
-    if (bodyArg && typeof bodyArg === "object") bodyValue = bodyArg;
-  }
-
-  // Build + resolve target (DNS lookup happens once here)
-  let target: ResolvedTarget;
-  try {
-    const urlStr = buildUrl(baseUrl, endpoint.path, pathParams, queryParams);
-    target = await resolveSafeSynthesizedTarget(urlStr);
-  } catch (err) {
-    return {
-      ok: false,
-      error: `URL safety check failed: ${err instanceof Error ? err.message : String(err)}`,
-      durationMs: Date.now() - started,
-    };
-  }
-
-  // Apply auth + headers
-  const headersObj: Record<string, string> = {
-    "Accept": "application/json",
-  };
-  if (bodyValue !== undefined) headersObj["Content-Type"] = "application/json";
-  if (connection.headers) {
-    for (const [k, v] of Object.entries(connection.headers)) {
-      headersObj[stripCrlf(k)] = stripCrlf(v);
+    let bodyValue: unknown;
+    if (endpoint.bodySchema && endpoint.method !== "GET") {
+      const bodyArg = callArgs.body ?? callArgs;
+      if (bodyArg && typeof bodyArg === "object") bodyValue = bodyArg;
     }
-  }
-  applyAuth(headersObj, target.url, connection.auth, cred.data);
 
-  // Non-GET approval gate
-  if (endpoint.method !== "GET") {
-    const argsPreview = JSON.stringify({
-      path: pathParams,
-      query: queryParams,
-      body: bodyValue,
-    }, null, 2).slice(0, 2000);
-
-    const approval = await requestApproval({
-      sessionId: context.sessionId,
-      originClientId: context.originClientId,
-      toolId: tool.id,
-      toolName: tool.metadata.name,
-      endpointName: endpoint.name,
-      method: endpoint.method,
-      path: endpoint.path,
-      resolvedUrl: target.url.toString(),
-      argsPreview,
-      pathParams: Object.keys(pathParams).length > 0 ? pathParams : undefined,
-      queryParams: Object.keys(queryParams).length > 0 ? queryParams : undefined,
-      body: bodyValue,
-      verified: synth.verified,
-      source: synth.source,
-    });
-
-    if (!approval.allowed) {
+    // Build + resolve target (DNS lookup happens once here)
+    let target: ResolvedTarget;
+    try {
+      const urlStr = buildUrl(baseUrl, endpoint.path, pathParams, queryParams);
+      target = await resolveSafeSynthesizedTarget(urlStr);
+    } catch (err) {
       return {
         ok: false,
-        error: approval.reason === "denied"
-          ? "user denied execution"
-          : approval.reason === "no-ws"
-          ? "cannot prompt for approval — no active UI connection"
-          : "approval timed out",
+        error: `URL safety check failed: ${err instanceof Error ? err.message : String(err)}`,
         durationMs: Date.now() - started,
       };
     }
-  }
 
-  // Execute via pinned-IP HTTPS request
-  const callId = randomUUID();
-  const timeoutMs = resolveTimeoutMs(tool);
-  let response: PinnedResponse;
-  try {
-    response = await pinnedHttpsRequest({
-      target,
-      method: endpoint.method,
-      headers: headersObj,
-      body: bodyValue !== undefined ? Buffer.from(JSON.stringify(bodyValue), "utf-8") : undefined,
-      timeoutMs,
-      maxBytes: MAX_RESPONSE_BYTES,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logError("mcp_crash" as const, msg, {
+    // Apply auth + headers
+    const headersObj: Record<string, string> = {
+      Accept: "application/json",
+    };
+    if (bodyValue !== undefined) headersObj["Content-Type"] = "application/json";
+    if (connection.headers) {
+      for (const [k, v] of Object.entries(connection.headers)) {
+        headersObj[stripCrlf(k)] = stripCrlf(v);
+      }
+    }
+    applyAuth(headersObj, target.url, connection.auth, cred.data);
+
+    // Non-GET approval gate
+    if (endpoint.method !== "GET") {
+      const argsPreview = JSON.stringify(
+        {
+          path: pathParams,
+          query: queryParams,
+          body: bodyValue,
+        },
+        null,
+        2
+      ).slice(0, 2000);
+
+      const approval = await requestApproval({
+        sessionId: context.sessionId,
+        originClientId: context.originClientId,
+        toolId: tool.id,
+        toolName: tool.metadata.name,
+        endpointName: endpoint.name,
+        method: endpoint.method,
+        path: endpoint.path,
+        resolvedUrl: target.url.toString(),
+        argsPreview,
+        pathParams: Object.keys(pathParams).length > 0 ? pathParams : undefined,
+        queryParams: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+        body: bodyValue,
+        verified: synth.verified,
+        source: synth.source,
+      });
+
+      if (!approval.allowed) {
+        return {
+          ok: false,
+          error:
+            approval.reason === "denied"
+              ? "user denied execution"
+              : approval.reason === "no-ws"
+                ? "cannot prompt for approval — no active UI connection"
+                : "approval timed out",
+          durationMs: Date.now() - started,
+        };
+      }
+    }
+
+    // Execute via pinned-IP HTTPS request
+    const callId = randomUUID();
+    const timeoutMs = resolveTimeoutMs(tool);
+    let response: PinnedResponse;
+    try {
+      response = await pinnedHttpsRequest({
+        target,
+        method: endpoint.method,
+        headers: headersObj,
+        body: bodyValue !== undefined ? Buffer.from(JSON.stringify(bodyValue), "utf-8") : undefined,
+        timeoutMs,
+        maxBytes: MAX_RESPONSE_BYTES,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logError("mcp_crash" as const, msg, {
+        kind: "synthesized_call",
+        callId,
+        toolId: tool.id,
+        endpoint: endpoint.name,
+        host: target.hostname,
+      });
+      recordFailure(context.sessionId, tool.id, endpoint.name);
+      return { ok: false, error: `network error: ${msg}`, durationMs: Date.now() - started };
+    }
+
+    const rawText = response.body.toString("utf-8");
+    const truncated = response.truncated;
+    const size = response.size;
+
+    logError("mcp_crash" as const, "", {
       kind: "synthesized_call",
       callId,
       toolId: tool.id,
       endpoint: endpoint.name,
+      method: endpoint.method,
       host: target.hostname,
+      status: response.status,
+      durationMs: Date.now() - started,
     });
-    recordFailure(context.sessionId, tool.id, endpoint.name);
-    return { ok: false, error: `network error: ${msg}`, durationMs: Date.now() - started };
-  }
 
-  const rawText = response.body.toString("utf-8");
-  const truncated = response.truncated;
-  const size = response.size;
-
-  logError("mcp_crash" as const, "", {
-    kind: "synthesized_call",
-    callId,
-    toolId: tool.id,
-    endpoint: endpoint.name,
-    method: endpoint.method,
-    host: target.hostname,
-    status: response.status,
-    durationMs: Date.now() - started,
-  });
-
-  // Parse body
-  let parsed: unknown;
-  const contentType = response.headers["content-type"] ?? "";
-  if (contentType.includes("application/json")) {
-    try { parsed = JSON.parse(rawText); } catch { parsed = rawText; }
-  } else {
-    parsed = rawText;
-  }
-
-  const finalBody = truncated
-    ? {
-        truncated: true as const,
-        preview: rawText.slice(0, TRUNCATION_PREVIEW_BYTES),
-        size,
-      }
-    : parsed;
-
-  // Track 0.7: transparent OAuth refresh on 401 — applies to both bearer
-  // and api-key-header (some providers carry the access token in a custom
-  // header rather than Authorization). One retry max, only if a refresh
-  // token is present and the refresh exchange succeeds.
-  if (response.status === 401 && cred.data.refreshToken) {
-    const refreshed = await tryRefreshOAuthToken(credId, cred.cred.name, cred.data);
-    if (refreshed) {
-      // Phase E2 — the outer seal opened with `extractSecretValues(cred.data)`
-      // captured only the *original* credential's values. The refresh just
-      // minted a new access token (and possibly a new refresh token); register
-      // those on top of the seal so any logging that incidentally sees them
-      // (audit rows, error context, etc.) gets scrubbed. Released after the
-      // retry block regardless of how it exits.
-      const releaseRefreshedSeal = addSecretsToSeal(extractSecretValues(refreshed.data));
+    // Parse body
+    let parsed: unknown;
+    const contentType = response.headers["content-type"] ?? "";
+    if (contentType.includes("application/json")) {
       try {
-        // Rebuild headers with the new access token and re-fire the request
-        // against the same already-resolved target (no second DNS round-trip,
-        // so SSRF gates remain enforced from the original lookup).
-        const retryHeaders: Record<string, string> = {
-          "Accept": "application/json",
-        };
-        if (bodyValue !== undefined) retryHeaders["Content-Type"] = "application/json";
-        if (connection.headers) {
-          for (const [k, v] of Object.entries(connection.headers)) {
-            retryHeaders[stripCrlf(k)] = stripCrlf(v);
-          }
-        }
-        applyAuth(retryHeaders, target.url, connection.auth, refreshed.data);
+        parsed = JSON.parse(rawText);
+      } catch {
+        parsed = rawText;
+      }
+    } else {
+      parsed = rawText;
+    }
 
+    const finalBody = truncated
+      ? {
+          truncated: true as const,
+          preview: rawText.slice(0, TRUNCATION_PREVIEW_BYTES),
+          size,
+        }
+      : parsed;
+
+    // Track 0.7: transparent OAuth refresh on 401 — applies to both bearer
+    // and api-key-header (some providers carry the access token in a custom
+    // header rather than Authorization). One retry max, only if a refresh
+    // token is present and the refresh exchange succeeds.
+    if (response.status === 401 && cred.data.refreshToken) {
+      const refreshed = await tryRefreshOAuthToken(credId, cred.cred.name, cred.data);
+      if (refreshed) {
+        // Phase E2 — the outer seal opened with `extractSecretValues(cred.data)`
+        // captured only the *original* credential's values. The refresh just
+        // minted a new access token (and possibly a new refresh token); register
+        // those on top of the seal so any logging that incidentally sees them
+        // (audit rows, error context, etc.) gets scrubbed. Released after the
+        // retry block regardless of how it exits.
+        const releaseRefreshedSeal = addSecretsToSeal(extractSecretValues(refreshed.data));
         try {
-          response = await pinnedHttpsRequest({
-            target,
-            method: endpoint.method,
-            headers: retryHeaders,
-            body: bodyValue !== undefined ? Buffer.from(JSON.stringify(bodyValue), "utf-8") : undefined,
-            timeoutMs,
-            maxBytes: MAX_RESPONSE_BYTES,
-          });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          recordFailure(context.sessionId, tool.id, endpoint.name);
-          return { ok: false, error: `network error after token refresh: ${msg}`, durationMs: Date.now() - started };
-        }
-
-        const refreshedRawText = response.body.toString("utf-8");
-        const refreshedTruncated = response.truncated;
-        const refreshedSize = response.size;
-        const refreshedContentType = response.headers["content-type"] ?? "";
-        let refreshedParsed: unknown;
-        if (refreshedContentType.includes("application/json")) {
-          try { refreshedParsed = JSON.parse(refreshedRawText); } catch { refreshedParsed = refreshedRawText; }
-        } else {
-          refreshedParsed = refreshedRawText;
-        }
-        const refreshedFinalBody = refreshedTruncated
-          ? { truncated: true as const, preview: refreshedRawText.slice(0, TRUNCATION_PREVIEW_BYTES), size: refreshedSize }
-          : refreshedParsed;
-
-        logError("mcp_crash" as const, "", {
-          kind: "synthesized_call",
-          callId,
-          toolId: tool.id,
-          endpoint: endpoint.name,
-          method: endpoint.method,
-          host: target.hostname,
-          status: response.status,
-          durationMs: Date.now() - started,
-          refreshed: true,
-        });
-
-        if (response.status >= 200 && response.status < 300) {
-          recordSuccess(context.sessionId, tool.id, endpoint.name);
-          if (endpoint.method !== "GET") {
-            recordSynthesizedMutationAudit({
-              tool,
-              endpoint,
-              resolvedUrl: target.url.toString(),
-              pathParams,
-              queryParams,
-              body: bodyValue,
-              responseStatus: response.status,
-              responseBody: refreshedFinalBody,
-              durationMs: Date.now() - started,
-            });
-          }
-          return {
-            ok: true,
-            status: response.status,
-            body: refreshedFinalBody,
-            truncated: refreshedTruncated,
-            size: refreshedSize,
-            durationMs: Date.now() - started,
+          // Rebuild headers with the new access token and re-fire the request
+          // against the same already-resolved target (no second DNS round-trip,
+          // so SSRF gates remain enforced from the original lookup).
+          const retryHeaders: Record<string, string> = {
+            Accept: "application/json",
           };
+          if (bodyValue !== undefined) retryHeaders["Content-Type"] = "application/json";
+          if (connection.headers) {
+            for (const [k, v] of Object.entries(connection.headers)) {
+              retryHeaders[stripCrlf(k)] = stripCrlf(v);
+            }
+          }
+          applyAuth(retryHeaders, target.url, connection.auth, refreshed.data);
+
+          try {
+            response = await pinnedHttpsRequest({
+              target,
+              method: endpoint.method,
+              headers: retryHeaders,
+              body:
+                bodyValue !== undefined
+                  ? Buffer.from(JSON.stringify(bodyValue), "utf-8")
+                  : undefined,
+              timeoutMs,
+              maxBytes: MAX_RESPONSE_BYTES,
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            recordFailure(context.sessionId, tool.id, endpoint.name);
+            return {
+              ok: false,
+              error: `network error after token refresh: ${msg}`,
+              durationMs: Date.now() - started,
+            };
+          }
+
+          const refreshedRawText = response.body.toString("utf-8");
+          const refreshedTruncated = response.truncated;
+          const refreshedSize = response.size;
+          const refreshedContentType = response.headers["content-type"] ?? "";
+          let refreshedParsed: unknown;
+          if (refreshedContentType.includes("application/json")) {
+            try {
+              refreshedParsed = JSON.parse(refreshedRawText);
+            } catch {
+              refreshedParsed = refreshedRawText;
+            }
+          } else {
+            refreshedParsed = refreshedRawText;
+          }
+          const refreshedFinalBody = refreshedTruncated
+            ? {
+                truncated: true as const,
+                preview: refreshedRawText.slice(0, TRUNCATION_PREVIEW_BYTES),
+                size: refreshedSize,
+              }
+            : refreshedParsed;
+
+          logError("mcp_crash" as const, "", {
+            kind: "synthesized_call",
+            callId,
+            toolId: tool.id,
+            endpoint: endpoint.name,
+            method: endpoint.method,
+            host: target.hostname,
+            status: response.status,
+            durationMs: Date.now() - started,
+            refreshed: true,
+          });
+
+          if (response.status >= 200 && response.status < 300) {
+            recordSuccess(context.sessionId, tool.id, endpoint.name);
+            if (endpoint.method !== "GET") {
+              recordSynthesizedMutationAudit({
+                tool,
+                endpoint,
+                resolvedUrl: target.url.toString(),
+                pathParams,
+                queryParams,
+                body: bodyValue,
+                responseStatus: response.status,
+                responseBody: refreshedFinalBody,
+                durationMs: Date.now() - started,
+              });
+            }
+            return {
+              ok: true,
+              status: response.status,
+              body: refreshedFinalBody,
+              truncated: refreshedTruncated,
+              size: refreshedSize,
+              durationMs: Date.now() - started,
+            };
+          }
+          // Refresh succeeded but the retry still failed — fall through to the
+          // standard error pipeline so the user gets a real diagnosis.
+        } finally {
+          releaseRefreshedSeal();
         }
-        // Refresh succeeded but the retry still failed — fall through to the
-        // standard error pipeline so the user gets a real diagnosis.
-      } finally {
-        releaseRefreshedSeal();
       }
     }
-  }
 
-  if (response.status === 401 || response.status === 403 || response.status === 429) {
-    recordFailure(context.sessionId, tool.id, endpoint.name);
-    const diagnosis = diagnoseAuthError({
-      status: response.status,
-      responseBody: rawText,
-      tool,
-      endpoint,
-      sessionId: context.sessionId,
-    });
+    if (response.status === 401 || response.status === 403 || response.status === 429) {
+      recordFailure(context.sessionId, tool.id, endpoint.name);
+      const diagnosis = diagnoseAuthError({
+        status: response.status,
+        responseBody: rawText,
+        tool,
+        endpoint,
+        sessionId: context.sessionId,
+      });
+      return {
+        ok: false,
+        status: response.status,
+        error: `${response.status} ${response.statusText}: ${diagnosis.userFacingHint}`,
+        durationMs: Date.now() - started,
+        diagnosis,
+      };
+    }
+
+    if (response.status >= 400) {
+      recordFailure(context.sessionId, tool.id, endpoint.name);
+      return {
+        ok: false,
+        status: response.status,
+        error: `${response.status} ${response.statusText}: ${rawText.slice(0, 500)}`,
+        durationMs: Date.now() - started,
+      };
+    }
+
+    recordSuccess(context.sessionId, tool.id, endpoint.name);
+    if (endpoint.method !== "GET") {
+      recordSynthesizedMutationAudit({
+        tool,
+        endpoint,
+        resolvedUrl: target.url.toString(),
+        pathParams,
+        queryParams,
+        body: bodyValue,
+        responseStatus: response.status,
+        responseBody: finalBody,
+        durationMs: Date.now() - started,
+      });
+    }
     return {
-      ok: false,
+      ok: true,
       status: response.status,
-      error: `${response.status} ${response.statusText}: ${diagnosis.userFacingHint}`,
-      durationMs: Date.now() - started,
-      diagnosis,
-    };
-  }
-
-  if (response.status >= 400) {
-    recordFailure(context.sessionId, tool.id, endpoint.name);
-    return {
-      ok: false,
-      status: response.status,
-      error: `${response.status} ${response.statusText}: ${rawText.slice(0, 500)}`,
+      body: finalBody,
+      truncated,
+      size,
       durationMs: Date.now() - started,
     };
-  }
-
-  recordSuccess(context.sessionId, tool.id, endpoint.name);
-  if (endpoint.method !== "GET") {
-    recordSynthesizedMutationAudit({
-      tool,
-      endpoint,
-      resolvedUrl: target.url.toString(),
-      pathParams,
-      queryParams,
-      body: bodyValue,
-      responseStatus: response.status,
-      responseBody: finalBody,
-      durationMs: Date.now() - started,
-    });
-  }
-  return {
-    ok: true,
-    status: response.status,
-    body: finalBody,
-    truncated,
-    size,
-    durationMs: Date.now() - started,
-  };
   });
 }
 
@@ -977,80 +1064,81 @@ export async function probeCredentialConfig(args: {
   const baseUrl = connection.baseUrl;
 
   return withSecretSeal(extractSecretValues(data), async () => {
-  const path = probePath && probePath.trim() ? probePath.trim() : "/";
-  let target: ResolvedTarget;
-  try {
-    const urlStr = buildUrl(baseUrl, path, {}, {});
-    target = await resolveSafeSynthesizedTarget(urlStr);
-  } catch (err) {
-    return {
-      ok: false,
-      error: `URL safety check failed: ${err instanceof Error ? err.message : String(err)}`,
-      durationMs: Date.now() - started,
-    };
-  }
-
-  const headersObj: Record<string, string> = { Accept: "application/json" };
-  if (connection.headers) {
-    for (const [k, v] of Object.entries(connection.headers)) {
-      headersObj[stripCrlf(k)] = stripCrlf(v);
+    const path = probePath && probePath.trim() ? probePath.trim() : "/";
+    let target: ResolvedTarget;
+    try {
+      const urlStr = buildUrl(baseUrl, path, {}, {});
+      target = await resolveSafeSynthesizedTarget(urlStr);
+    } catch (err) {
+      return {
+        ok: false,
+        error: `URL safety check failed: ${err instanceof Error ? err.message : String(err)}`,
+        durationMs: Date.now() - started,
+      };
     }
-  }
-  applyAuth(headersObj, target.url, connection.auth, data);
 
-  let response: PinnedResponse;
-  try {
-    response = await pinnedHttpsRequest({
-      target,
-      method: "GET",
-      headers: headersObj,
-      timeoutMs,
-      maxBytes: 64 * 1024,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return {
-      ok: false,
-      probedUrl: target.url.toString(),
-      error: `network error: ${msg}`,
-      durationMs: Date.now() - started,
-    };
-  }
+    const headersObj: Record<string, string> = { Accept: "application/json" };
+    if (connection.headers) {
+      for (const [k, v] of Object.entries(connection.headers)) {
+        headersObj[stripCrlf(k)] = stripCrlf(v);
+      }
+    }
+    applyAuth(headersObj, target.url, connection.auth, data);
 
-  const bodyPreview = response.body.toString("utf-8").slice(0, 500);
-  const status = response.status;
-  const probedUrl = target.url.toString();
+    let response: PinnedResponse;
+    try {
+      response = await pinnedHttpsRequest({
+        target,
+        method: "GET",
+        headers: headersObj,
+        timeoutMs,
+        maxBytes: 64 * 1024,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        probedUrl: target.url.toString(),
+        error: `network error: ${msg}`,
+        durationMs: Date.now() - started,
+      };
+    }
 
-  if (status >= 200 && status < 400) {
-    return { ok: true, status, probedUrl, durationMs: Date.now() - started };
-  }
-  // 404 with no probePath: ambiguous — the host responded, the credential may still be valid.
-  if (status === 404 && !probePath) {
-    return {
-      ok: true,
-      status,
-      probedUrl,
-      bodyPreview: "host reachable, root path returned 404 — credential not validated, but baseUrl works",
-      durationMs: Date.now() - started,
-    };
-  }
-  if (status === 401 || status === 403) {
+    const bodyPreview = response.body.toString("utf-8").slice(0, 500);
+    const status = response.status;
+    const probedUrl = target.url.toString();
+
+    if (status >= 200 && status < 400) {
+      return { ok: true, status, probedUrl, durationMs: Date.now() - started };
+    }
+    // 404 with no probePath: ambiguous — the host responded, the credential may still be valid.
+    if (status === 404 && !probePath) {
+      return {
+        ok: true,
+        status,
+        probedUrl,
+        bodyPreview:
+          "host reachable, root path returned 404 — credential not validated, but baseUrl works",
+        durationMs: Date.now() - started,
+      };
+    }
+    if (status === 401 || status === 403) {
+      return {
+        ok: false,
+        status,
+        probedUrl,
+        bodyPreview,
+        error: `auth rejected (${status}) — check the credential value and auth scheme`,
+        durationMs: Date.now() - started,
+      };
+    }
     return {
       ok: false,
       status,
       probedUrl,
       bodyPreview,
-      error: `auth rejected (${status}) — check the credential value and auth scheme`,
+      error: `HTTP ${status} ${response.statusText}`,
       durationMs: Date.now() - started,
     };
-  }
-  return {
-    ok: false,
-    status,
-    probedUrl,
-    bodyPreview,
-    error: `HTTP ${status} ${response.statusText}`,
-    durationMs: Date.now() - started,
-  };
   });
 }

@@ -1,12 +1,18 @@
 import { tool } from "ai";
 import { z } from "zod";
-import type { Tool, SynthesizedEndpoint, SynthesizedEndpointParam, ToolBagScope } from "@chvor/shared";
+import type {
+  Tool,
+  SynthesizedEndpoint,
+  SynthesizedEndpointParam,
+  ToolBagScope,
+} from "@chvor/shared";
 import { logError } from "./error-logger.ts";
 import { mcpManager } from "./mcp-manager.ts";
 import { hasRequiredCredentials } from "./credential-resolver.ts";
 import { getNativeToolDefinitions } from "./native-tools.ts";
 import { buildCapabilityRegistry, invalidateCapabilityRegistry } from "./capability-resolver.ts";
 import { filterTools, applyScopeToDefs } from "./tool-groups.ts";
+import { listCredentials } from "../db/credential-store.ts";
 
 const MAX_SCHEMA_DEPTH = 5;
 
@@ -100,14 +106,36 @@ function jsonSchemaObjectToZod(schema: Record<string, unknown>, depth = 0): z.Zo
 let cachedToolHash: string | null = null;
 let cachedToolDefs: Record<string, ReturnType<typeof tool>> | null = null;
 // Dedup: return in-flight build promise to concurrent callers (only when hash matches)
-let inflightBuild: { hash: string; promise: Promise<Record<string, ReturnType<typeof tool>>> } | null = null;
+let inflightBuild: {
+  hash: string;
+  promise: Promise<Record<string, ReturnType<typeof tool>>>;
+} | null = null;
 
 function scopeSignature(scope?: ToolBagScope): string {
-  if (!scope || scope.isPermissive) return "permissive";
+  const allowedCreds = scope?.allowedCredentialTypes
+    ? Array.from(scope.allowedCredentialTypes).sort().join(",")
+    : "";
+  if (!scope || scope.isPermissive) return `permissive|c:${allowedCreds}`;
   const groups = Array.from(scope.groups).sort().join(",");
   const required = Array.from(scope.requiredTools).sort().join(",");
   const denied = Array.from(scope.deniedTools).sort().join(",");
-  return `g:${groups}|r:${required}|d:${denied}`;
+  return `g:${groups}|r:${required}|d:${denied}|c:${allowedCreds}`;
+}
+
+function credentialSurfaceSignature(tools: Tool[], scope?: ToolBagScope): string {
+  const synthTypes = new Set(
+    tools
+      .filter((t) => t.mcpServer?.transport === "synthesized" && t.synthesized?.credentialType)
+      .map((t) => t.synthesized!.credentialType)
+  );
+  if (synthTypes.size === 0) return "creds:";
+  const allowedTypes = scope?.allowedCredentialTypes;
+  const creds = listCredentials()
+    .filter((c) => synthTypes.has(c.type))
+    .filter((c) => !allowedTypes || allowedTypes.size === 0 || allowedTypes.has(c.type))
+    .map((c) => `${c.type}:${c.id}:${c.name}:${c.usageContext ?? ""}`)
+    .sort();
+  return `creds:${creds.join("|")}`;
 }
 
 /** Tools that failed MCP discovery on last build — surfaced to LLM via system prompt. */
@@ -142,11 +170,25 @@ function zodForEndpointParam(p: SynthesizedEndpointParam): z.ZodType {
   }
 }
 
-function buildSynthesizedToolDefs(t: Tool): Record<string, ReturnType<typeof tool>> {
+function buildSynthesizedToolDefs(
+  t: Tool,
+  scope?: ToolBagScope
+): Record<string, ReturnType<typeof tool>> {
   const defs: Record<string, ReturnType<typeof tool>> = {};
   if (!t.endpoints || !t.synthesized) return defs;
 
   const verifiedTag = t.synthesized.verified ? "" : " [unverified]";
+  const credentialType = t.synthesized.credentialType;
+  if (
+    scope?.allowedCredentialTypes &&
+    scope.allowedCredentialTypes.size > 0 &&
+    !scope.allowedCredentialTypes.has(credentialType)
+  ) {
+    return defs;
+  }
+  const credentialChoices = listCredentials()
+    .filter((c) => c.type === credentialType)
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id < b.id ? -1 : 1));
 
   for (const ep of t.endpoints) {
     const shape: Record<string, z.ZodType> = {};
@@ -161,7 +203,7 @@ function buildSynthesizedToolDefs(t: Tool): Record<string, ReturnType<typeof too
     for (const p of ep.queryParams ?? []) {
       if (pathNames.has(p.name)) {
         console.warn(
-          `[tool-builder] ${t.id}__${ep.name}: query param "${p.name}" collides with path param; query value will be ignored. Rename the query param in the tool file.`,
+          `[tool-builder] ${t.id}__${ep.name}: query param "${p.name}" collides with path param; query value will be ignored. Rename the query param in the tool file.`
         );
         continue;
       }
@@ -171,6 +213,33 @@ function buildSynthesizedToolDefs(t: Tool): Record<string, ReturnType<typeof too
     }
     if (ep.bodySchema && ep.method !== "GET") {
       shape.body = z.record(z.unknown()).optional().describe("Request body (JSON).");
+    }
+    const hasRealCredentialIdParam =
+      pathNames.has("credentialId") ||
+      (ep.queryParams ?? []).some((p) => p.name === "credentialId") ||
+      Boolean(
+        ep.bodySchema &&
+        ep.method !== "GET" &&
+        typeof (ep.bodySchema.properties as Record<string, unknown> | undefined)?.credentialId !==
+          "undefined"
+      );
+    if (credentialChoices.length > 1 && !hasRealCredentialIdParam) {
+      const ids = credentialChoices.map((c) => c.id) as [string, ...string[]];
+      const lines = credentialChoices.map((c) => {
+        const ctx = c.usageContext?.trim() ? c.usageContext : "none";
+        return `- ${c.id}: ${c.name} (context: ${ctx})`;
+      });
+      shape.credentialId = z
+        .enum(ids)
+        .optional()
+        .describe(
+          `Pick which ${credentialType} credential to use. Options:\n${lines.join("\n")}\n` +
+            "Omit to let Chvor choose by tool pin / session pin / skill hints."
+        );
+    } else if (credentialChoices.length > 1 && hasRealCredentialIdParam) {
+      console.warn(
+        `[tool-builder] ${t.id}__${ep.name}: cannot expose credential picker meta-arg because endpoint already has credentialId`
+      );
     }
 
     const qualifiedName = `${t.id}__${ep.name}`;
@@ -192,7 +261,10 @@ export async function buildToolDefinitions(
   // Apply skill-scoped group filter (no-op when scope is permissive).
   const eligibleTools = scope ? filterTools(credentialEligible, scope) : credentialEligible;
 
-  const hash = `${eligibleTools.map((t) => t.id).sort().join(",")}|${scopeSignature(scope)}`;
+  const hash = `${eligibleTools
+    .map((t) => t.id)
+    .sort()
+    .join(",")}|${scopeSignature(scope)}|${credentialSurfaceSignature(eligibleTools, scope)}`;
 
   if (hash === cachedToolHash && cachedToolDefs) {
     return cachedToolDefs;
@@ -214,10 +286,13 @@ async function doBuild(
   eligibleTools: Tool[],
   allTools: Tool[],
   hash: string,
-  scope?: ToolBagScope,
+  scope?: ToolBagScope
 ): Promise<Record<string, ReturnType<typeof tool>>> {
   const toolDefs: Record<string, ReturnType<typeof tool>> = {};
-  const discoveredMcpTools = new Map<string, Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>>();
+  const discoveredMcpTools = new Map<
+    string,
+    Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>
+  >();
   const failedTools: FailedTool[] = [];
   let hadErrors = false;
 
@@ -230,7 +305,7 @@ async function doBuild(
       console.warn(`[tool-builder] synthesized tool ${t.id} has no endpoints — skipping`);
       continue;
     }
-    const defs = buildSynthesizedToolDefs(t);
+    const defs = buildSynthesizedToolDefs(t, scope);
     Object.assign(toolDefs, defs);
     const fakeMcpTools = (t.endpoints ?? []).map((ep: SynthesizedEndpoint) => ({
       name: ep.name,
@@ -266,10 +341,7 @@ async function doBuild(
       const failedTool = externalTools[results.indexOf(result)];
       const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
       logError("mcp_crash", result.reason, { toolId: failedTool?.id });
-      console.warn(
-        `[tool-builder] failed to discover tools for ${failedTool?.id}:`,
-        result.reason
-      );
+      console.warn(`[tool-builder] failed to discover tools for ${failedTool?.id}:`, result.reason);
       if (failedTool) {
         failedTools.push({ id: failedTool.id, name: failedTool.metadata.name, reason });
       }

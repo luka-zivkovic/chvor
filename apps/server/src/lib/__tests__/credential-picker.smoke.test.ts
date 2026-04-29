@@ -17,8 +17,10 @@ let getSessionPin: typeof import("../../db/session-pin-store.ts").getSessionPin;
 
 beforeAll(async () => {
   ({ pickCredential } = await import("../credential-picker.ts"));
-  ({ createCredential, deleteCredential, listCredentials } = await import("../../db/credential-store.ts"));
-  ({ setSessionPin, clearAllSessionPins, getSessionPin } = await import("../../db/session-pin-store.ts"));
+  ({ createCredential, deleteCredential, listCredentials } =
+    await import("../../db/credential-store.ts"));
+  ({ setSessionPin, clearAllSessionPins, getSessionPin } =
+    await import("../../db/session-pin-store.ts"));
 });
 
 function reset() {
@@ -88,7 +90,12 @@ describe("credential-picker — session pin", () => {
 
   it("uses the session pin when one is set", () => {
     const work = createCredential("Work GitHub", "github", { apiKey: "ghp_a" }, "work, enterprise");
-    const personal = createCredential("Personal GitHub", "github", { apiKey: "ghp_b" }, "side projects");
+    const personal = createCredential(
+      "Personal GitHub",
+      "github",
+      { apiKey: "ghp_b" },
+      "side projects"
+    );
     setSessionPin("sess-1", "github", work.id);
     const pick = pickCredential("github", { sessionId: "sess-1" });
     expect(pick!.credentialId).toBe(work.id);
@@ -112,8 +119,18 @@ describe("credential-picker — context-match", () => {
   beforeEach(reset);
 
   it("breaks ties using usage_context overlap", () => {
-    const work = createCredential("Work GitHub", "github", { apiKey: "ghp_a" }, "work, enterprise repos");
-    const personal = createCredential("Personal GitHub", "github", { apiKey: "ghp_b" }, "side projects, open source");
+    const work = createCredential(
+      "Work GitHub",
+      "github",
+      { apiKey: "ghp_a" },
+      "work, enterprise repos"
+    );
+    const personal = createCredential(
+      "Personal GitHub",
+      "github",
+      { apiKey: "ghp_b" },
+      "side projects, open source"
+    );
     const pick = pickCredential("github", {
       sessionId: "sess-1",
       preferredUsageContext: ["work", "enterprise"],
@@ -141,5 +158,39 @@ describe("credential-picker — first-match-fallback", () => {
     expect(pick!.reason).toBe("first-match-fallback");
     const summary = listCredentials().find((c) => c.id === pick!.credentialId);
     expect(summary?.name).toBe("Alpha GitHub");
+  });
+});
+
+describe("credential-picker — llm-picked", () => {
+  beforeEach(reset);
+
+  it("uses llm-picked id ahead of an existing session pin", () => {
+    const work = createCredential("Work GitHub", "github", { apiKey: "ghp_a" });
+    const personal = createCredential("Personal GitHub", "github", { apiKey: "ghp_b" });
+    setSessionPin("sess-1", "github", work.id);
+    const pick = pickCredential("github", { sessionId: "sess-1", llmPickedId: personal.id });
+    expect(pick!.credentialId).toBe(personal.id);
+    expect(pick!.reason).toBe("llm-picked");
+  });
+
+  it("falls through when llm-picked id is for the wrong type", () => {
+    const github = createCredential("GitHub", "github", { apiKey: "ghp_a" });
+    const openai = createCredential("OpenAI", "openai", { apiKey: "sk_a" });
+    const pick = pickCredential("github", { llmPickedId: openai.id });
+    expect(pick!.credentialId).toBe(github.id);
+    expect(pick!.reason).toBe("single-match");
+  });
+
+  it("honours allowed credential ids/types before all tiers", () => {
+    const work = createCredential("Work GitHub", "github", { apiKey: "ghp_a" });
+    const personal = createCredential("Personal GitHub", "github", { apiKey: "ghp_b" });
+    expect(pickCredential("github", { allowedCredentialTypes: ["slack"] })).toBeNull();
+    const pick = pickCredential("github", {
+      llmPickedId: work.id,
+      allowedCredentialTypes: ["github"],
+      allowedCredentialIds: [personal.id],
+    });
+    expect(pick!.credentialId).toBe(personal.id);
+    expect(pick!.reason).toBe("single-match");
   });
 });

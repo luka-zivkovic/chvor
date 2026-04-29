@@ -54,11 +54,35 @@ const activeSecrets = new Set<string>();
  * public side of the pair; `clientSecret` is intentionally NOT here).
  */
 const NON_SECRET_FIELD_NAMES = new Set<string>([
-  "username", "user", "email", "tenant", "tenantId", "tenant_id",
-  "region", "host", "hostname", "port", "endpoint", "domain", "name",
-  "apiUrl", "api_url", "baseUrl", "base_url", "url", "issuer", "audience",
-  "homeserverUrl", "userId", "user_id", "vaultPath", "vault_path",
-  "instanceUrl", "instance_url", "clientId", "client_id",
+  "username",
+  "user",
+  "email",
+  "tenant",
+  "tenantId",
+  "tenant_id",
+  "region",
+  "host",
+  "hostname",
+  "port",
+  "endpoint",
+  "domain",
+  "name",
+  "apiUrl",
+  "api_url",
+  "baseUrl",
+  "base_url",
+  "url",
+  "issuer",
+  "audience",
+  "homeserverUrl",
+  "userId",
+  "user_id",
+  "vaultPath",
+  "vault_path",
+  "instanceUrl",
+  "instance_url",
+  "clientId",
+  "client_id",
 ]);
 
 /**
@@ -106,6 +130,8 @@ function extractCredValue(data: Record<string, string>, field?: string): string 
  * credential's `data` object, pass `byType: false`.
  */
 export interface InjectOptions {
+  /** Map placeholder ref (credential type or id) → data object. */
+  byRef?: Map<string, Record<string, string>>;
   /** Map credential type → data object. */
   byType?: Map<string, Record<string, string>>;
   /** Single credential's data — used when the placeholder is implicit. */
@@ -118,16 +144,16 @@ export function injectPlaceholders(template: string, opts: InjectOptions): strin
   if (!template.includes("{{credentials.")) return template;
   return template.replace(PLACEHOLDER_RE, (_match, credRef: string) => {
     const { type, field } = parseCredRef(credRef);
-    const data = opts.byType?.get(type) ?? opts.data;
+    const data = opts.byRef?.get(type) ?? opts.byType?.get(type) ?? opts.data;
     if (!data) {
       throw new Error(
-        `[credential-injector] no credential data for type "${type}" — caller must resolve before injection`,
+        `[credential-injector] no credential data for type "${type}" — caller must resolve before injection`
       );
     }
     const value = extractCredValue(data, field);
     if (!value) {
       throw new Error(
-        `[credential-injector] credential "${type}"${field ? ` field "${field}"` : ""} has no usable value`,
+        `[credential-injector] credential "${type}"${field ? ` field "${field}"` : ""} has no usable value`
       );
     }
     return opts.urlEncode ? encodeURIComponent(value) : value;
@@ -153,7 +179,7 @@ export function hasCredentialPlaceholder(template: string): boolean {
  */
 export async function withSecretSeal<T>(
   secrets: Iterable<string>,
-  fn: () => Promise<T>,
+  fn: () => Promise<T>
 ): Promise<T> {
   const added: string[] = [];
   for (const raw of secrets) {

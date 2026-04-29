@@ -277,6 +277,7 @@ export async function executeConversation(
       isPermissive: bagSummary.isPermissive,
       permissiveReason: bagSummary.permissiveReason,
       contributingSkills: bagSummary.contributingSkills,
+      allowedCredentialTypes: bagSummary.allowedCredentialTypes,
       toolCount,
     },
   });
@@ -1256,6 +1257,7 @@ export async function executeConversation(
             sessionId: options?.sessionId,
             originClientId: options?.originClientId,
             preferredUsageContext,
+            allowedCredentialTypes: bagScope.allowedCredentialTypes ? Array.from(bagScope.allowedCredentialTypes) : undefined,
             onCredentialResolved: (info) => {
               emit({
                 type: "credential.resolved",

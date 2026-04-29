@@ -12,7 +12,12 @@ import {
 } from "../credential-injector.ts";
 import { pickCredential } from "../credential-picker.ts";
 import { getCredentialData } from "../../db/credential-store.ts";
-import type { NativeToolContext, NativeToolHandler, NativeToolModule, NativeToolResult } from "./types.ts";
+import type {
+  NativeToolContext,
+  NativeToolHandler,
+  NativeToolModule,
+  NativeToolResult,
+} from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Browser Agent tools
@@ -66,9 +71,13 @@ async function evictIfBrowserDead(err: unknown, sessionId: string): Promise<void
 const browserNavigateToolDef = tool({
   description:
     "[Web Agent] Navigate to a URL. Use this as the first step when browsing the web. Returns the page title and final URL. " +
-    "If a URL needs to embed a credential (e.g. a token query param), reference it with `{{credentials.<type>}}` — the value is URL-encoded and substituted at the browser boundary; the recorded URL keeps the placeholder.",
+    "If a URL needs to embed a credential (e.g. a token query param), reference it with `{{credentials.<type>}}` or `{{credentials.<credentialId>}}` — the value is URL-encoded and substituted at the browser boundary; the recorded URL keeps the placeholder.",
   parameters: z.object({
-    url: z.string().describe("The URL to navigate to (e.g. 'https://google.com'). May contain {{credentials.<type>}} placeholders for tokens that must appear in the URL."),
+    url: z
+      .string()
+      .describe(
+        "The URL to navigate to (e.g. 'https://google.com'). May contain {{credentials.<type>}} or {{credentials.<credentialId>}} placeholders for tokens that must appear in the URL."
+      ),
   }),
 });
 
@@ -82,7 +91,9 @@ const handleBrowserNavigate: NativeToolHandler = async (
   let expanded: string;
   let secretsToSeal: string[];
   try {
-    ({ expanded, secretsToSeal } = expandBrowserCredentials(rawUrl, sessionId, { urlEncode: true }));
+    ({ expanded, secretsToSeal } = expandBrowserCredentials(rawUrl, sessionId, {
+      urlEncode: true,
+    }));
   } catch (err) {
     return {
       content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
@@ -94,7 +105,12 @@ const handleBrowserNavigate: NativeToolHandler = async (
     await validateFetchUrl(expanded);
   } catch (err) {
     return {
-      content: [{ type: "text", text: `Browser navigate blocked: ${err instanceof Error ? err.message : String(err)}` }],
+      content: [
+        {
+          type: "text",
+          text: `Browser navigate blocked: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ],
     };
   }
 
@@ -105,7 +121,7 @@ const handleBrowserNavigate: NativeToolHandler = async (
       await withTimeout(
         stagehand.page.goto(expanded, { waitUntil: "domcontentloaded" }),
         BROWSER_OP_TIMEOUT,
-        "Navigation",
+        "Navigation"
       );
       const title = await stagehand.page.title();
       const url = stagehand.page.url();
@@ -115,7 +131,12 @@ const handleBrowserNavigate: NativeToolHandler = async (
     } catch (err) {
       await evictIfBrowserDead(err, sessionId);
       return {
-        content: [{ type: "text", text: `Browser navigate failed: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [
+          {
+            type: "text",
+            text: `Browser navigate failed: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
       };
     }
   });
@@ -124,13 +145,15 @@ const handleBrowserNavigate: NativeToolHandler = async (
 const browserActToolDef = tool({
   description:
     "[Web Agent] Perform an action on the current page using natural language. Examples: 'click the Sign In button', 'type {{credentials.github}} in the password field', 'scroll down', 'select the second item from the dropdown'. " +
-    "For credentials: ALWAYS reference them with `{{credentials.<type>}}` placeholders — never paste raw passwords or tokens. The placeholder is expanded at the browser boundary so secret values never reach the chat history. " +
+    "For credentials: ALWAYS reference them with `{{credentials.<type>}}` or `{{credentials.<credentialId>}}` placeholders — never paste raw passwords or tokens. The placeholder is expanded at the browser boundary so secret values never reach the chat history. " +
     "✓ Good: `type {{credentials.github}} in the password field`. " +
     "✗ Bad: `type ghp_abc123xyz... in the password field`.",
   parameters: z.object({
     instruction: z
       .string()
-      .describe("Natural language instruction. Use {{credentials.<type>}} placeholders for any password/token; never inline raw secret values."),
+      .describe(
+        "Natural language instruction. Use {{credentials.<type>}} or {{credentials.<credentialId>}} placeholders for any password/token; never inline raw secret values."
+      ),
   }),
 });
 
@@ -153,43 +176,51 @@ const browserActToolDef = tool({
 function expandBrowserCredentials(
   text: string,
   sessionId: string,
-  opts: { urlEncode?: boolean } = {},
+  opts: { urlEncode?: boolean } = {}
 ): { expanded: string; secretsToSeal: string[]; expandedTypes: string[] } {
   if (!hasCredentialPlaceholder(text)) {
     return { expanded: text, secretsToSeal: [], expandedTypes: [] };
   }
-  // Pull every `{{credentials.<type>[.field]}}` into a Map<type → data>.
-  // The picker honours session pin → context match → tier ordering — same
-  // path the synthesized-caller takes, so credential resolution stays
-  // consistent across surfaces.
-  const credentialTypes = new Set<string>();
+  // Pull every `{{credentials.<type-or-id>[.field]}}` into maps. A ref whose
+  // leading segment equals a saved credential id bypasses the type picker;
+  // otherwise we keep the Phase E type picker path.
+  const refs = new Set<string>();
   for (const m of text.matchAll(PLACEHOLDER_RE)) {
-    credentialTypes.add(parseCredRef(m[1]).type);
+    refs.add(parseCredRef(m[1]).type);
   }
   const byType = new Map<string, Record<string, string>>();
+  const byRef = new Map<string, Record<string, string>>();
   const seal: string[] = [];
   const expandedTypes: string[] = [];
-  for (const credType of credentialTypes) {
+  for (const ref of refs) {
+    const byId = getCredentialData(ref);
+    if (byId) {
+      byRef.set(ref, byId.data);
+      seal.push(...extractSecretValues(byId.data));
+      expandedTypes.push(byId.cred.type);
+      continue;
+    }
+
+    const credType = ref;
     const pick = pickCredential(credType, { sessionId });
     if (!pick) {
       throw new Error(
-        `[browser_tools] no credential of type "${credType}" available — add one in Settings > Credentials before referencing it`,
+        `[browser_tools] no credential of type or id "${credType}" available — add one in Settings > Credentials before referencing it`
       );
     }
     const full = getCredentialData(pick.credentialId);
     if (!full) {
-      throw new Error(
-        `[browser_tools] credential ${pick.credentialId} could not be decrypted`,
-      );
+      throw new Error(`[browser_tools] credential ${pick.credentialId} could not be decrypted`);
     }
     byType.set(credType, full.data);
+    byRef.set(credType, full.data);
     seal.push(...extractSecretValues(full.data));
     expandedTypes.push(credType);
   }
   return {
-    expanded: injectPlaceholders(text, { byType, urlEncode: opts.urlEncode }),
+    expanded: injectPlaceholders(text, { byRef, byType, urlEncode: opts.urlEncode }),
     secretsToSeal: seal,
-    expandedTypes,
+    expandedTypes: Array.from(new Set(expandedTypes)),
   };
 }
 
@@ -213,26 +244,28 @@ const handleBrowserAct: NativeToolHandler = async (
     try {
       const { getBrowser } = await import("../browser-manager.ts");
       const stagehand = await getBrowser(sessionId);
-      const result = await withTimeout(
-        stagehand.page.act(expanded),
-        BROWSER_OP_TIMEOUT,
-        "Action",
-      );
-      const note = expandedTypes.length > 0
-        ? ` [credentials substituted: ${expandedTypes.join(", ")}]`
-        : "";
+      const result = await withTimeout(stagehand.page.act(expanded), BROWSER_OP_TIMEOUT, "Action");
+      const note =
+        expandedTypes.length > 0 ? ` [credentials substituted: ${expandedTypes.join(", ")}]` : "";
       return {
-        content: [{
-          type: "text",
-          text: result
-            ? `Action completed: ${JSON.stringify(result)}${note}`
-            : `Action completed successfully.${note}`,
-        }],
+        content: [
+          {
+            type: "text",
+            text: result
+              ? `Action completed: ${JSON.stringify(result)}${note}`
+              : `Action completed successfully.${note}`,
+          },
+        ],
       };
     } catch (err) {
       await evictIfBrowserDead(err, sessionId);
       return {
-        content: [{ type: "text", text: `Browser action failed: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [
+          {
+            type: "text",
+            text: `Browser action failed: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
       };
     }
   });
@@ -242,9 +275,7 @@ const browserExtractToolDef = tool({
   description:
     "[Web Agent] Extract structured data from the current page. Describe what data you want and the AI will find and extract it. Example: 'get all product names and prices', 'extract the main article text'.",
   parameters: z.object({
-    instruction: z
-      .string()
-      .describe("What data to extract from the current page"),
+    instruction: z.string().describe("What data to extract from the current page"),
   }),
 });
 
@@ -259,7 +290,7 @@ const handleBrowserExtract: NativeToolHandler = async (
     const result = await withTimeout(
       stagehand.page.extract({ instruction: String(args.instruction) }),
       BROWSER_OP_TIMEOUT,
-      "Extract",
+      "Extract"
     );
     let text: string;
     try {
@@ -268,12 +299,22 @@ const handleBrowserExtract: NativeToolHandler = async (
       text = "[Extract returned non-serializable data]";
     }
     return {
-      content: [{ type: "text", text: text.length > 50_000 ? text.slice(0, 50_000) + "\n\n[...truncated]" : text }],
+      content: [
+        {
+          type: "text",
+          text: text.length > 50_000 ? text.slice(0, 50_000) + "\n\n[...truncated]" : text,
+        },
+      ],
     };
   } catch (err) {
     await evictIfBrowserDead(err, sessionId);
     return {
-      content: [{ type: "text", text: `Browser extract failed: ${err instanceof Error ? err.message : String(err)}` }],
+      content: [
+        {
+          type: "text",
+          text: `Browser extract failed: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ],
     };
   }
 };
@@ -285,7 +326,9 @@ const browserObserveToolDef = tool({
     instruction: z
       .string()
       .optional()
-      .describe("Optional: what to look for (e.g. 'find login form elements'). If omitted, returns all visible interactive elements."),
+      .describe(
+        "Optional: what to look for (e.g. 'find login form elements'). If omitted, returns all visible interactive elements."
+      ),
   }),
 });
 
@@ -301,7 +344,7 @@ const handleBrowserObserve: NativeToolHandler = async (
     const observations = await withTimeout(
       stagehand.page.observe(instruction ? { instruction } : {}),
       BROWSER_OP_TIMEOUT,
-      "Observe",
+      "Observe"
     );
     let text: string;
     try {
@@ -310,12 +353,22 @@ const handleBrowserObserve: NativeToolHandler = async (
       text = "[Observe returned non-serializable data]";
     }
     return {
-      content: [{ type: "text", text: text.length > 50_000 ? text.slice(0, 50_000) + "\n\n[...truncated]" : text }],
+      content: [
+        {
+          type: "text",
+          text: text.length > 50_000 ? text.slice(0, 50_000) + "\n\n[...truncated]" : text,
+        },
+      ],
     };
   } catch (err) {
     await evictIfBrowserDead(err, sessionId);
     return {
-      content: [{ type: "text", text: `Browser observe failed: ${err instanceof Error ? err.message : String(err)}` }],
+      content: [
+        {
+          type: "text",
+          text: `Browser observe failed: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ],
     };
   }
 };

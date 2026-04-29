@@ -49,8 +49,15 @@ describe("credential-injector — placeholder injection", () => {
       ["github", { token: "ghp_test_abc123" }],
     ]);
     expect(injectPlaceholders("Authorization: Bearer {{credentials.github}}", { byType })).toBe(
-      "Authorization: Bearer ghp_test_abc123",
+      "Authorization: Bearer ghp_test_abc123"
     );
+  });
+
+  it("supports direct placeholder refs via byRef map", () => {
+    const byRef = new Map<string, Record<string, string>>([
+      ["cred-123", { apiKey: "direct_secret" }],
+    ]);
+    expect(injectPlaceholders("{{credentials.cred-123}}", { byRef })).toBe("direct_secret");
   });
 
   it("supports field selection via dot notation", () => {
@@ -58,7 +65,7 @@ describe("credential-injector — placeholder injection", () => {
       ["n8n", { apiUrl: "https://x.io", apiKey: "k" }],
     ]);
     expect(injectPlaceholders("URL={{credentials.n8n.apiUrl}}", { byType })).toBe(
-      "URL=https://x.io",
+      "URL=https://x.io"
     );
   });
 
@@ -76,24 +83,22 @@ describe("credential-injector — placeholder injection", () => {
   });
 
   it("URL-encodes when urlEncode is true", () => {
-    const byType = new Map<string, Record<string, string>>([
-      ["x", { token: "a/b c" }],
-    ]);
+    const byType = new Map<string, Record<string, string>>([["x", { token: "a/b c" }]]);
     expect(injectPlaceholders("?k={{credentials.x}}", { byType, urlEncode: true })).toBe(
-      "?k=a%2Fb%20c",
+      "?k=a%2Fb%20c"
     );
   });
 
   it("throws when a placeholder has no resolved data", () => {
     expect(() => injectPlaceholders("{{credentials.missing}}", { byType: new Map() })).toThrow(
-      /no credential data for type "missing"/,
+      /no credential data for type "missing"/
     );
   });
 
   it("throws when the resolved data has no usable value for the field", () => {
     const byType = new Map<string, Record<string, string>>([["x", { token: "" }]]);
     expect(() => injectPlaceholders("{{credentials.x.token}}", { byType })).toThrow(
-      /has no usable value/,
+      /has no usable value/
     );
   });
 
@@ -107,9 +112,9 @@ describe("credential-injector — extractSecretValues", () => {
     const out = extractSecretValues({
       apiKey: "ghp_thisIsAValidToken",
       token: "another_token_value",
-      apiUrl: "https://example.com",   // excluded
-      username: "alice@example.com",   // excluded
-      region: "us-east-1",             // excluded
+      apiUrl: "https://example.com", // excluded
+      username: "alice@example.com", // excluded
+      region: "us-east-1", // excluded
     });
     expect(out).toContain("ghp_thisIsAValidToken");
     expect(out).toContain("another_token_value");
@@ -150,7 +155,7 @@ describe("credential-injector — seal + redact", () => {
   it("redactKnownSecrets is a noop when no seal is open", () => {
     expect(hasActiveSecrets()).toBe(false);
     expect(redactKnownSecretsInString("plain text with ghp_secret_value")).toBe(
-      "plain text with ghp_secret_value",
+      "plain text with ghp_secret_value"
     );
   });
 
@@ -173,7 +178,7 @@ describe("credential-injector — seal + redact", () => {
     await expect(
       withSecretSeal([SECRET], async () => {
         throw new Error("boom");
-      }),
+      })
     ).rejects.toThrow("boom");
     expect(hasActiveSecrets()).toBe(false);
   });
@@ -222,7 +227,7 @@ describe("credential-injector — seal + redact", () => {
     withSecretSealSync(["", "abc", "long_enough_secret"], () => {
       // Only the long one should redact.
       expect(redactKnownSecretsInString("a=abc, b=long_enough_secret")).toBe(
-        "a=abc, b=«credential»",
+        "a=abc, b=«credential»"
       );
     });
   });
@@ -235,20 +240,20 @@ describe("credential-injector — addSecretsToSeal (OAuth refresh path)", () => 
     withSecretSealSync([ORIGINAL], () => {
       // Both original sealed; refreshed not yet.
       expect(redactKnownSecretsInString(`a=${ORIGINAL} b=${REFRESHED}`)).toBe(
-        `a=«credential» b=${REFRESHED}`,
+        `a=«credential» b=${REFRESHED}`
       );
       const release = addSecretsToSeal([REFRESHED]);
       try {
         // Both sealed during retry pipeline.
         expect(redactKnownSecretsInString(`a=${ORIGINAL} b=${REFRESHED}`)).toBe(
-          "a=«credential» b=«credential»",
+          "a=«credential» b=«credential»"
         );
       } finally {
         release();
       }
       // Refreshed released; outer seal still active for original.
       expect(redactKnownSecretsInString(`a=${ORIGINAL} b=${REFRESHED}`)).toBe(
-        `a=«credential» b=${REFRESHED}`,
+        `a=«credential» b=${REFRESHED}`
       );
     });
     expect(hasActiveSecrets()).toBe(false);
@@ -268,9 +273,7 @@ describe("credential-injector — addSecretsToSeal (OAuth refresh path)", () => 
   it("skips empty + below-threshold values like withSecretSeal does", () => {
     const release = addSecretsToSeal(["", "abc", "long_enough_value"]);
     try {
-      expect(redactKnownSecretsInString("a=abc b=long_enough_value")).toBe(
-        "a=abc b=«credential»",
-      );
+      expect(redactKnownSecretsInString("a=abc b=long_enough_value")).toBe("a=abc b=«credential»");
     } finally {
       release();
     }
@@ -283,11 +286,11 @@ describe("credential-injector — exported regex + parser", () => {
     // Regex has /g — reset lastIndex to test repeatedly.
     PLACEHOLDER_RE.lastIndex = 0;
     expect("hello {{credentials.github}}".match(PLACEHOLDER_RE)?.[0]).toBe(
-      "{{credentials.github}}",
+      "{{credentials.github}}"
     );
     PLACEHOLDER_RE.lastIndex = 0;
     expect("a={{credentials.n8n.apiUrl}}".match(PLACEHOLDER_RE)?.[0]).toBe(
-      "{{credentials.n8n.apiUrl}}",
+      "{{credentials.n8n.apiUrl}}"
     );
     PLACEHOLDER_RE.lastIndex = 0;
     expect("plain text".match(PLACEHOLDER_RE)).toBeNull();
