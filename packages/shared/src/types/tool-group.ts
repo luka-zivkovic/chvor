@@ -93,4 +93,6 @@ export interface ToolBagScope {
   permissiveReason?: string;
   /** IDs of the active skills whose declarations contributed to this scope. */
   contributingSkills: string[];
+  /** Credential types active skills allow this turn. Undefined/empty ⇒ legacy unscoped. */
+  allowedCredentialTypes?: Set<string>;
 }

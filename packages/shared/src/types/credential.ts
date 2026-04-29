@@ -1,7 +1,20 @@
 /** Open-ended credential type — any string identifier (e.g., "github", "stripe", "my-crm"). */
 export type CredentialType = string;
 
-/** Structured connection configuration — how to authenticate and call a service's API. */
+/**
+ * Structured connection configuration — how to authenticate and call a
+ * service's API.
+ *
+ * INVARIANT: `connectionConfig` MUST reference credential field values via
+ * `{{fieldName}}` templates only. It must never embed raw secret values
+ * inline. The redaction in `native__use_credential` swaps known credential
+ * values for placeholders before returning a connection hint, but a value
+ * that isn't a stored credential field — for example a hand-typed token in
+ * `headers` — would pass through unredacted unless its header name matches
+ * a sensitive-name regex. Authors that build `ConnectionConfig` (probe,
+ * llm-research, user-provided) must keep secrets in credential `data`,
+ * not in this struct.
+ */
 export interface ConnectionConfig {
   auth: {
     scheme: "bearer" | "api-key-header" | "basic" | "query-param" | "custom";

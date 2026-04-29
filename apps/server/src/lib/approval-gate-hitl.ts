@@ -83,7 +83,9 @@ export type ApprovalOutcome =
  * the user's decision (or auto-expire). The returned promise always settles
  * — it never rejects — so callers can branch cleanly on the outcome.
  */
-export async function requestNativeApproval(args: RequestNativeApprovalArgs): Promise<ApprovalOutcome> {
+export async function requestNativeApproval(
+  args: RequestNativeApprovalArgs
+): Promise<ApprovalOutcome> {
   const ttlMs = getTimeoutMs();
   const id = appendPendingApproval({
     sessionId: args.sessionId,
@@ -95,6 +97,25 @@ export async function requestNativeApproval(args: RequestNativeApprovalArgs): Pr
     reasons: args.reasons,
     checkpointId: args.checkpointId,
     ttlMs,
+  });
+
+  // Register the in-memory waiter before notifying clients. A very fast UI /
+  // REST response can arrive immediately after the row is visible in the DB;
+  // if the pending handle is not installed yet, the DB decision succeeds but
+  // this promise would otherwise sit until timeout.
+  const decisionPromise = new Promise<ApprovalDecision | "expired">((resolve) => {
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      resolve("expired");
+    }, ttlMs);
+    pending.set(id, {
+      resolve: (d) => {
+        clearTimeout(timer);
+        resolve(d);
+      },
+      targetClientId: args.originClientId,
+      timer,
+    });
   });
 
   // Emit the WS event so the canvas can render the prompt. We don't return
@@ -133,20 +154,7 @@ export async function requestNativeApproval(args: RequestNativeApprovalArgs): Pr
     wsAvailable = false;
   }
 
-  const decision = await new Promise<ApprovalDecision | "expired">((resolve) => {
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      resolve("expired");
-    }, ttlMs);
-    pending.set(id, {
-      resolve: (d) => {
-        clearTimeout(timer);
-        resolve(d);
-      },
-      targetClientId: args.originClientId,
-      timer,
-    });
-  });
+  const decision = await decisionPromise;
 
   if (decision === "expired") {
     // Conditional pending → expired. If the periodic sweep got there first
@@ -186,13 +194,23 @@ export function resolveHITLApproval(args: {
   decision: ApprovalDecision;
   decidedBy: string;
   responderClientId?: string;
-}): { ok: true; record: ApprovalRecord } | { ok: false; reason: "not-found" | "already-decided" | "responder-mismatch" } {
+}):
+  | { ok: true; record: ApprovalRecord }
+  | { ok: false; reason: "not-found" | "already-decided" | "responder-mismatch" } {
   const handle = pending.get(args.id);
-  if (handle?.targetClientId && args.responderClientId && handle.targetClientId !== args.responderClientId) {
+  if (
+    handle?.targetClientId &&
+    args.responderClientId &&
+    handle.targetClientId !== args.responderClientId
+  ) {
     return { ok: false, reason: "responder-mismatch" };
   }
 
-  const record = decideApproval({ id: args.id, decision: args.decision, decidedBy: args.decidedBy });
+  const record = decideApproval({
+    id: args.id,
+    decision: args.decision,
+    decidedBy: args.decidedBy,
+  });
   if (!record) {
     // Either the row never existed or it was already decided / expired by
     // someone else. Drop the in-memory handle so a stale waiter eventually

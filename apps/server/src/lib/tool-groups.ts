@@ -28,6 +28,7 @@ export function resolveSkillBag(skills: Skill[]): ToolBagScope {
   const requiredTools = new Set<string>();
   const deniedTools = new Set<string>();
   const contributingSkills: string[] = [];
+  const allowedCredentialTypes = new Set<string>();
 
   let anyDeclared = false;
 
@@ -37,6 +38,7 @@ export function resolveSkillBag(skills: Skill[]): ToolBagScope {
       (m.requiredGroups && m.requiredGroups.length > 0) ||
       (m.requiredTools && m.requiredTools.length > 0) ||
       (m.deniedTools && m.deniedTools.length > 0);
+    for (const ct of m.allowedCredentialTypes ?? []) allowedCredentialTypes.add(ct);
     if (!declared) continue;
 
     anyDeclared = true;
@@ -59,6 +61,7 @@ export function resolveSkillBag(skills: Skill[]): ToolBagScope {
           ? "no active skills"
           : "no active skill declared requiredGroups / requiredTools / deniedTools",
       contributingSkills,
+      allowedCredentialTypes: allowedCredentialTypes.size > 0 ? allowedCredentialTypes : undefined,
     };
   }
 
@@ -71,6 +74,7 @@ export function resolveSkillBag(skills: Skill[]): ToolBagScope {
     deniedTools,
     isPermissive: false,
     contributingSkills,
+    allowedCredentialTypes: allowedCredentialTypes.size > 0 ? allowedCredentialTypes : undefined,
   };
 }
 
@@ -138,6 +142,7 @@ export function summarizeScope(scope: ToolBagScope): {
   isPermissive: boolean;
   contributingSkills: string[];
   permissiveReason: string | undefined;
+  allowedCredentialTypes?: string[];
 } {
   return {
     groups: Array.from(scope.groups).sort(),
@@ -146,5 +151,8 @@ export function summarizeScope(scope: ToolBagScope): {
     isPermissive: scope.isPermissive,
     contributingSkills: [...scope.contributingSkills].sort(),
     permissiveReason: scope.permissiveReason,
+    allowedCredentialTypes: scope.allowedCredentialTypes
+      ? Array.from(scope.allowedCredentialTypes).sort()
+      : undefined,
   };
 }
