@@ -18,7 +18,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 export function A2UIHostRenderer({ surfaceId, surface }: { surfaceId: string; surface: A2UISurface }) {
   const openPanel = useUIStore((s) => s.openPanel);
 
-  const dispatch = useCallback((action: ParsedA2UIAction, sourceId?: string) => {
+  const dispatch = useCallback(async (action: ParsedA2UIAction, sourceId?: string) => {
     if (action.kind === "noop") return;
     if (action.kind === "navigate") {
       if (NAVIGABLE_PANELS.has(action.panelId)) {
@@ -28,20 +28,22 @@ export function A2UIHostRenderer({ surfaceId, surface }: { surfaceId: string; su
     }
 
     const payload = asRecord(action.payload);
-    api.a2ui.dispatchAction({
-      surfaceId,
-      sourceId,
-      eventName: action.eventName,
-      payload,
-    }).then((task) => {
-      import("sonner").then(({ toast }) => {
+    try {
+      const task = await api.a2ui.dispatchAction({
+        surfaceId,
+        sourceId,
+        eventName: action.eventName,
+        payload,
+      });
+      void import("sonner").then(({ toast }) => {
         toast.success(`Queued: ${task.title}`);
       }).catch(() => { /* optional */ });
-    }).catch((err) => {
-      import("sonner").then(({ toast }) => {
+    } catch (err) {
+      void import("sonner").then(({ toast }) => {
         toast.error(err instanceof Error ? err.message : "Failed to queue action");
       }).catch(() => { /* optional */ });
-    });
+      throw err;
+    }
   }, [openPanel, surfaceId]);
 
   return (

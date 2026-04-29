@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRuntimeStore } from "../../stores/runtime-store";
 import { useUIStore } from "../../stores/ui-store";
 
@@ -16,10 +16,16 @@ export function CognitiveLoopRail() {
   const activeLoop = useRuntimeStore((s) => s.activeCognitiveLoop);
   const eventsByLoop = useRuntimeStore((s) => s.cognitiveLoopEvents);
   const openPreviewModal = useUIStore((s) => s.openPreviewModal);
+  const [dismissedLoopId, setDismissedLoopId] = useState<string | null>(null);
   const events = activeLoop ? eventsByLoop[activeLoop.id] ?? [] : [];
   const recentEvents = useMemo(() => events.slice(-5).reverse(), [events]);
 
+  useEffect(() => {
+    if (activeLoop && dismissedLoopId !== null && activeLoop.id !== dismissedLoopId) setDismissedLoopId(null);
+  }, [activeLoop, dismissedLoopId]);
+
   if (!activeLoop) return null;
+  if (dismissedLoopId === activeLoop.id && activeLoop.status !== "running") return null;
 
   const color = severityColor(activeLoop.severity);
   const isRunning = activeLoop.status === "running";
@@ -46,8 +52,20 @@ export function CognitiveLoopRail() {
             <div className="truncate text-sm font-semibold text-white">{activeLoop.title}</div>
             <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-white/60">{activeLoop.summary}</div>
           </div>
-          <div className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] uppercase tracking-wide text-white/65">
-            {activeLoop.status}
+          <div className="flex shrink-0 items-center gap-1">
+            <div className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] uppercase tracking-wide text-white/65">
+              {activeLoop.status}
+            </div>
+            {activeLoop.status !== "running" && (
+              <button
+                type="button"
+                aria-label="Dismiss cognitive loop"
+                className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/45 transition hover:bg-white/10 hover:text-white"
+                onClick={() => setDismissedLoopId(activeLoop.id)}
+              >
+                ×
+              </button>
+            )}
           </div>
         </div>
 
@@ -61,6 +79,12 @@ export function CognitiveLoopRail() {
             }}
           />
         </div>
+
+        {activeLoop.currentStage && (
+          <div className="mb-3 rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2 text-[11px] text-white/45">
+            Current stage <span className="ml-1 text-white/70">{stageLabel(activeLoop.currentStage)}</span>
+          </div>
+        )}
 
         <div className="space-y-2">
           {recentEvents.length === 0 ? (

@@ -770,9 +770,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   addCanvasInputNode: ({ label, inputKind, preview }) => {
     const { nodes, edges } = get();
-    const existingInputs = nodes.filter((n) => n.type === "canvas-input").length;
+    const previousInputs = nodes.filter((n) => n.type === "canvas-input");
+    const retainedInputs = previousInputs.slice(-5);
+    const retainedInputIds = new Set(retainedInputs.map((n) => n.id));
+    const baseNodes = nodes.filter((n) => n.type !== "canvas-input" || retainedInputIds.has(n.id));
+    const baseEdges = edges.filter((e) => !e.id.startsWith("edge-input-") || retainedInputIds.has(e.source) || retainedInputIds.has(e.target));
+    const existingInputs = retainedInputs.length;
     const id = `input-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-    const brain = nodes.find((n) => n.id === BRAIN_NODE_ID);
+    const brain = baseNodes.find((n) => n.id === BRAIN_NODE_ID);
     const origin = brain?.position ?? { x: -90, y: -90 };
     const brainCenter = { x: origin.x + OFFSETS.brain.hw, y: origin.y + OFFSETS.brain.hh };
     const angle = Math.PI / 3 + existingInputs * 0.38;
@@ -796,9 +801,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     };
 
     set({
-      nodes: [...nodes, node],
+      nodes: [...baseNodes, node],
       edges: [
-        ...edges,
+        ...baseEdges,
         {
           id: `edge-input-brain-${id}`,
           source: id,

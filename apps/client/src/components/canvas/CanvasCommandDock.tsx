@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useAppStore } from "../../stores/app-store";
 import { useUIStore } from "../../stores/ui-store";
 import { cn } from "@/lib/utils";
@@ -9,7 +9,6 @@ export function CanvasCommandDock() {
   const chatCollapsed = useUIStore((s) => s.chatCollapsed);
   const toggleChat = useUIStore((s) => s.toggleChat);
   const [text, setText] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const send = useCallback(() => {
     const trimmed = text.trim();
@@ -34,7 +33,6 @@ export function CanvasCommandDock() {
           canvas input
         </div>
         <input
-          ref={inputRef}
           value={text}
           disabled={!connected}
           onChange={(e) => setText(e.target.value)}
@@ -42,6 +40,8 @@ export function CanvasCommandDock() {
             if (e.key === "Enter") {
               e.preventDefault();
               send();
+            } else if (e.key === "Escape") {
+              setText("");
             }
           }}
           placeholder={connected ? "Ask from the canvas…" : "Connecting…"}

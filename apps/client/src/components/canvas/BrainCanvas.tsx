@@ -69,6 +69,10 @@ function labelForUrl(value: string): string {
   }
 }
 
+function toastCanvasError(message: string): void {
+  void import("sonner").then(({ toast }) => toast.error(message)).catch(() => { /* optional */ });
+}
+
 // MiniMap needs resolved color strings (CSS vars don't work in SVG fill)
 function minimapNodeColor(node: { type?: string }): string {
   switch (node.type) {
@@ -407,7 +411,10 @@ export function BrainCanvas() {
   const handleCanvasDrop = useCallback(async (event: React.DragEvent<HTMLDivElement>) => {
     const files = event.dataTransfer.files;
     const droppedText = extractDroppedText(event.dataTransfer);
-    if (!files.length && !droppedText) return;
+    if (!files.length && !droppedText) {
+      setDragActive(false);
+      return;
+    }
     event.preventDefault();
     setDragActive(false);
     if (files.length > 0) {
@@ -421,6 +428,8 @@ export function BrainCanvas() {
           });
         });
         sendChat("Analyze the files I dropped onto the canvas.", undefined, artifacts);
+      } else {
+        toastCanvasError("Couldn't upload dropped file.");
       }
       return;
     }

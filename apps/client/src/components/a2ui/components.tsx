@@ -245,22 +245,31 @@ export function A2UIButton({
   const label = resolveValue(spec.label, bindings);
   const variant = VARIANT_MAP[spec.variant ?? "primary"] ?? "default";
   const { fire, enabled } = useA2UIAction();
+  const [pending, setPending] = useState(false);
   // The button is enabled only when a host dispatcher is registered AND the
   // action string passes the allowlist. Anything else renders disabled with
   // a hint, so the user can see something was filtered out.
   const isNoop = !spec.action || spec.action === "noop";
+  const disabled = !enabled || isNoop || pending;
 
   return (
     <Button
       variant={variant}
       size="sm"
-      disabled={!enabled || isNoop}
-      title={!enabled ? "Actions disabled — no host dispatcher" : isNoop ? "No action bound" : undefined}
-      onClick={() => {
-        if (!isNoop) fire(spec.action, sourceId);
+      disabled={disabled}
+      aria-busy={pending}
+      title={!enabled ? "Actions disabled — no host dispatcher" : isNoop ? "No action bound" : pending ? "Action is being queued" : undefined}
+      onClick={async () => {
+        if (isNoop || pending) return;
+        setPending(true);
+        try {
+          await fire(spec.action, sourceId);
+        } finally {
+          setPending(false);
+        }
       }}
     >
-      {label}
+      {pending ? "Queuing…" : label}
     </Button>
   );
 }
@@ -282,6 +291,8 @@ export function A2UIForm({
   const { fire, enabled } = useA2UIAction();
   const isNoop = !spec.submitAction || spec.submitAction === "noop";
   const [values, setValues] = useState<FormValues>({});
+  const [pending, setPending] = useState(false);
+  const disabled = !enabled || isNoop || pending;
   const formContextValue = useMemo(() => ({
     values,
     setValue: (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value })),
@@ -291,9 +302,15 @@ export function A2UIForm({
     <A2UIFormContext.Provider value={formContextValue}>
       <form
         className="flex flex-col gap-3 rounded-lg border border-border p-4"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
-          if (!isNoop) fire(mergeFormValuesIntoAction(spec.submitAction, values), sourceId);
+          if (isNoop || pending) return;
+          setPending(true);
+          try {
+            await fire(mergeFormValuesIntoAction(spec.submitAction, values), sourceId);
+          } finally {
+            setPending(false);
+          }
         }}
       >
         {children.map((childId) => (
@@ -303,10 +320,11 @@ export function A2UIForm({
           type="submit"
           size="sm"
           className="self-start mt-1"
-          disabled={!enabled || isNoop}
-          title={!enabled ? "Form submission disabled — no host dispatcher" : isNoop ? "No submit action bound" : undefined}
+          disabled={disabled}
+          aria-busy={pending}
+          title={!enabled ? "Form submission disabled — no host dispatcher" : isNoop ? "No submit action bound" : pending ? "Submission is being queued" : undefined}
         >
-          {spec.submitLabel ?? "Submit"}
+          {pending ? "Queuing…" : spec.submitLabel ?? "Submit"}
         </Button>
       </form>
     </A2UIFormContext.Provider>
