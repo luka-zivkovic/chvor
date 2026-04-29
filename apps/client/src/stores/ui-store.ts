@@ -46,7 +46,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   activePanel: null,
   brainTab: "overview",
   layoutMode: "default",
-  chatCollapsed: false,
+  chatCollapsed: true,
   mobileMenuOpen: false,
   detailNodeId: null,
   settingsOpen: false,

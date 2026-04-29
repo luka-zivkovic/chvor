@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { createContext, useContext, useId, useMemo, useState, type ChangeEvent } from "react";
 import type {
   A2UITextComponent,
   A2UIColumnComponent,
@@ -11,10 +11,26 @@ import type {
   A2UIChartComponent,
   A2UISurface,
 } from "@chvor/shared";
+import { parseA2UIAction } from "@chvor/shared";
 import { resolveValue, resolveArray } from "./resolve";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useA2UIAction } from "./action-context";
+
+type FormValues = Record<string, string>;
+const A2UIFormContext = createContext<{
+  values: FormValues;
+  setValue: (key: string, value: string) => void;
+} | null>(null);
+
+function mergeFormValuesIntoAction(raw: string, values: FormValues): string {
+  const parsed = parseA2UIAction(raw);
+  if (!parsed || parsed.kind !== "emit") return raw;
+  const payload = parsed.payload && typeof parsed.payload === "object" && !Array.isArray(parsed.payload)
+    ? parsed.payload as Record<string, unknown>
+    : {};
+  return `emit:${parsed.eventName}?${encodeURIComponent(JSON.stringify({ ...payload, form: values }))}`;
+}
 
 /* ─── Shared child renderer ─── */
 
@@ -220,9 +236,11 @@ const VARIANT_MAP: Record<string, "default" | "secondary" | "ghost"> = {
 export function A2UIButton({
   spec,
   bindings,
+  sourceId,
 }: {
   spec: A2UIButtonComponent["Button"];
   bindings: Record<string, unknown>;
+  sourceId?: string;
 }) {
   const label = resolveValue(spec.label, bindings);
   const variant = VARIANT_MAP[spec.variant ?? "primary"] ?? "default";
@@ -239,7 +257,7 @@ export function A2UIButton({
       disabled={!enabled || isNoop}
       title={!enabled ? "Actions disabled — no host dispatcher" : isNoop ? "No action bound" : undefined}
       onClick={() => {
-        if (!isNoop) fire(spec.action);
+        if (!isNoop) fire(spec.action, sourceId);
       }}
     >
       {label}
@@ -253,36 +271,45 @@ export function A2UIForm({
   spec,
   surface,
   renderNode,
+  sourceId,
 }: {
   spec: A2UIFormComponent["Form"];
   surface: A2UISurface;
   renderNode: (nodeId: string, surface: A2UISurface, visited?: Set<string>, depth?: number) => React.ReactNode;
+  sourceId?: string;
 }) {
   const children = spec.children?.explicitList ?? [];
   const { fire, enabled } = useA2UIAction();
   const isNoop = !spec.submitAction || spec.submitAction === "noop";
+  const [values, setValues] = useState<FormValues>({});
+  const formContextValue = useMemo(() => ({
+    values,
+    setValue: (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value })),
+  }), [values]);
 
   return (
-    <form
-      className="flex flex-col gap-3 rounded-lg border border-border p-4"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!isNoop) fire(spec.submitAction);
-      }}
-    >
-      {children.map((childId) => (
-        <Child key={childId} nodeId={childId} surface={surface} renderNode={renderNode} />
-      ))}
-      <Button
-        type="submit"
-        size="sm"
-        className="self-start mt-1"
-        disabled={!enabled || isNoop}
-        title={!enabled ? "Form submission disabled — no host dispatcher" : isNoop ? "No submit action bound" : undefined}
+    <A2UIFormContext.Provider value={formContextValue}>
+      <form
+        className="flex flex-col gap-3 rounded-lg border border-border p-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!isNoop) fire(mergeFormValuesIntoAction(spec.submitAction, values), sourceId);
+        }}
       >
-        {spec.submitLabel ?? "Submit"}
-      </Button>
-    </form>
+        {children.map((childId) => (
+          <Child key={childId} nodeId={childId} surface={surface} renderNode={renderNode} />
+        ))}
+        <Button
+          type="submit"
+          size="sm"
+          className="self-start mt-1"
+          disabled={!enabled || isNoop}
+          title={!enabled ? "Form submission disabled — no host dispatcher" : isNoop ? "No submit action bound" : undefined}
+        >
+          {spec.submitLabel ?? "Submit"}
+        </Button>
+      </form>
+    </A2UIFormContext.Provider>
   );
 }
 
@@ -293,6 +320,8 @@ export function A2UIInput({
   spec: A2UIInputComponent["Input"];
 }) {
   const inputId = useId();
+  const form = useContext(A2UIFormContext);
+  const value = form?.values[spec.bindTo] ?? "";
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -305,6 +334,9 @@ export function A2UIInput({
         id={inputId}
         type={spec.inputType ?? "text"}
         placeholder={spec.placeholder ?? ""}
+        {...(form
+          ? { value, onChange: (e: ChangeEvent<HTMLInputElement>) => form.setValue(spec.bindTo, e.target.value) }
+          : {})}
         className="h-9 w-full rounded-md border border-border bg-input px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
     </div>

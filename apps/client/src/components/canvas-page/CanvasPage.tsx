@@ -1,7 +1,7 @@
 import { useEffect, memo } from "react";
 import { useRuntimeStore } from "../../stores/runtime-store";
 import { useUIStore } from "../../stores/ui-store";
-import { A2UIRenderer } from "../a2ui/A2UIRenderer";
+import { A2UIHostRenderer } from "../a2ui/A2UIHostRenderer";
 import { cn } from "@/lib/utils";
 import type { A2UISurfaceListItem } from "@chvor/shared";
 
@@ -84,7 +84,7 @@ export function CanvasPage() {
       <main className="flex flex-1 flex-col overflow-hidden">
         {activeSurface ? (
           <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-            <A2UIRenderer surfaceId={activeSurface.surfaceId} surface={activeSurface} />
+            <A2UIHostRenderer surfaceId={activeSurface.surfaceId} surface={activeSurface} />
           </div>
         ) : (
           <div className="flex flex-1 items-center justify-center">

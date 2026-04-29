@@ -1,7 +1,7 @@
 // ─── Daemon (Always-On) Types ──────────────────────────────
 
 export type DaemonTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
-export type DaemonTaskSource = "user" | "pulse" | "webhook" | "idle" | "system";
+export type DaemonTaskSource = "user" | "pulse" | "webhook" | "idle" | "system" | "a2ui";
 
 export interface DaemonTask {
   id: string;
@@ -12,6 +12,8 @@ export interface DaemonTask {
   status: DaemonTaskStatus;
   progress: string | null;
   retryCount: number;
+  /** Cognitive loop this task belongs to, if it was spawned by an autonomous loop. */
+  loopId: string | null;
   result: string | null;
   error: string | null;
   createdAt: string;
@@ -38,6 +40,7 @@ export interface CreateDaemonTaskRequest {
   title: string;
   prompt: string;
   priority?: number;
+  loopId?: string | null;
 }
 
 export interface UpdateDaemonConfigRequest {

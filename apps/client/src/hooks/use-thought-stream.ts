@@ -17,6 +17,7 @@ const FONT_MONO = "10px 'IBM Plex Mono', monospace";
 function segmentType(eventType: string): ThoughtSegment["type"] | null {
   if (eventType === "brain.thinking") return "thought";
   if (eventType === "brain.decision") return "decision";
+  if (eventType.startsWith("multi_mind.")) return "thought";
   if (eventType.startsWith("skill.")) return "skill";
   if (eventType.startsWith("tool.")) return "tool";
   if (eventType.startsWith("memory.")) return "memory";
@@ -30,6 +31,16 @@ function extractText(eventType: string, data: Record<string, unknown>): string {
       return (data.thought as string) || "";
     case "brain.decision":
       return `${data.capabilityKind === "skill" ? "skill" : "tool"}: ${data.reason || ""}`;
+    case "multi_mind.started":
+      return `parallel minds: ${(data.roles as string[] | undefined)?.join(", ") || "starting"}`;
+    case "multi_mind.agent.started":
+      return `${data.title || data.role || "mind"} thinking…`;
+    case "multi_mind.agent.completed":
+      return `${data.role || "mind"}: ${data.title || "done"}`;
+    case "multi_mind.agent.failed":
+      return `${data.role || "mind"} failed: ${data.error || "unknown"}`;
+    case "multi_mind.completed":
+      return `parallel minds converged (${(data.insights as unknown[] | undefined)?.length ?? 0})`;
     case "skill.invoked":
       return `invoking ${data.skillId || "skill"}`;
     case "skill.completed":

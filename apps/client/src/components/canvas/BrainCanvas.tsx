@@ -12,7 +12,7 @@ import { useFeatureStore } from "../../stores/feature-store";
 import { useConfigStore } from "../../stores/config-store";
 import { EMOTION_COLORS } from "@chvor/shared";
 import { api } from "../../lib/api";
-import type { AnyProviderDef } from "@chvor/shared";
+import type { AnyProviderDef, MediaArtifact } from "@chvor/shared";
 import { BrainNode } from "./BrainNode";
 import { SkillNode } from "./SkillNode";
 import { ScheduleHubNode } from "./ScheduleHubNode";
@@ -35,13 +35,39 @@ import { CanvasSearchDialog } from "./CanvasSearchDialog";
 import { GhostHubNode } from "./GhostHubNode";
 import { A2UICanvasNode } from "./A2UICanvasNode";
 import { ThoughtStreamCanvas } from "./ThoughtStreamCanvas";
+import { CognitiveLoopRail } from "./CognitiveLoopRail";
+import { MindAgentNode } from "./MindAgentNode";
+import { CanvasCommandDock } from "./CanvasCommandDock";
+import { CanvasInputNode } from "./CanvasInputNode";
 
-const nodeTypes = { brain: BrainNode, skill: SkillNode, tool: ToolNode, integration: IntegrationNode, "skills-hub": SkillsHubNode, "tools-hub": ToolsHubNode, "connections-hub": ConnectionsHubNode, "integrations-hub": IntegrationsHubNode, "schedule-hub": ScheduleHubNode, schedule: ScheduleNode, "webhooks-hub": WebhooksHubNode, webhook: WebhookNode, trigger: TriggerNode, output: OutputNode, "ghost-hub": GhostHubNode, "a2ui-canvas": A2UICanvasNode };
+const nodeTypes = { brain: BrainNode, skill: SkillNode, tool: ToolNode, integration: IntegrationNode, "skills-hub": SkillsHubNode, "tools-hub": ToolsHubNode, "connections-hub": ConnectionsHubNode, "integrations-hub": IntegrationsHubNode, "schedule-hub": ScheduleHubNode, schedule: ScheduleNode, "webhooks-hub": WebhooksHubNode, webhook: WebhookNode, trigger: TriggerNode, output: OutputNode, "ghost-hub": GhostHubNode, "a2ui-canvas": A2UICanvasNode, "mind-agent": MindAgentNode, "canvas-input": CanvasInputNode };
 const edgeTypes = { animated: AnimatedEdge };
 
 const DEFAULT_WORKSPACE_ID = "default-constellation";
 const CHANNEL_TYPES = new Set(["telegram", "discord", "slack", "whatsapp"]);
 const LLM_TYPES = new Set(["openai", "anthropic", "deepseek", "minimax", "openrouter", "google-ai", "groq", "mistral", "custom-llm", "ollama", "ollama-cloud"]);
+
+function hasCanvasDropPayload(types: readonly string[] | DOMStringList): boolean {
+  const hasType = (value: string) => (
+    typeof (types as DOMStringList).contains === "function"
+      ? (types as DOMStringList).contains(value)
+      : (types as readonly string[]).includes(value)
+  );
+  return hasType("Files") || hasType("text/uri-list") || hasType("text/plain");
+}
+
+function extractDroppedText(dataTransfer: DataTransfer): string {
+  return (dataTransfer.getData("text/uri-list") || dataTransfer.getData("text/plain") || "").trim();
+}
+
+function labelForUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return url.hostname.replace(/^www\./, "");
+  } catch {
+    return "Dropped URL";
+  }
+}
 
 // MiniMap needs resolved color strings (CSS vars don't work in SVG fill)
 function minimapNodeColor(node: { type?: string }): string {
@@ -74,6 +100,7 @@ export function BrainCanvas() {
     initializeFromSkills,
     initializeEmptyState,
     updateBrainLabel,
+    addCanvasInputNode,
   } = useCanvasStore();
   // Per-property selectors — reading the whole store object would re-render this 530 LOC
   // canvas on every mutation in any unrelated slice (voice config, knowledge, schedules, ...).
@@ -90,8 +117,11 @@ export function BrainCanvas() {
   const providers = useFeatureStore((s) => s.providers);
   const fetchCredentials = useFeatureStore((s) => s.fetchCredentials);
   const connected = useAppStore((s) => s.connected);
+  const sendChat = useAppStore((s) => s._sendChat);
+  const fetchCognitiveLoops = useRuntimeStore((s) => s.fetchCognitiveLoops);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, nodeId: null, nodeType: null });
   const [searchDialog, setSearchDialog] = useState<{ open: boolean; initialKind: "skill" | "tool" | null }>({ open: false, initialKind: null });
+  const [dragActive, setDragActive] = useState(false);
   const initializedRef = useRef<string | undefined>(undefined);
   const rfInstanceRef = useRef<ReactFlowInstance<ChvorNode, ChvorEdge> | null>(null);
   const savedPositionsRef = useRef<Map<string, { x: number; y: number }> | undefined>(undefined);
@@ -108,6 +138,10 @@ export function BrainCanvas() {
     fetchSchedules();
     fetchWebhooks();
   }, [fetchSkills, fetchTools, fetchCredentials, fetchSchedules, fetchWebhooks]);
+
+  useEffect(() => {
+    if (connected) void fetchCognitiveLoops();
+  }, [connected, fetchCognitiveLoops]);
 
   // Load saved layout from server — re-fetch when WS connects (covers late server start + reconnect)
   useEffect(() => {
@@ -186,13 +220,15 @@ export function BrainCanvas() {
     const viewport = rf.getViewport();
     const workspaceId = DEFAULT_WORKSPACE_ID;
     // Map to WorkspaceNode shape (strip runtime-only fields)
-    const saveNodes = currentNodes.map((n) => ({
+    const persistentNodes = currentNodes.filter((n) => n.type !== "mind-agent" && n.type !== "canvas-input");
+    const persistentEdges = currentEdges.filter((e) => !e.id.startsWith("edge-mind-") && !e.id.startsWith("edge-input-"));
+    const saveNodes = persistentNodes.map((n) => ({
       id: n.id,
       type: n.type ?? "skill",
       position: n.position,
       data: n.data,
     }));
-    const saveEdges = currentEdges.map((e) => ({
+    const saveEdges = persistentEdges.map((e) => ({
       id: e.id,
       source: e.source,
       target: e.target,
@@ -207,7 +243,7 @@ export function BrainCanvas() {
     });
     // Update saved ref so subsequent inits use saved positions
     const posMap = new Map<string, { x: number; y: number }>();
-    for (const n of currentNodes) posMap.set(n.id, n.position);
+    for (const n of persistentNodes) posMap.set(n.id, n.position);
     savedPositionsRef.current = posMap;
     savedViewportRef.current = viewport;
     return true;
@@ -356,10 +392,64 @@ export function BrainCanvas() {
     });
   }, [handleSaveLayout]);
 
+  const uploadDroppedFiles = useCallback(async (files: FileList): Promise<MediaArtifact[]> => {
+    const artifacts: MediaArtifact[] = [];
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/media/upload", { method: "POST", body: formData, credentials: "same-origin" });
+      if (!res.ok) continue;
+      artifacts.push((await res.json()) as MediaArtifact);
+    }
+    return artifacts;
+  }, []);
+
+  const handleCanvasDrop = useCallback(async (event: React.DragEvent<HTMLDivElement>) => {
+    const files = event.dataTransfer.files;
+    const droppedText = extractDroppedText(event.dataTransfer);
+    if (!files.length && !droppedText) return;
+    event.preventDefault();
+    setDragActive(false);
+    if (files.length > 0) {
+      const artifacts = await uploadDroppedFiles(files);
+      if (artifacts.length > 0) {
+        artifacts.forEach((artifact) => {
+          addCanvasInputNode({
+            label: artifact.filename ?? `${artifact.mediaType} drop`,
+            inputKind: "file",
+            preview: `${artifact.mediaType} · ${artifact.mimeType}${artifact.sizeBytes ? ` · ${Math.round(artifact.sizeBytes / 1024)}KB` : ""}`,
+          });
+        });
+        sendChat("Analyze the files I dropped onto the canvas.", undefined, artifacts);
+      }
+      return;
+    }
+    const urls = droppedText
+      .split(/\s+/)
+      .filter((value) => /^https?:\/\//i.test(value));
+    if (urls.length > 0) {
+      urls.slice(0, 4).forEach((url) => addCanvasInputNode({ label: labelForUrl(url), inputKind: "url", preview: url }));
+      sendChat(`Analyze ${urls.length === 1 ? "this URL" : "these URLs"} I dropped onto the canvas:\n${urls.join("\n")}`);
+    } else {
+      addCanvasInputNode({ label: "Dropped text", inputKind: "text", preview: droppedText.slice(0, 240) });
+      sendChat(`Use this dropped canvas input:\n${droppedText.slice(0, 4000)}`);
+    }
+  }, [addCanvasInputNode, sendChat, uploadDroppedFiles]);
+
   return (
     <div
       className="relative h-full w-full transition-[opacity,filter] duration-500"
       tabIndex={-1}
+      onDragOver={(event) => {
+        if (hasCanvasDropPayload(event.dataTransfer.types)) {
+          event.preventDefault();
+          setDragActive(true);
+        }
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget === event.target) setDragActive(false);
+      }}
+      onDrop={handleCanvasDrop}
       style={{
         background: "var(--canvas-bg)",
         opacity: connected ? 1 : 0.55,
@@ -368,6 +458,13 @@ export function BrainCanvas() {
     >
       <CanvasAtmosphere />
       <ThoughtStreamCanvas rfInstance={rfInstanceRef} />
+      <CognitiveLoopRail />
+      <CanvasCommandDock />
+      {dragActive && (
+        <div className="pointer-events-none absolute inset-4 z-30 flex items-center justify-center rounded-3xl border border-primary/40 bg-primary/8 text-sm text-primary backdrop-blur-sm">
+          Drop files, URLs, screenshots, or clips onto the cognitive canvas
+        </div>
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}

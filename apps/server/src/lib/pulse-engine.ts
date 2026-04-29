@@ -10,16 +10,18 @@ import { listSchedules } from "../db/schedule-store.ts";
 import { listCredentials } from "../db/credential-store.ts";
 import { listWebhookSubscriptions, listWebhookEvents } from "../db/webhook-store.ts";
 import { insertActivity } from "../db/activity-store.ts";
+import { completeCognitiveLoop, failCognitiveLoop, startPulseCognitiveLoop } from "./cognitive-loop.ts";
+import { runConsolidation } from "./memory-consolidation.ts";
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let wsRef: WSManager | null = null;
 let consecutiveSilent = 0;
 
 // Escalation callback — set by daemon engine for auto-remediation
-let onEscalation: ((resultText: string, healthContext: string) => void) | null = null;
+let onEscalation: ((resultText: string, healthContext: string, loopId?: string) => boolean) | null = null;
 
 /** Register an escalation handler (called when pulse detects non-silent alerts). */
-export function setEscalationHandler(handler: (resultText: string, healthContext: string) => void): void {
+export function setEscalationHandler(handler: (resultText: string, healthContext: string, loopId?: string) => boolean): void {
   onEscalation = handler;
 }
 
@@ -193,8 +195,24 @@ async function runPulse(): Promise<void> {
     });
     wsRef?.broadcast({ type: "activity.new", data: entry });
 
-    // Notify daemon for auto-remediation
-    onEscalation?.(resultText, healthContext);
+    const loop = startPulseCognitiveLoop(resultText, healthContext);
+
+    // Notify daemon for auto-remediation immediately, then let memory sleep
+    // run as the loop's reflective pass. If no daemon task is queued, the loop
+    // can finish after consolidation rather than staying visually "running".
+    const remediationQueued = onEscalation?.(resultText, healthContext, loop.id) ?? false;
+
+    try {
+      await runConsolidation({ loopId: loop.id, reason: "pulse", force: true });
+      if (!remediationQueued) {
+        completeCognitiveLoop(loop.id, "Loop completed", "Pulse recorded, memory consolidated, no daemon remediation queued.");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!remediationQueued) {
+        failCognitiveLoop(loop.id, "Loop failed during consolidation", message);
+      }
+    }
 
     recordPulseRun(resultText, null);
 

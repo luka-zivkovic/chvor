@@ -19,6 +19,8 @@ import type {
   A2UIDeleteSurface,
   A2UIComponentEntry,
   A2UISurfaceListItem,
+  CognitiveLoopRun,
+  CognitiveLoopEvent,
 } from "@chvor/shared";
 import {
   upgradeLegacyEmotion,
@@ -54,6 +56,14 @@ interface RuntimeState {
   markRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
   handleActivityEvent: (entry: ActivityEntry) => void;
+
+  // ── cognitive-loop-store ────────────────────────────────────────────────
+  cognitiveLoops: CognitiveLoopRun[];
+  activeCognitiveLoop: CognitiveLoopRun | null;
+  cognitiveLoopEvents: Record<string, CognitiveLoopEvent[]>;
+  fetchCognitiveLoops: () => Promise<void>;
+  handleCognitiveLoopRun: (run: CognitiveLoopRun) => void;
+  handleCognitiveLoopEvent: (event: CognitiveLoopEvent) => void;
 
   // ── emotion-store ────────────────────────────────────────────────────────
   currentSnapshot: EmotionSnapshot | null;
@@ -156,6 +166,60 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       return {
         activities: [entry, ...s.activities].slice(0, 200),
         unreadCount: s.unreadCount + 1,
+      };
+    });
+  },
+
+  // ── cognitive-loop-store ────────────────────────────────────────────────
+  cognitiveLoops: [],
+  activeCognitiveLoop: null,
+  cognitiveLoopEvents: {},
+
+  fetchCognitiveLoops: async () => {
+    try {
+      const loops = await api.cognitiveLoops.list(20);
+      set((s) => ({
+        cognitiveLoops: loops,
+        activeCognitiveLoop: loops.find((loop) => loop.status === "running") ?? s.activeCognitiveLoop ?? loops[0] ?? null,
+      }));
+      const active = loops.find((loop) => loop.status === "running") ?? loops[0];
+      if (active) {
+        const detail = await api.cognitiveLoops.get(active.id);
+        set((s) => ({
+          cognitiveLoopEvents: { ...s.cognitiveLoopEvents, [detail.run.id]: detail.events },
+          activeCognitiveLoop: detail.run,
+        }));
+      }
+    } catch (err) {
+      console.warn("[cognitive-loop] failed to fetch loops:", err);
+    }
+  },
+
+  handleCognitiveLoopRun: (run) => {
+    set((s) => {
+      const existing = s.cognitiveLoops.some((loop) => loop.id === run.id);
+      const loops = existing
+        ? s.cognitiveLoops.map((loop) => (loop.id === run.id ? run : loop))
+        : [run, ...s.cognitiveLoops];
+      const active = run.status === "running" || s.activeCognitiveLoop?.id === run.id
+        ? run
+        : s.activeCognitiveLoop ?? run;
+      return {
+        cognitiveLoops: loops.slice(0, 50),
+        activeCognitiveLoop: active,
+      };
+    });
+  },
+
+  handleCognitiveLoopEvent: (event) => {
+    set((s) => {
+      const current = s.cognitiveLoopEvents[event.loopId] ?? [];
+      if (current.some((e) => e.id === event.id)) return s;
+      return {
+        cognitiveLoopEvents: {
+          ...s.cognitiveLoopEvents,
+          [event.loopId]: [...current, event].slice(-100),
+        },
       };
     });
   },

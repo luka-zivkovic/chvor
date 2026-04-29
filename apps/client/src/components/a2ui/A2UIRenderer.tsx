@@ -75,10 +75,10 @@ function renderNode(
       return <A2UITable key={nodeId} spec={comp.Table} bindings={surface.bindings} />;
     }
     if ("Button" in comp) {
-      return <A2UIButton key={nodeId} spec={comp.Button} bindings={surface.bindings} />;
+      return <A2UIButton key={nodeId} sourceId={nodeId} spec={comp.Button} bindings={surface.bindings} />;
     }
     if ("Form" in comp) {
-      return <A2UIForm key={nodeId} spec={comp.Form} surface={surface} renderNode={childRenderNode} />;
+      return <A2UIForm key={nodeId} sourceId={nodeId} spec={comp.Form} surface={surface} renderNode={childRenderNode} />;
     }
     if ("Input" in comp) {
       return <A2UIInput key={nodeId} spec={comp.Input} />;

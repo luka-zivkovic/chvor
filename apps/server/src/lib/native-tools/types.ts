@@ -16,6 +16,8 @@ export interface NativeToolContext {
   channelType?: string;
   channelId?: string;
   workspaceId?: string;
+  /** Cognitive loop lineage, present for daemon/pulse/A2UI autonomous tasks. */
+  loopId?: string;
   /**
    * The most recent user message in this turn. Used by `request_credential`
    * to capture deferred intent so the AI can resume the original task once
