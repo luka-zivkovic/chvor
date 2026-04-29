@@ -93,12 +93,30 @@ export const listCredentialsToolDef = tool({
   parameters: z.object({}),
 });
 
-export const handleListCredentials: NativeToolHandler = async (): Promise<NativeToolResult> => {
+export const handleListCredentials: NativeToolHandler = async (
+  _args: Record<string, unknown>,
+  context?: NativeToolContext
+): Promise<NativeToolResult> => {
   const { listCredentials } = await import("../../../db/credential-store.ts");
   const { INTEGRATION_PROVIDERS } = await import("../../provider-registry.ts");
-  const creds = listCredentials();
+  const all = listCredentials();
+  // Honour the active skill's allowedCredentialTypes scope. Listing
+  // out-of-scope credential ids would invite the LLM to try them and absorb
+  // a synthesized-caller preflight rejection downstream.
+  const allowed = context?.allowedCredentialTypes;
+  const creds = allowed && allowed.length > 0 ? all.filter((c) => allowed.includes(c.type)) : all;
   if (creds.length === 0) {
-    return { content: [{ type: "text", text: "No credentials saved yet." }] };
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            allowed && allowed.length > 0 && all.length > 0
+              ? `No credentials available for the active skill scope (${allowed.join(", ")}).`
+              : "No credentials saved yet.",
+        },
+      ],
+    };
   }
   const lines = creds.map((c) => {
     const status = c.testStatus ?? "untested";

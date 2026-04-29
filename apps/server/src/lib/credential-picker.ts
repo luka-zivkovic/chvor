@@ -7,12 +7,13 @@ import { getSessionPin } from "../db/session-pin-store.ts";
  * When `{{credentials.X}}` references a type with multiple instances, this
  * function decides which one to use. Order:
  *
- *   1. **LLM-picked** — a synthesized tool call may pass a safe metadata-only
+ *   1. **Pinned by tool config** — synth tools may declare a hard-coded
+ *      `credentialId` in their frontmatter; deterministic and author-set.
+ *   2. **Session pin** — user pinned `(session, type)` via Settings or the
+ *      AI's prior turn (durable, survives restart). User intent outranks
+ *      LLM choice so pins are not silently overridden.
+ *   3. **LLM-picked** — a synthesized tool call may pass a safe metadata-only
  *      `credentialId` enum chosen from the exposed options.
- *   2. **Pinned by tool config** — synth tools may declare a hard-coded
- *      `credentialId` in their frontmatter; honoured first.
- *   3. **Session pin** — user pinned `(session, type)` via Settings or the
- *      AI's prior turn (durable, survives restart).
  *   4. **Skill `preferredUsageContext` match** — score each candidate by
  *      token-overlap between the credential's `usage_context` and the
  *      union of `preferredUsageContext` from active skills. Wins only when
@@ -98,22 +99,7 @@ export function pickCredential(credentialType: string, ctx: PickContext = {}): P
     return null;
   }
 
-  // Tier 1 — explicit LLM choice from a schema enum. Invalid choices fall
-  // through so legacy callers can recover through pins/context/fallback;
-  // synthesized-caller performs a stricter preflight and returns a clean error.
-  if (ctx.llmPickedId) {
-    const m = candidates.find((c) => c.id === ctx.llmPickedId);
-    if (m) {
-      return {
-        credentialId: m.id,
-        reason: "llm-picked",
-        candidateCount: candidates.length,
-        detail: `LLM selected credential "${m.name}"`,
-      };
-    }
-  }
-
-  // Tier 2 — explicit tool pin (synth credentialId in frontmatter)
+  // Tier 1 — explicit tool pin (synth credentialId in frontmatter)
   if (ctx.toolPinnedId) {
     const m = candidates.find((c) => c.id === ctx.toolPinnedId);
     if (m) {
@@ -127,7 +113,9 @@ export function pickCredential(credentialType: string, ctx: PickContext = {}): P
     // Pinned id no longer matches — fall through.
   }
 
-  // Tier 3 — session pin
+  // Tier 2 — session pin. Durable user intent outranks LLM choice; if the
+  // user pinned a credential for this session, that wins even when the LLM
+  // suggested something different.
   if (ctx.sessionId) {
     try {
       const pin = getSessionPin(ctx.sessionId, credentialType);
@@ -150,6 +138,21 @@ export function pickCredential(credentialType: string, ctx: PickContext = {}): P
         "[credential-picker] session pin lookup failed:",
         err instanceof Error ? err.message : String(err)
       );
+    }
+  }
+
+  // Tier 3 — explicit LLM choice from a schema enum. Invalid choices fall
+  // through so legacy callers can recover through context/fallback;
+  // synthesized-caller performs a stricter preflight and returns a clean error.
+  if (ctx.llmPickedId) {
+    const m = candidates.find((c) => c.id === ctx.llmPickedId);
+    if (m) {
+      return {
+        credentialId: m.id,
+        reason: "llm-picked",
+        candidateCount: candidates.length,
+        detail: `LLM selected credential "${m.name}"`,
+      };
     }
   }
 

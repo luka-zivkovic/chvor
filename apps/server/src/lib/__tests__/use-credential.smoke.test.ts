@@ -8,6 +8,7 @@ process.env.CHVOR_DATA_DIR = tmp;
 process.env.CHVOR_HITL_TIMEOUT_MS = "1500";
 
 let handleUseCredential: typeof import("../native-tools/credential/crud.ts").handleUseCredential;
+let handleListCredentials: typeof import("../native-tools/credential/crud.ts").handleListCredentials;
 let createCredential: typeof import("../../db/credential-store.ts").createCredential;
 let deleteCredential: typeof import("../../db/credential-store.ts").deleteCredential;
 let listCredentials: typeof import("../../db/credential-store.ts").listCredentials;
@@ -19,7 +20,8 @@ let beginAction: typeof import("../event-bus.ts").beginAction;
 let listTraces: typeof import("../../db/event-store.ts").listTraces;
 
 beforeAll(async () => {
-  ({ handleUseCredential } = await import("../native-tools/credential/crud.ts"));
+  ({ handleUseCredential, handleListCredentials } =
+    await import("../native-tools/credential/crud.ts"));
   ({ createCredential, deleteCredential, listCredentials, updateConnectionConfig } =
     await import("../../db/credential-store.ts"));
   ({ listApprovals } = await import("../../db/approval-store.ts"));
@@ -155,5 +157,36 @@ describe("native__use_credential redaction", () => {
     expect(JSON.stringify(traces.map((t) => t.action.args))).not.toContain(
       "ghp_super_secret_token"
     );
+  });
+});
+
+describe("native__list_credentials skill scope filter", () => {
+  beforeEach(reset);
+
+  it("hides credentials whose type is outside allowedCredentialTypes", async () => {
+    createCredential("Work GitHub", "github", { apiKey: "ghp_a" });
+    createCredential("Slack Bot", "slack", { token: "xoxb_secret" });
+    const result = await handleListCredentials({}, { allowedCredentialTypes: ["github"] });
+    const out = result.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
+    expect(out).toContain("Work GitHub");
+    expect(out).not.toContain("Slack Bot");
+    expect(out).not.toContain("xoxb_secret");
+  });
+
+  it("returns scoped empty message when nothing matches the active scope", async () => {
+    createCredential("Slack Bot", "slack", { token: "xoxb_secret" });
+    const result = await handleListCredentials({}, { allowedCredentialTypes: ["github"] });
+    const out = result.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
+    expect(out).toContain("active skill scope");
+    expect(out).not.toContain("Slack Bot");
+  });
+
+  it("falls back to listing everything when no scope is set", async () => {
+    createCredential("Work GitHub", "github", { apiKey: "ghp_a" });
+    createCredential("Slack Bot", "slack", { token: "xoxb_secret" });
+    const result = await handleListCredentials({}, {});
+    const out = result.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
+    expect(out).toContain("Work GitHub");
+    expect(out).toContain("Slack Bot");
   });
 });

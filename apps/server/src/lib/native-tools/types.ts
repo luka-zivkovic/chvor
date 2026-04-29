@@ -22,6 +22,14 @@ export interface NativeToolContext {
    * credentials arrive.
    */
   latestUserText?: string;
+  /**
+   * Skill-scoped credential type whitelist for the active turn. When present
+   * and non-empty, native tools that resolve `{{credentials.<ref>}}`
+   * placeholders must reject any credential whose type is outside this set.
+   * Mirrors the synthesized-caller preflight so browser-tool calls cannot
+   * silently expand credentials forbidden by the active skill scope.
+   */
+  allowedCredentialTypes?: string[];
 }
 
 export type NativeToolHandler = (
@@ -47,7 +55,10 @@ export interface NativeToolModule {
    * module has one or two tools that don't fit the module's primary group
    * (e.g. a "diagnose" tool inside a domain-specific module wants `core`).
    */
-  toolOverrides?: Record<string, { group?: ToolGroupId; criticality?: ToolCriticality; riskTag?: RiskTag }>;
+  toolOverrides?: Record<
+    string,
+    { group?: ToolGroupId; criticality?: ToolCriticality; riskTag?: RiskTag }
+  >;
   /** Default criticality for tools in this module. Defaults to "normal". */
   criticality?: ToolCriticality;
   /**

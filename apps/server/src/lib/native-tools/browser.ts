@@ -93,6 +93,7 @@ const handleBrowserNavigate: NativeToolHandler = async (
   try {
     ({ expanded, secretsToSeal } = expandBrowserCredentials(rawUrl, sessionId, {
       urlEncode: true,
+      allowedCredentialTypes: context?.allowedCredentialTypes,
     }));
   } catch (err) {
     return {
@@ -173,36 +174,62 @@ const browserActToolDef = tool({
  * The original (placeholder) string is what the orchestrator records in
  * `ActionEvent.args`, so the persisted row never contains the raw secret.
  */
-function expandBrowserCredentials(
+// UUID-shaped ids are accepted on the byRef path; anything else is treated as
+// a credential type so a credential whose leading segment collides with a
+// known type cannot bypass the type picker (and skill scope) by id-match.
+const CREDENTIAL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function expandBrowserCredentials(
   text: string,
   sessionId: string,
-  opts: { urlEncode?: boolean } = {}
+  opts: { urlEncode?: boolean; allowedCredentialTypes?: string[] } = {}
 ): { expanded: string; secretsToSeal: string[]; expandedTypes: string[] } {
   if (!hasCredentialPlaceholder(text)) {
     return { expanded: text, secretsToSeal: [], expandedTypes: [] };
   }
   // Pull every `{{credentials.<type-or-id>[.field]}}` into maps. A ref whose
-  // leading segment equals a saved credential id bypasses the type picker;
-  // otherwise we keep the Phase E type picker path.
+  // leading segment looks like a credential id is resolved directly; otherwise
+  // we keep the Phase E type picker path. The id-shape gate stops a credential
+  // whose id happens to collide with a registered type literal from bypassing
+  // the picker (and skill-scope check).
   const refs = new Set<string>();
   for (const m of text.matchAll(PLACEHOLDER_RE)) {
     refs.add(parseCredRef(m[1]).type);
   }
+  const allowedTypes =
+    opts.allowedCredentialTypes && opts.allowedCredentialTypes.length > 0
+      ? new Set(opts.allowedCredentialTypes)
+      : null;
   const byType = new Map<string, Record<string, string>>();
   const byRef = new Map<string, Record<string, string>>();
   const seal: string[] = [];
   const expandedTypes: string[] = [];
   for (const ref of refs) {
-    const byId = getCredentialData(ref);
-    if (byId) {
-      byRef.set(ref, byId.data);
-      seal.push(...extractSecretValues(byId.data));
-      expandedTypes.push(byId.cred.type);
-      continue;
+    if (CREDENTIAL_ID_RE.test(ref)) {
+      const byId = getCredentialData(ref);
+      if (byId) {
+        if (allowedTypes && !allowedTypes.has(byId.cred.type)) {
+          throw new Error(
+            `[browser_tools] credential type "${byId.cred.type}" is not allowed by the active skill scope`
+          );
+        }
+        byRef.set(ref, byId.data);
+        seal.push(...extractSecretValues(byId.data));
+        expandedTypes.push(byId.cred.type);
+        continue;
+      }
     }
 
     const credType = ref;
-    const pick = pickCredential(credType, { sessionId });
+    if (allowedTypes && !allowedTypes.has(credType)) {
+      throw new Error(
+        `[browser_tools] credential type "${credType}" is not allowed by the active skill scope`
+      );
+    }
+    const pick = pickCredential(credType, {
+      sessionId,
+      allowedCredentialTypes: opts.allowedCredentialTypes,
+    });
     if (!pick) {
       throw new Error(
         `[browser_tools] no credential of type or id "${credType}" available — add one in Settings > Credentials before referencing it`
@@ -234,7 +261,9 @@ const handleBrowserAct: NativeToolHandler = async (
   let secretsToSeal: string[];
   let expandedTypes: string[];
   try {
-    ({ expanded, secretsToSeal, expandedTypes } = expandBrowserCredentials(instruction, sessionId));
+    ({ expanded, secretsToSeal, expandedTypes } = expandBrowserCredentials(instruction, sessionId, {
+      allowedCredentialTypes: context?.allowedCredentialTypes,
+    }));
   } catch (err) {
     return {
       content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],

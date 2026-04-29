@@ -164,13 +164,30 @@ describe("credential-picker — first-match-fallback", () => {
 describe("credential-picker — llm-picked", () => {
   beforeEach(reset);
 
-  it("uses llm-picked id ahead of an existing session pin", () => {
+  it("uses llm-picked id when no session pin is set", () => {
+    const work = createCredential("Work GitHub", "github", { apiKey: "ghp_a" });
+    const personal = createCredential("Personal GitHub", "github", { apiKey: "ghp_b" });
+    const pick = pickCredential("github", { sessionId: "sess-1", llmPickedId: personal.id });
+    expect(pick!.credentialId).toBe(personal.id);
+    expect(pick!.reason).toBe("llm-picked");
+    void work;
+  });
+
+  it("session pin outranks llm-picked id", () => {
     const work = createCredential("Work GitHub", "github", { apiKey: "ghp_a" });
     const personal = createCredential("Personal GitHub", "github", { apiKey: "ghp_b" });
     setSessionPin("sess-1", "github", work.id);
     const pick = pickCredential("github", { sessionId: "sess-1", llmPickedId: personal.id });
-    expect(pick!.credentialId).toBe(personal.id);
-    expect(pick!.reason).toBe("llm-picked");
+    expect(pick!.credentialId).toBe(work.id);
+    expect(pick!.reason).toBe("session-pin");
+  });
+
+  it("tool-pinned id outranks llm-picked id", () => {
+    const work = createCredential("Work GitHub", "github", { apiKey: "ghp_a" });
+    const personal = createCredential("Personal GitHub", "github", { apiKey: "ghp_b" });
+    const pick = pickCredential("github", { toolPinnedId: work.id, llmPickedId: personal.id });
+    expect(pick!.credentialId).toBe(work.id);
+    expect(pick!.reason).toBe("tool-pinned");
   });
 
   it("falls through when llm-picked id is for the wrong type", () => {
