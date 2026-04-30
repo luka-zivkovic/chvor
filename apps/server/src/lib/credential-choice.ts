@@ -132,7 +132,6 @@ export async function requestCredentialChoice(
     const handle = pending.get(requestId);
     if (handle) {
       pending.delete(requestId);
-      clearTimeout(handle.timer);
       handle.resolve("expired");
     }
     return { ok: false, reason: "no-active-ui" };

@@ -671,9 +671,12 @@ export async function callSynthesizedEndpoint(
   const credId = pick.credentialId;
   const cred = getCredentialData(credId);
   if (!cred) {
+    const stillExists = listCredentials().some((c) => c.id === credId);
     return {
       ok: false,
-      error: `credential ${credId} could not be decrypted`,
+      error: stillExists
+        ? `credential ${credId} could not be decrypted`
+        : `credential ${credId} no longer exists (it may have been deleted)`,
       durationMs: Date.now() - started,
     };
   }

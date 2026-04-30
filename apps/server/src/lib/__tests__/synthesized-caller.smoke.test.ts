@@ -33,7 +33,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  setWSInstance(null as never);
+  setWSInstance(null);
 });
 
 function reset() {
