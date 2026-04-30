@@ -10,6 +10,7 @@ import { AudioPlayback } from "./AudioPlayback";
 import { useFeatureStore } from "@/stores/feature-store";
 import { CommandApproval } from "./CommandApproval";
 import { SynthesizedConfirm } from "./SynthesizedConfirm";
+import { CredentialChoicePrompt } from "./CredentialChoicePrompt";
 import { CredentialForm } from "../credentials/CredentialForm";
 import { OAuthSynthesizedWizard } from "../credentials/OAuthSynthesizedWizard";
 import { ConversationSwitcher } from "./ConversationSwitcher";
@@ -70,8 +71,11 @@ function useStarterPrompts(): string[] {
     const candidates: string[] = ["What can you do?"];
     if (tz) candidates.push("Set up a daily morning briefing");
     if (hasChannel) {
-      const channelName = credentials.find((c) => CHANNEL_CRED_TYPES.has(c.type))?.type ?? "Telegram";
-      candidates.push(`Send me a reminder on ${channelName[0].toUpperCase() + channelName.slice(1)} in 1 hour`);
+      const channelName =
+        credentials.find((c) => CHANNEL_CRED_TYPES.has(c.type))?.type ?? "Telegram";
+      candidates.push(
+        `Send me a reminder on ${channelName[0].toUpperCase() + channelName.slice(1)} in 1 hour`
+      );
     }
     if (schedules.length === 0) candidates.push("Create a scheduled task for me");
     candidates.push(name ? "Remember that I prefer concise answers" : "Get to know me");
@@ -91,9 +95,7 @@ function EmptyState({ onSend }: { onSend: (text: string) => void }) {
       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 overflow-hidden">
         <img src="/chvor_logo.svg" alt="Chvor" className="h-6 w-6 object-contain" />
       </div>
-      <p className="text-xs text-muted-foreground">
-        Ask {aiName} anything
-      </p>
+      <p className="text-xs text-muted-foreground">Ask {aiName} anything</p>
       <div className="flex max-w-sm flex-wrap items-center justify-center gap-2">
         {prompts.map((prompt) => (
           <button
@@ -109,7 +111,13 @@ function EmptyState({ onSend }: { onSend: (text: string) => void }) {
   );
 }
 
-function StreamingSection({ lastIsUser, scrollToBottom }: { lastIsUser: boolean; scrollToBottom: () => void }) {
+function StreamingSection({
+  lastIsUser,
+  scrollToBottom,
+}: {
+  lastIsUser: boolean;
+  scrollToBottom: () => void;
+}) {
   const streamingContent = useAppStore((s) => s.streamingContent);
   const streamingTools = useAppStore((s) => s.streamingTools);
   const streamingStopped = useAppStore((s) => s.streamingStopped);
@@ -198,6 +206,7 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
   const pendingApprovals = useAppStore((s) => s.pendingApprovals);
   const pendingCredentialRequests = useAppStore((s) => s.pendingCredentialRequests);
   const respondToCredentialRequest = useAppStore((s) => s.respondToCredentialRequest);
+  const pendingCredentialChoices = useAppStore((s) => s.pendingCredentialChoices);
   const pendingSynthesizedConfirms = useAppStore((s) => s.pendingSynthesizedConfirms);
   const pendingOAuthWizards = useAppStore((s) => s.pendingOAuthWizards);
   const respondToOAuthWizard = useAppStore((s) => s.respondToOAuthWizard);
@@ -243,7 +252,11 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
     useAppStore.getState().clearStreaming();
   }, [stopGeneration]);
 
-  const handleSend = (text: string, inputModality?: "voice", media?: import("@chvor/shared").MediaArtifact[]) => {
+  const handleSend = (
+    text: string,
+    inputModality?: "voice",
+    media?: import("@chvor/shared").MediaArtifact[]
+  ) => {
     // Auto-stop current generation when sending a new message
     if (isStreaming) {
       stopGeneration();
@@ -290,7 +303,14 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
             title="New conversation (Ctrl+Shift+N)"
             className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-accent/50 transition-colors shrink-0"
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
               <path d="M8 3V13M3 8H13" />
             </svg>
           </button>
@@ -307,19 +327,37 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
             title="Talk Mode"
             className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground/50 hover:text-muted-foreground transition-colors"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
               <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
               <line x1="12" x2="12" y1="19" y2="22" />
             </svg>
           </button>
-          <span className={cn("h-[6px] w-[6px] rounded-full", connected ? "bg-status-completed" : "bg-destructive")} />
+          <span
+            className={cn(
+              "h-[6px] w-[6px] rounded-full",
+              connected ? "bg-status-completed" : "bg-destructive"
+            )}
+          />
         </div>
       </div>
 
       {/* Messages */}
       <div className="relative flex-1 overflow-hidden">
-        <div ref={scrollRef} onScroll={handleScroll} className="chat-scrollbar h-full overflow-y-auto px-4 py-3">
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="chat-scrollbar h-full overflow-y-auto px-4 py-3"
+        >
           {messagesLoading ? (
             <div className="flex items-center justify-center h-32">
               <div className="text-xs text-muted-foreground/50">Loading conversation...</div>
@@ -329,9 +367,7 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
           ) : (
             <div className="flex flex-col gap-4">
               {messages.map((msg) => {
-                const msgAudioUrl = msg.role === "assistant"
-                  ? audioUrls[msg.id]
-                  : undefined;
+                const msgAudioUrl = msg.role === "assistant" ? audioUrls[msg.id] : undefined;
                 return (
                   <div key={msg.id} className="min-w-0">
                     <MessageBubble message={msg} />
@@ -361,7 +397,17 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
             }}
             title="Scroll to bottom"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-muted-foreground"
+            >
               <path d="M6 9l6 6 6-6" />
             </svg>
           </button>
@@ -413,6 +459,15 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
         </div>
       )}
 
+      {/* Pending credential choice prompts */}
+      {pendingCredentialChoices.length > 0 && (
+        <div className="shrink-0 px-3 py-2 space-y-2">
+          {pendingCredentialChoices.map((request) => (
+            <CredentialChoicePrompt key={request.requestId} request={request} onSend={send} />
+          ))}
+        </div>
+      )}
+
       {/* Pending synthesized-tool confirmations */}
       {pendingSynthesizedConfirms.length > 0 && (
         <div className="shrink-0 px-3 py-2 space-y-2">
@@ -459,7 +514,12 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
 
       {/* Input */}
       <div className="px-3 py-3 shrink-0">
-        <ChatInput onSend={handleSend} onStop={handleStop} disabled={!connected} isStreaming={isStreaming} />
+        <ChatInput
+          onSend={handleSend}
+          onStop={handleStop}
+          disabled={!connected}
+          isStreaming={isStreaming}
+        />
       </div>
       <TalkMode onSend={handleSend} />
     </div>

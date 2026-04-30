@@ -56,15 +56,17 @@ function extractText(eventType: string, data: Record<string, unknown>): string {
     case "credential.resolved": {
       const pickedBy = String(data.pickedBy || data.reason || "");
       const label =
-        pickedBy === "llm-picked"
-          ? "LLM picked"
-          : pickedBy === "session-pin"
-            ? "Session pin"
-            : pickedBy === "tool-pinned"
-              ? "Tool pin"
-              : pickedBy === "context-match"
-                ? "Context match"
-                : "Auto";
+        pickedBy === "user-picked"
+          ? "User picked"
+          : pickedBy === "llm-picked"
+            ? "LLM picked"
+            : pickedBy === "session-pin"
+              ? "Session pin"
+              : pickedBy === "tool-pinned"
+                ? "Tool pin"
+                : pickedBy === "context-match"
+                  ? "Context match"
+                  : "Auto";
       return `${label}: ${data.credentialName || data.credentialType || "credential"}`;
     }
     case "memory.recalled":

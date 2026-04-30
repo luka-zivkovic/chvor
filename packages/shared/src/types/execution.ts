@@ -66,9 +66,15 @@ export type ExecutionEvent =
   | { type: "execution.started"; data: { executionId: string } }
   | { type: "brain.thinking"; data: { thought: string } }
   | { type: "multi_mind.started"; data: { roles: MultiMindRole[] } }
-  | { type: "multi_mind.agent.started"; data: { agentId: string; role: MultiMindRole; title: string } }
+  | {
+      type: "multi_mind.agent.started";
+      data: { agentId: string; role: MultiMindRole; title: string };
+    }
   | { type: "multi_mind.agent.completed"; data: MultiMindInsight }
-  | { type: "multi_mind.agent.failed"; data: { agentId: string; role: MultiMindRole; title: string; error: string } }
+  | {
+      type: "multi_mind.agent.failed";
+      data: { agentId: string; role: MultiMindRole; title: string; error: string };
+    }
   | { type: "multi_mind.completed"; data: { insights: MultiMindInsight[]; durationMs: number } }
   | {
       type: "brain.decision";
@@ -220,6 +226,7 @@ export interface CredentialResolvedEvent {
   credentialName: string;
   /** Why the picker landed here. */
   reason:
+    | "user-picked"
     | "llm-picked"
     | "tool-pinned"
     | "session-pin"
@@ -228,6 +235,7 @@ export interface CredentialResolvedEvent {
     | "first-match-fallback";
   /** Which picker tier won; duplicated from reason for UI readability/backcompat. */
   pickedBy:
+    | "user-picked"
     | "llm-picked"
     | "tool-pinned"
     | "session-pin"

@@ -70,8 +70,15 @@ interface AppState {
 
   _send: (event: GatewayClientEvent) => void;
   setSend: (fn: (event: GatewayClientEvent) => void) => void;
-  _sendChat: (text: string, inputModality?: "voice", media?: MediaArtifact[], messageId?: string) => void;
-  setSendChat: (fn: (text: string, inputModality?: "voice", media?: MediaArtifact[], messageId?: string) => void) => void;
+  _sendChat: (
+    text: string,
+    inputModality?: "voice",
+    media?: MediaArtifact[],
+    messageId?: string
+  ) => void;
+  setSendChat: (
+    fn: (text: string, inputModality?: "voice", media?: MediaArtifact[], messageId?: string) => void
+  ) => void;
   _stopGeneration: () => void;
   setStopGeneration: (fn: () => void) => void;
   loadConversations: () => Promise<void>;
@@ -121,6 +128,9 @@ interface AppState {
   pendingCredentialRequests: import("@chvor/shared").CredentialRequestData[];
   respondToCredentialRequest: (requestId: string) => void;
 
+  pendingCredentialChoices: import("@chvor/shared").CredentialChoiceRequestData[];
+  respondToCredentialChoice: (requestId: string) => void;
+
   pendingSynthesizedConfirms: import("@chvor/shared").SynthesizedConfirmData[];
   respondToSynthesizedConfirm: (requestId: string) => void;
 
@@ -138,6 +148,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!connected) {
       updates.pendingApprovals = [];
       updates.pendingCredentialRequests = [];
+      updates.pendingCredentialChoices = [];
       updates.pendingSynthesizedConfirms = [];
       updates.pendingOAuthWizards = [];
     }
@@ -171,6 +182,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pendingModelInfo: null,
       pendingApprovals: [],
       pendingCredentialRequests: [],
+      pendingCredentialChoices: [],
       pendingSynthesizedConfirms: [],
       pendingOAuthWizards: [],
       currentEmotion: null,
@@ -230,6 +242,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       streamingStopped: false,
       pendingModelInfo: null,
       pendingApprovals: [],
+      pendingCredentialRequests: [],
+      pendingCredentialChoices: [],
+      pendingSynthesizedConfirms: [],
+      pendingOAuthWizards: [],
       messagesLoading: true,
     });
     // Re-init WS session with new ID
@@ -274,9 +290,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await api.sessions.patch(compositeId, { title });
       set({
-        conversations: get().conversations.map((c) =>
-          c.id === compositeId ? { ...c, title } : c
-        ),
+        conversations: get().conversations.map((c) => (c.id === compositeId ? { ...c, title } : c)),
       });
     } catch (err) {
       console.error("[app] failed to update title:", err);
@@ -284,10 +298,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   messages: [],
-  addMessage: (message) => set((s) => {
-    if (s.messages.some((m) => m.id === message.id)) return s;
-    return { messages: [...s.messages, message] };
-  }),
+  addMessage: (message) =>
+    set((s) => {
+      if (s.messages.some((m) => m.id === message.id)) return s;
+      return { messages: [...s.messages, message] };
+    }),
   clearMessages: () => set({ messages: [] }),
 
   streamingContent: null,
@@ -296,7 +311,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   pendingModelInfo: null,
   clearStreaming: () => {
     chunkBuffer = [];
-    set({ streamingContent: null, streamingTools: [], streamingStopped: true, pendingModelInfo: null });
+    set({
+      streamingContent: null,
+      streamingTools: [],
+      streamingStopped: true,
+      pendingModelInfo: null,
+    });
   },
 
   currentEmotion: null,
@@ -313,7 +333,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   addExecutionEvent: (event) =>
     set((s) => {
       const events = [...s.executionEvents, event];
-      return { executionEvents: events.length > MAX_EXECUTION_EVENTS ? events.slice(-MAX_EXECUTION_EVENTS) : events };
+      return {
+        executionEvents:
+          events.length > MAX_EXECUTION_EVENTS ? events.slice(-MAX_EXECUTION_EVENTS) : events,
+      };
     }),
   clearExecutionEvents: () => set({ executionEvents: [] }),
   lastToolBag: null,
@@ -330,14 +353,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   pendingCredentialRequests: [],
   respondToCredentialRequest: (requestId) => {
     set((s) => ({
-      pendingCredentialRequests: s.pendingCredentialRequests.filter((r) => r.requestId !== requestId),
+      pendingCredentialRequests: s.pendingCredentialRequests.filter(
+        (r) => r.requestId !== requestId
+      ),
+    }));
+  },
+
+  pendingCredentialChoices: [],
+  respondToCredentialChoice: (requestId) => {
+    set((s) => ({
+      pendingCredentialChoices: s.pendingCredentialChoices.filter((r) => r.requestId !== requestId),
     }));
   },
 
   pendingSynthesizedConfirms: [],
   respondToSynthesizedConfirm: (requestId) => {
     set((s) => ({
-      pendingSynthesizedConfirms: s.pendingSynthesizedConfirms.filter((r) => r.requestId !== requestId),
+      pendingSynthesizedConfirms: s.pendingSynthesizedConfirms.filter(
+        (r) => r.requestId !== requestId
+      ),
     }));
   },
 
@@ -370,7 +404,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         const toolTraceSnapshot = get().toolTrace;
         set((s) => ({
           ...(trace ? { messageTraces: { ...s.messageTraces, [messageId]: trace } } : {}),
-          ...(toolTraceSnapshot.length ? { messageToolTraces: { ...s.messageToolTraces, [messageId]: toolTraceSnapshot } } : {}),
+          ...(toolTraceSnapshot.length
+            ? { messageToolTraces: { ...s.messageToolTraces, [messageId]: toolTraceSnapshot } }
+            : {}),
         }));
         break;
       }
@@ -394,7 +430,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         // User stopped generation — discard partial response (skip if already handled by clearStreaming)
         if (!get().streamingStopped) {
           chunkBuffer = [];
-          set({ streamingContent: null, streamingTools: [], streamingStopped: true, pendingModelInfo: null });
+          set({
+            streamingContent: null,
+            streamingTools: [],
+            streamingStopped: true,
+            pendingModelInfo: null,
+          });
         }
         break;
       case "chat.welcome":
@@ -415,18 +456,30 @@ export const useAppStore = create<AppState>((set, get) => ({
           chunkBuffer = [];
           useCanvasStore.getState().clearMindAgents();
           set({
-            streamingContent: null, streamingTools: [], streamingStopped: false, pendingModelInfo: null,
-            streamingThought: null, streamingDecisionReason: null, memoryTrace: null, tokenBudget: null, toolTrace: [],
+            streamingContent: null,
+            streamingTools: [],
+            streamingStopped: false,
+            pendingModelInfo: null,
+            streamingThought: null,
+            streamingDecisionReason: null,
+            memoryTrace: null,
+            tokenBudget: null,
+            toolTrace: [],
           });
         }
         // Unified skill/tool execution tracking (shared logic, different ID extraction)
         if (execEvent.type === "skill.invoked" || execEvent.type === "tool.invoked") {
-          const name = execEvent.type === "skill.invoked" ? execEvent.data.skillId : execEvent.data.toolId;
+          const name =
+            execEvent.type === "skill.invoked" ? execEvent.data.skillId : execEvent.data.toolId;
           const reason = get().streamingDecisionReason ?? undefined;
           set((s) => {
-            const alreadyRunning = s.streamingTools.some((t) => t.name === name && t.status === "running");
+            const alreadyRunning = s.streamingTools.some(
+              (t) => t.name === name && t.status === "running"
+            );
             return {
-              streamingTools: alreadyRunning ? s.streamingTools : [...s.streamingTools, { name, status: "running" }],
+              streamingTools: alreadyRunning
+                ? s.streamingTools
+                : [...s.streamingTools, { name, status: "running" }],
               toolTrace: [...s.toolTrace, { name, reason, status: "running" }],
             };
           });
@@ -434,7 +487,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           const prefix = execEvent.type === "skill.completed" ? "skill-" : "tool-";
           const id = execEvent.data.nodeId.replace(prefix, "");
           const media = execEvent.data.media;
-          const outputStr = typeof execEvent.data.output === "string" ? execEvent.data.output : JSON.stringify(execEvent.data.output);
+          const outputStr =
+            typeof execEvent.data.output === "string"
+              ? execEvent.data.output
+              : JSON.stringify(execEvent.data.output);
           set((s) => ({
             streamingTools: s.streamingTools.map((t) =>
               t.name === id && t.status === "running"
@@ -443,7 +499,13 @@ export const useAppStore = create<AppState>((set, get) => ({
             ),
             toolTrace: s.toolTrace.map((t) =>
               t.name === id && t.status === "running"
-                ? { ...t, status: "completed" as const, output: outputStr?.slice(0, 500), truncated: (outputStr?.length ?? 0) > 500, ...(media?.length ? { media } : {}) }
+                ? {
+                    ...t,
+                    status: "completed" as const,
+                    output: outputStr?.slice(0, 500),
+                    truncated: (outputStr?.length ?? 0) > 500,
+                    ...(media?.length ? { media } : {}),
+                  }
                 : t
             ),
           }));
@@ -483,9 +545,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             const next = [...s.securityVerdicts, execEvent.data];
             return {
               securityVerdicts:
-                next.length > MAX_SECURITY_VERDICTS
-                  ? next.slice(-MAX_SECURITY_VERDICTS)
-                  : next,
+                next.length > MAX_SECURITY_VERDICTS ? next.slice(-MAX_SECURITY_VERDICTS) : next,
             };
           });
         } else if (execEvent.type === "multi_mind.agent.started") {
@@ -496,12 +556,14 @@ export const useAppStore = create<AppState>((set, get) => ({
             status: "running",
           });
         } else if (execEvent.type === "multi_mind.agent.completed") {
-          useCanvasStore.getState().completeMindAgent(
-            execEvent.data.agentId,
-            execEvent.data.title,
-            execEvent.data.text,
-            execEvent.data.durationMs,
-          );
+          useCanvasStore
+            .getState()
+            .completeMindAgent(
+              execEvent.data.agentId,
+              execEvent.data.title,
+              execEvent.data.text,
+              execEvent.data.durationMs
+            );
         } else if (execEvent.type === "multi_mind.agent.failed") {
           useCanvasStore.getState().failMindAgent(execEvent.data.agentId, execEvent.data.error);
         }
@@ -533,9 +595,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       case "a2ui.toast":
         // Auto-open the preview modal so the user sees the dashboard immediately
         useUIStore.getState().openPreviewModal(event.data.surfaceId);
-        import("sonner").then(({ toast }) => {
-          toast.success(event.data.title ?? "Surface ready");
-        }).catch(() => { /* sonner not available */ });
+        import("sonner")
+          .then(({ toast }) => {
+            toast.success(event.data.title ?? "Surface ready");
+          })
+          .catch(() => {
+            /* sonner not available */
+          });
         break;
       case "activity.new":
         useRuntimeStore.getState().handleActivityEvent(event.data);
@@ -553,7 +619,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         useSessionStore.getState().handleAgentDisconnected(event.data.id);
         break;
       case "pc.frame":
-        useSessionStore.getState().handleFrame(event.data.agentId, event.data.screenshot, event.data.mimeType);
+        useSessionStore
+          .getState()
+          .handleFrame(event.data.agentId, event.data.screenshot, event.data.mimeType);
         break;
       case "session.ack":
         console.log("[ws] session acknowledged:", event.data.sessionId);
@@ -583,6 +651,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           pendingCredentialRequests: [...s.pendingCredentialRequests, event.data],
         }));
         break;
+      case "credential.choice.request":
+        set((s) => ({
+          pendingCredentialChoices: [...s.pendingCredentialChoices, event.data],
+        }));
+        break;
       case "synthesized.confirm":
         set((s) => ({
           pendingSynthesizedConfirms: [...s.pendingSynthesizedConfirms, event.data],
@@ -601,9 +674,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Suppress the noisy reconnect-loop UI — the next clean restart will
         // re-open the socket on its own.
         set({ connected: false });
-        import("sonner").then(({ toast }) => {
-          toast.info("Server is restarting…");
-        }).catch(() => { /* sonner not available */ });
+        import("sonner")
+          .then(({ toast }) => {
+            toast.info("Server is restarting…");
+          })
+          .catch(() => {
+            /* sonner not available */
+          });
         break;
       }
       case "chat.audio": {
