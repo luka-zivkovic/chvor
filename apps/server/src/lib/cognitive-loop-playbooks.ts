@@ -44,8 +44,16 @@ const PLAYBOOKS: Record<CognitiveLoopPlaybookId, CognitiveLoopPlaybook> = {
   },
 };
 
+const LOOP_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function safeText(value: unknown, max = 1200): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "";
+}
+
+function safeLoopId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return LOOP_ID_RE.test(trimmed) ? trimmed : null;
 }
 
 function metadataRecord(value: unknown): Record<string, unknown> {
@@ -184,7 +192,7 @@ export function queueLoopPlaybookDaemonStep(opts: {
 }
 
 export function handleCognitiveLoopDashboardAction(eventName: string, payload: Record<string, unknown>): DaemonTask | null {
-  const loopId = safeText(payload.loopId, 160);
+  const loopId = safeLoopId(payload.loopId);
   if (!loopId) return null;
 
   if (eventName === "cognitive_loop.retry") {
