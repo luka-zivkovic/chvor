@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { CredentialChoiceRequestData, GatewayClientEvent } from "@chvor/shared";
 import { useAppStore } from "../../stores/app-store";
+import { notifySessionPinsChanged } from "../../lib/session-pins-events";
 
 interface Props {
   request: CredentialChoiceRequestData;
@@ -31,6 +32,9 @@ export function CredentialChoicePrompt({ request, onSend }: Props) {
         },
       });
       respondToCredentialChoice(request.requestId);
+      if (action === "pin-session") {
+        window.setTimeout(() => notifySessionPinsChanged(), 250);
+      }
     },
     [onSend, request.requestId, respondToCredentialChoice, selectedId]
   );

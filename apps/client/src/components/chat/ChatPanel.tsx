@@ -12,6 +12,7 @@ import { CommandApproval } from "./CommandApproval";
 import { SynthesizedConfirm } from "./SynthesizedConfirm";
 import { CredentialChoicePrompt } from "./CredentialChoicePrompt";
 import { CredentialForm } from "../credentials/CredentialForm";
+import { SessionCredentialPins } from "../credentials/SessionCredentialPins";
 import { OAuthSynthesizedWizard } from "../credentials/OAuthSynthesizedWizard";
 import { ConversationSwitcher } from "./ConversationSwitcher";
 import { useConfigStore } from "@/stores/config-store";
@@ -458,6 +459,10 @@ export function ChatPanel({ collapsed, layoutMode }: Props) {
           ))}
         </div>
       )}
+
+      <div className="shrink-0 px-3">
+        <SessionCredentialPins compact showEmpty={false} />
+      </div>
 
       {/* Pending credential choice prompts */}
       {pendingCredentialChoices.length > 0 && (

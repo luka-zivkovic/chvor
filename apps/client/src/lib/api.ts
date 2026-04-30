@@ -97,6 +97,14 @@ export interface ChannelTargetDTO {
   lastActive: string;
 }
 
+export interface SessionCredentialPinInfo {
+  sessionId: string;
+  credentialType: string;
+  credentialId: string;
+  credentialName: string | null;
+  pinnedAt: string;
+}
+
 const BASE = "/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -586,6 +594,24 @@ export const api = {
 
   sessions: {
     targets: () => request<ChannelTargetDTO[]>("/sessions/targets"),
+    credentialPins: (sessionId: string) =>
+      request<SessionCredentialPinInfo[]>(
+        `/sessions/${encodeURIComponent(sessionId)}/credential-pins`
+      ),
+    setCredentialPin: (sessionId: string, body: { credentialType: string; credentialId: string }) =>
+      request<SessionCredentialPinInfo>(`/sessions/${encodeURIComponent(sessionId)}/credential-pins`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    deleteCredentialPin: (sessionId: string, credentialType: string) =>
+      request<{ removed: boolean }>(
+        `/sessions/${encodeURIComponent(sessionId)}/credential-pins/${encodeURIComponent(credentialType)}`,
+        { method: "DELETE" },
+      ),
+    clearCredentialPins: (sessionId: string) =>
+      request<{ removed: number }>(`/sessions/${encodeURIComponent(sessionId)}/credential-pins`, {
+        method: "DELETE",
+      }),
     list: (params?: { archived?: boolean; search?: string }) => {
       const qs = new URLSearchParams();
       if (params?.archived !== undefined) qs.set("archived", String(params.archived));

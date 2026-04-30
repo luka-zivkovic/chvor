@@ -7,6 +7,7 @@ import { useSessionStore } from "../../stores/session-store";
 import { CredentialList } from "../credentials/CredentialList";
 import { AddCredentialDialog } from "../credentials/AddCredentialDialog";
 import { CredentialForm } from "../credentials/CredentialForm";
+import { SessionCredentialPins } from "../credentials/SessionCredentialPins";
 import { VoiceSettingsContent } from "./VoiceSettingsContent";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -151,6 +152,7 @@ export function CredentialsContent() {
         <p className="text-xs text-muted-foreground">Loading...</p>
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
+      <SessionCredentialPins />
       {!loading && <CredentialList onEdit={setEditingCredential} />}
 
       {showAdd && <AddCredentialDialog onClose={() => setShowAdd(false)} />}
