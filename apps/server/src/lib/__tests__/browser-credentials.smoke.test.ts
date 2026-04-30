@@ -107,6 +107,32 @@ describe("expandBrowserCredentials — ambiguous credentials", () => {
     expect(out.picks[0]).toMatchObject({ reason: "context-match", pickedBy: "context-match" });
   });
 
+  it("rejects with no-active-ui when the origin client cannot receive the choice prompt", async () => {
+    createCredential("Work GitHub", "github", { apiKey: "ghp_work" }, "work");
+    createCredential("Personal GitHub", "github", { apiKey: "ghp_personal" }, "personal");
+
+    setWSInstance({
+      sendTo: () => false,
+      getClientsBySessionId: () => [],
+      broadcastToSession: () => undefined,
+    } as never);
+    try {
+      await expect(
+        expandBrowserCredentialsInteractive("{{credentials.github}}", "sess-no-ui", {
+          allowedCredentialTypes: ["github"],
+          originClientId: "ws-disconnected",
+          toolName: "native__browser_act",
+        })
+      ).rejects.toThrow(/no active UI connection/);
+    } finally {
+      setWSInstance({
+        sendTo: () => true,
+        getClientsBySessionId: () => ["ws-1"],
+        broadcastToSession: () => undefined,
+      } as never);
+    }
+  });
+
   it("asks the user for browser placeholder ambiguity in interactive expansion", async () => {
     createCredential("Work GitHub", "github", { apiKey: "ghp_work" }, "work");
     const personal = createCredential(

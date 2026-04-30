@@ -109,6 +109,10 @@ const handleBrowserNavigate: NativeToolHandler = async (
       content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
     };
   }
+  // Surface the credential pick before any further check so a downstream
+  // failure (SSRF block, browser crash) cannot erase the audit trail of which
+  // credential was about to be substituted.
+  emitCredentialPicks(context, picks);
 
   // SSRF protection: validate URL after expansion (same rules as http_fetch).
   // Keep the seal open while formatting any validation error in case a future
@@ -131,7 +135,6 @@ const handleBrowserNavigate: NativeToolHandler = async (
       ],
     };
   }
-  emitCredentialPicks(context, picks);
 
   return withSecretSeal(secretsToSeal, async () => {
     try {
@@ -368,6 +371,11 @@ function syncTypeSelection(
   };
 }
 
+/**
+ * Sync expansion variant kept as the fail-closed invariant exercised by the
+ * smoke suite. Production browser handlers call {@link expandBrowserCredentialsInteractive}
+ * so an ambiguous type placeholder can prompt the user instead of erroring.
+ */
 export function expandBrowserCredentials(
   text: string,
   sessionId: string,
