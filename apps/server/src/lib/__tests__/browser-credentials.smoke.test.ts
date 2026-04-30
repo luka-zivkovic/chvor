@@ -1,11 +1,23 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const browserMocks = vi.hoisted(() => ({
+  act: vi.fn(),
+  goto: vi.fn(),
+  title: vi.fn(),
+  url: vi.fn(),
+}));
+
+vi.mock("../browser-manager.ts", () => ({
+  getBrowser: vi.fn(async () => ({ page: browserMocks })),
+}));
+
 const tmp = mkdtempSync(join(tmpdir(), "chvor-browser-cred-"));
 process.env.CHVOR_DATA_DIR = tmp;
 
+let browserModule: typeof import("../native-tools/browser.ts").browserModule;
 let expandBrowserCredentials: typeof import("../native-tools/browser.ts").expandBrowserCredentials;
 let expandBrowserCredentialsInteractive: typeof import("../native-tools/browser.ts").expandBrowserCredentialsInteractive;
 let createCredential: typeof import("../../db/credential-store.ts").createCredential;
@@ -16,7 +28,7 @@ let resolveCredentialChoice: typeof import("../credential-choice.ts").resolveCre
 let setWSInstance: typeof import("../../gateway/ws-instance.ts").setWSInstance;
 
 beforeAll(async () => {
-  ({ expandBrowserCredentials, expandBrowserCredentialsInteractive } =
+  ({ browserModule, expandBrowserCredentials, expandBrowserCredentialsInteractive } =
     await import("../native-tools/browser.ts"));
   ({ createCredential, deleteCredential, listCredentials } =
     await import("../../db/credential-store.ts"));
@@ -35,6 +47,10 @@ afterAll(() => {
 });
 
 function reset() {
+  browserMocks.act.mockReset();
+  browserMocks.goto.mockReset();
+  browserMocks.title.mockReset();
+  browserMocks.url.mockReset();
   for (const c of listCredentials()) deleteCredential(c.id);
 }
 
@@ -77,6 +93,7 @@ describe("expandBrowserCredentials — skill scope", () => {
     expect(out.expandedTypes).toEqual(["github"]);
     expect(out.secretsToSeal).toContain("ghp_secret_value");
     expect(out.picks[0]).toMatchObject({ reason: "single-match", pickedBy: "single-match" });
+    expect(JSON.stringify(out.picks)).not.toContain("ghp_secret_value");
   });
 });
 
@@ -105,6 +122,7 @@ describe("expandBrowserCredentials — ambiguous credentials", () => {
 
     expect(out.expanded).toBe("ghp_work");
     expect(out.picks[0]).toMatchObject({ reason: "context-match", pickedBy: "context-match" });
+    expect(JSON.stringify(out.picks)).not.toContain("ghp_work");
   });
 
   it("rejects with no-active-ui when the origin client cannot receive the choice prompt", async () => {
@@ -167,5 +185,40 @@ describe("expandBrowserCredentials — ambiguous credentials", () => {
       reason: "user-picked",
       pickedBy: "user-picked",
     });
+    expect(JSON.stringify(out.picks)).not.toContain("ghp_personal");
+  });
+});
+
+describe("browser credential boundary leak regressions", () => {
+  beforeEach(reset);
+
+  it("redacts expanded credential values from browser action results", async () => {
+    createCredential("GitHub", "github", { apiKey: "ghp_secret_value" });
+    browserMocks.act.mockResolvedValue({ echoedInstruction: "type ghp_secret_value" });
+
+    const result = await browserModule.handlers.native__browser_act(
+      { instruction: "type {{credentials.github}}" },
+      { sessionId: "sess-browser-redact", allowedCredentialTypes: ["github"] }
+    );
+    const out = JSON.stringify(result);
+
+    expect(browserMocks.act).toHaveBeenCalledWith("type ghp_secret_value");
+    expect(out).not.toContain("ghp_secret_value");
+    expect(out).toContain("«credential»");
+  });
+
+  it("redacts expanded credential values from browser action errors", async () => {
+    createCredential("GitHub", "github", { apiKey: "ghp_secret_value" });
+    browserMocks.act.mockRejectedValue(new Error("Stagehand saw ghp_secret_value"));
+
+    const result = await browserModule.handlers.native__browser_act(
+      { instruction: "type {{credentials.github}}" },
+      { sessionId: "sess-browser-redact-error", allowedCredentialTypes: ["github"] }
+    );
+    const out = JSON.stringify(result);
+
+    expect(out).toContain("Browser action failed");
+    expect(out).not.toContain("ghp_secret_value");
+    expect(out).toContain("«credential»");
   });
 });
