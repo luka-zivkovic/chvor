@@ -9,6 +9,7 @@ import {
 import { createDaemonTask } from "../db/daemon-store.ts";
 import { getWSInstance } from "../gateway/ws-instance.ts";
 import { appendCognitiveLoopEvent, startA2UICognitiveLoop } from "../lib/cognitive-loop.ts";
+import { handleCognitiveLoopDashboardAction, startLoopPlaybook } from "../lib/cognitive-loop-playbooks.ts";
 
 const a2ui = new Hono();
 
@@ -85,6 +86,12 @@ a2ui.post("/actions", async (c) => {
     }
 
     const payload = payloadRecord(body.payload);
+    if (eventName.startsWith("cognitive_loop.")) {
+      const task = handleCognitiveLoopDashboardAction(eventName, payload);
+      if (!task) return c.json({ error: "unknown cognitive loop action or loop not found" }, 404);
+      return c.json({ data: task }, 201);
+    }
+
     const explicitTitle = payloadString(payload, ["title", "label", "name"]);
     const explicitPrompt = payloadString(payload, ["prompt", "instruction", "text", "message"]);
     const priorityRaw = typeof payload.priority === "number" ? payload.priority : 1;
@@ -92,6 +99,11 @@ a2ui.post("/actions", async (c) => {
     const payloadPreview = JSON.stringify(payload).slice(0, 2000);
 
     const loop = startA2UICognitiveLoop(eventName, surfaceId, sourceId);
+    startLoopPlaybook(loop.id, "a2ui_action", {
+      eventName,
+      sourceSurfaceId: surfaceId,
+      sourceId,
+    });
     const task = createDaemonTask({
       title: (explicitTitle ?? `A2UI action: ${eventName}`).slice(0, 200),
       prompt: (explicitPrompt ?? (

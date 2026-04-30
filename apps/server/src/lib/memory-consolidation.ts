@@ -29,6 +29,7 @@ import type { Memory } from "@chvor/shared";
 
 import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
 import { appendCognitiveLoopEvent } from "./cognitive-loop.ts";
+import { markLoopPlaybookStep } from "./cognitive-loop-playbooks.ts";
 
 let lastConsolidationAt: string | null = getConfig("memory.lastConsolidationAt") ?? null;
 let consolidationInProgress: Promise<unknown> | null = null; // concurrency lock
@@ -457,6 +458,9 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
     insights,
     narratives,
     pruned,
+  });
+  markLoopPlaybookStep(options.loopId, "Playbook step completed: memory consolidation", {
+    metadata: { merged, insights, narratives, pruned },
   });
 
   return { merged, insights, narratives, pruned };

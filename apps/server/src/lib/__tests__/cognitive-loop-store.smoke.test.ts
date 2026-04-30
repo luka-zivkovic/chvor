@@ -15,6 +15,8 @@ let getCognitiveLoopRun: typeof import("../../db/cognitive-loop-store.ts").getCo
 let createDaemonTask: typeof import("../../db/daemon-store.ts").createDaemonTask;
 let completeCognitiveLoop: typeof import("../cognitive-loop.ts").completeCognitiveLoop;
 let recoverStaleCognitiveLoops: typeof import("../cognitive-loop.ts").recoverStaleCognitiveLoops;
+let startLoopPlaybook: typeof import("../cognitive-loop-playbooks.ts").startLoopPlaybook;
+let queueLoopPlaybookDaemonStep: typeof import("../cognitive-loop-playbooks.ts").queueLoopPlaybookDaemonStep;
 let getDb: typeof import("../../db/database.ts").getDb;
 
 beforeAll(async () => {
@@ -28,6 +30,7 @@ beforeAll(async () => {
   } = await import("../../db/cognitive-loop-store.ts"));
   ({ createDaemonTask } = await import("../../db/daemon-store.ts"));
   ({ completeCognitiveLoop, recoverStaleCognitiveLoops } = await import("../cognitive-loop.ts"));
+  ({ startLoopPlaybook, queueLoopPlaybookDaemonStep } = await import("../cognitive-loop-playbooks.ts"));
   ({ getDb } = await import("../../db/database.ts"));
 });
 
@@ -110,5 +113,30 @@ describe("cognitive-loop store", () => {
 
     expect(getCognitiveLoopRun(stale.id)?.status).toBe("failed");
     expect(getCognitiveLoopRun(fresh.id)?.status).toBe("running");
+  });
+
+  it("records playbook starts and queues dashboard-requested daemon steps", () => {
+    const run = createCognitiveLoopRun({
+      title: "Playbook loop",
+      severity: "warning",
+      trigger: "manual",
+      summary: "Needs a follow-up step",
+    });
+
+    startLoopPlaybook(run.id, "health_anomaly", { test: true });
+    const task = queueLoopPlaybookDaemonStep({
+      loopId: run.id,
+      action: "retry",
+      title: "Retry test step",
+      priority: 2,
+    });
+
+    expect(task?.loopId).toBe(run.id);
+    expect(task?.title).toBe("Retry test step");
+
+    const events = listCognitiveLoopEvents(run.id);
+    expect(events.some((e) => e.stage === "playbook.started")).toBe(true);
+    expect(events.some((e) => e.stage === "playbook.action.requested")).toBe(true);
+    expect(events.some((e) => e.stage === "daemon.task.queued")).toBe(true);
   });
 });

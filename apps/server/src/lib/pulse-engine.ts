@@ -11,6 +11,7 @@ import { listCredentials } from "../db/credential-store.ts";
 import { listWebhookSubscriptions, listWebhookEvents } from "../db/webhook-store.ts";
 import { insertActivity } from "../db/activity-store.ts";
 import { completeCognitiveLoop, failCognitiveLoop, startPulseCognitiveLoop } from "./cognitive-loop.ts";
+import { startLoopPlaybook } from "./cognitive-loop-playbooks.ts";
 import { runConsolidation } from "./memory-consolidation.ts";
 
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -196,6 +197,10 @@ async function runPulse(): Promise<void> {
     wsRef?.broadcast({ type: "activity.new", data: entry });
 
     const loop = startPulseCognitiveLoop(resultText, healthContext);
+    startLoopPlaybook(loop.id, "health_anomaly", {
+      alert: content,
+      title,
+    });
 
     // Notify daemon for auto-remediation immediately, then let memory sleep
     // run as the loop's reflective pass. If no daemon task is queued, the loop

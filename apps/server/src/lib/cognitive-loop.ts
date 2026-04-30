@@ -34,6 +34,23 @@ function eventTableRows(events: CognitiveLoopEvent[]): Array<{ time: string; sta
   }));
 }
 
+function loopAction(eventName: string, loopId: string): string {
+  return `emit:${eventName}?${encodeURIComponent(JSON.stringify({ loopId }))}`;
+}
+
+function metadataValue(metadata: Record<string, unknown> | null, key: string): string | null {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function playbookLine(events: CognitiveLoopEvent[]): string {
+  const playbook = events.find((event) => event.stage === "playbook.started");
+  if (!playbook) return "Playbook: implicit loop";
+  const name = metadataValue(playbook.metadata, "name") ?? metadataValue(playbook.metadata, "playbookId") ?? "Autonomous playbook";
+  const stepCount = Array.isArray(playbook.metadata?.steps) ? playbook.metadata.steps.length : null;
+  return `${name}${stepCount ? ` • ${stepCount} steps` : ""}`;
+}
+
 function severityFromText(resultText: string): CognitiveLoopSeverity {
   if (resultText.startsWith("[CRITICAL]")) return "critical";
   if (resultText.startsWith("[WARNING]")) return "warning";
@@ -44,7 +61,7 @@ function stripSeverity(resultText: string): string {
   return resultText.replace(/^\[(CRITICAL|WARNING)]\s*/i, "").trim();
 }
 
-function surfaceComponents(): A2UIComponentEntry[] {
+function surfaceComponents(loopId: string): A2UIComponentEntry[] {
   return [
     {
       id: "title",
@@ -57,6 +74,10 @@ function surfaceComponents(): A2UIComponentEntry[] {
     {
       id: "status",
       component: { Text: { text: { binding: "statusLine" }, usageHint: "caption" } },
+    },
+    {
+      id: "playbook",
+      component: { Text: { text: { binding: "playbookLine" }, usageHint: "caption" } },
     },
     {
       id: "events",
@@ -73,8 +94,42 @@ function surfaceComponents(): A2UIComponentEntry[] {
       },
     },
     {
+      id: "retry",
+      component: {
+        Button: {
+          label: { literalString: "Retry step" },
+          action: loopAction("cognitive_loop.retry", loopId),
+          variant: "secondary",
+        },
+      },
+    },
+    {
+      id: "escalate",
+      component: {
+        Button: {
+          label: { literalString: "Escalate" },
+          action: loopAction("cognitive_loop.escalate", loopId),
+          variant: "primary",
+        },
+      },
+    },
+    {
+      id: "open-activity",
+      component: {
+        Button: {
+          label: { literalString: "Open activity" },
+          action: "navigate:activity",
+          variant: "ghost",
+        },
+      },
+    },
+    {
+      id: "actions",
+      component: { Row: { children: { explicitList: ["retry", "escalate", "open-activity"] }, gap: 8, align: "start" } },
+    },
+    {
       id: "root",
-      component: { Column: { children: { explicitList: ["title", "summary", "status", "events"] }, gap: 10, align: "start" } },
+      component: { Column: { children: { explicitList: ["title", "summary", "status", "playbook", "events", "actions"] }, gap: 10, align: "start" } },
     },
   ];
 }
@@ -95,10 +150,11 @@ function refreshLoopDashboard(loopId: string, opts: { toast?: boolean } = {}): v
   if (!run) return;
   const surfaceId = run.surfaceId ?? `cognitive-loop-${run.id}`;
   const events = listCognitiveLoopEvents(run.id);
-  const components = surfaceComponents();
+  const components = surfaceComponents(run.id);
   const bindings = {
     summary: run.summary,
     statusLine: `${run.severity.toUpperCase()} • ${run.status} • ${run.currentStage?.replace(/\./g, " › ") ?? "starting"}`,
+    playbookLine: playbookLine(events),
     events: eventTableRows(events),
   };
 
@@ -195,6 +251,24 @@ export function appendCognitiveLoopEvent(
 
 export function completeCognitiveLoop(loopId: string | null | undefined, title = "Loop completed", body?: string | null): void {
   appendCognitiveLoopEvent(loopId, "loop.completed", title, body ?? null);
+}
+
+export function pauseCognitiveLoop(loopId: string | null | undefined, title = "Loop paused", body?: string | null): void {
+  if (!loopId) return;
+  const event = appendStoredCognitiveLoopEvent({ loopId, stage: "loop.paused", title, body: body ?? null });
+  const run = updateCognitiveLoopRun(loopId, { status: "paused", currentStage: "loop.paused" });
+  if (run) broadcastRun(run);
+  broadcastEvent(event);
+  refreshLoopDashboard(loopId);
+}
+
+export function resumeCognitiveLoop(loopId: string | null | undefined, title = "Loop resumed", body?: string | null): void {
+  if (!loopId) return;
+  const event = appendStoredCognitiveLoopEvent({ loopId, stage: "loop.resumed", title, body: body ?? null });
+  const run = updateCognitiveLoopRun(loopId, { status: "running", currentStage: "loop.resumed", completedAt: null });
+  if (run) broadcastRun(run);
+  broadcastEvent(event);
+  refreshLoopDashboard(loopId);
 }
 
 export function failCognitiveLoop(loopId: string | null | undefined, title = "Loop failed", body?: string | null): void {

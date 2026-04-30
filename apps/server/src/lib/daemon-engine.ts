@@ -7,6 +7,7 @@ import { claimNextTask, updateDaemonTask, createDaemonTask, getQueueDepth, prune
 import { insertActivity } from "../db/activity-store.ts";
 import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
 import { appendCognitiveLoopEvent, completeCognitiveLoop, failCognitiveLoop, recoverStaleCognitiveLoops } from "./cognitive-loop.ts";
+import { markLoopPlaybookStep } from "./cognitive-loop-playbooks.ts";
 
 let wsRef: WSManager | null = null;
 let currentTask: DaemonTask | null = null;
@@ -179,6 +180,11 @@ async function daemonTick(): Promise<void> {
         appendCognitiveLoopEvent(task.loopId, "daemon.task.completed", `Daemon completed: ${task.title}`, resultText?.slice(0, 1200) ?? null, {
           taskId: task.id,
         });
+        markLoopPlaybookStep(task.loopId, "Playbook step completed: daemon remediation", {
+          body: resultText?.slice(0, 1200) ?? null,
+          success: true,
+          metadata: { taskId: task.id },
+        });
         completeCognitiveLoop(task.loopId, "Autonomous remediation completed", resultText?.slice(0, 1200) ?? null);
 
         const activityEntry = insertActivity({
@@ -206,6 +212,11 @@ async function daemonTick(): Promise<void> {
             taskId: task.id,
             retryCount: retryCount + 1,
           });
+          markLoopPlaybookStep(task.loopId, "Playbook step needs retry: daemon remediation", {
+            body: error,
+            success: false,
+            metadata: { taskId: task.id, retryCount: retryCount + 1 },
+          });
           appendCognitiveLoopEvent(task.loopId, "daemon.task.queued", `Re-queued daemon task: ${task.title}`, null, {
             taskId: task.id,
             retryCount: retryCount + 1,
@@ -221,6 +232,11 @@ async function daemonTick(): Promise<void> {
           appendCognitiveLoopEvent(task.loopId, "daemon.task.failed", `Daemon failed: ${task.title}`, error, {
             taskId: task.id,
             retryCount,
+          });
+          markLoopPlaybookStep(task.loopId, "Playbook step failed: daemon remediation", {
+            body: error,
+            success: false,
+            metadata: { taskId: task.id, retryCount },
           });
           failCognitiveLoop(task.loopId, "Autonomous remediation failed", error);
           const failEntry = insertActivity({
@@ -311,6 +327,9 @@ function queueRemediationTask(opts: {
   priority: number;
   loopId?: string;
 }): boolean {
+  appendCognitiveLoopEvent(opts.loopId, "playbook.step.started", "Playbook step started: daemon remediation", opts.title, {
+    priority: opts.priority,
+  });
   const task = createDaemonTask({
     title: opts.title,
     prompt: opts.prompt,

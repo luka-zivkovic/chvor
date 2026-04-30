@@ -29,6 +29,7 @@ export function CognitiveLoopRail() {
 
   const color = severityColor(activeLoop.severity);
   const isRunning = activeLoop.status === "running";
+  const isPaused = activeLoop.status === "paused";
 
   return (
     <div className="pointer-events-none absolute left-5 top-5 z-20 w-[360px] max-w-[calc(100vw-2.5rem)]">
@@ -74,8 +75,9 @@ export function CognitiveLoopRail() {
             className="h-full rounded-full transition-all duration-500"
             style={{
               width: activeLoop.status === "completed" ? "100%" : activeLoop.status === "failed" ? "100%" : `${Math.min(90, 18 + events.length * 12)}%`,
-              background: activeLoop.status === "failed" ? "oklch(0.62 0.20 25)" : color,
-              boxShadow: `0 0 18px ${color}88`,
+              background: activeLoop.status === "failed" ? "oklch(0.62 0.20 25)" : isPaused ? "oklch(0.55 0.02 285)" : color,
+              boxShadow: isPaused ? "none" : `0 0 18px ${color}88`,
+              opacity: isPaused ? 0.55 : 1,
             }}
           />
         </div>
