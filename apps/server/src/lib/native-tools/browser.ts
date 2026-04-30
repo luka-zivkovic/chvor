@@ -8,9 +8,10 @@ import {
   injectPlaceholders,
   parseCredRef,
   PLACEHOLDER_RE,
+  redactKnownSecrets,
   withSecretSeal,
 } from "../credential-injector.ts";
-import { pickCredential } from "../credential-picker.ts";
+import { pickCredential, type PickResult } from "../credential-picker.ts";
 import { getCredentialData } from "../../db/credential-store.ts";
 import type {
   NativeToolContext,
@@ -71,7 +72,7 @@ async function evictIfBrowserDead(err: unknown, sessionId: string): Promise<void
 const browserNavigateToolDef = tool({
   description:
     "[Web Agent] Navigate to a URL. Use this as the first step when browsing the web. Returns the page title and final URL. " +
-    "If a URL needs to embed a credential (e.g. a token query param), reference it with `{{credentials.<type>}}` or `{{credentials.<credentialId>}}` — the value is URL-encoded and substituted at the browser boundary; the recorded URL keeps the placeholder.",
+    "If a URL needs to embed a credential (e.g. a token query param), reference it with `{{credentials.<type>}}` or, when multiple credentials share a type, the safer `{{credentials.<credentialId>}}` — the value is URL-encoded and substituted at the browser boundary; the recorded URL keeps the placeholder.",
   parameters: z.object({
     url: z
       .string()
@@ -90,30 +91,47 @@ const handleBrowserNavigate: NativeToolHandler = async (
 
   let expanded: string;
   let secretsToSeal: string[];
+  let picks: BrowserCredentialPick[] = [];
   try {
-    ({ expanded, secretsToSeal } = expandBrowserCredentials(rawUrl, sessionId, {
-      urlEncode: true,
-      allowedCredentialTypes: context?.allowedCredentialTypes,
-    }));
+    ({ expanded, secretsToSeal, picks } = await expandBrowserCredentialsInteractive(
+      rawUrl,
+      sessionId,
+      {
+        urlEncode: true,
+        allowedCredentialTypes: context?.allowedCredentialTypes,
+        preferredUsageContext: context?.preferredUsageContext,
+        originClientId: context?.originClientId,
+        toolName: BROWSER_NAVIGATE_NAME,
+      }
+    ));
   } catch (err) {
     return {
       content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
     };
   }
 
-  // SSRF protection: validate URL after expansion (same rules as http_fetch)
-  try {
-    await validateFetchUrl(expanded);
-  } catch (err) {
+  // SSRF protection: validate URL after expansion (same rules as http_fetch).
+  // Keep the seal open while formatting any validation error in case a future
+  // validator includes the expanded URL in its message.
+  let blockedMessage: string | null = null;
+  await withSecretSeal(secretsToSeal, async () => {
+    try {
+      await validateFetchUrl(expanded);
+    } catch (err) {
+      blockedMessage = redactKnownSecrets(err instanceof Error ? err.message : String(err));
+    }
+  });
+  if (blockedMessage) {
     return {
       content: [
         {
           type: "text",
-          text: `Browser navigate blocked: ${err instanceof Error ? err.message : String(err)}`,
+          text: `Browser navigate blocked: ${blockedMessage}`,
         },
       ],
     };
   }
+  emitCredentialPicks(context, picks);
 
   return withSecretSeal(secretsToSeal, async () => {
     try {
@@ -127,15 +145,18 @@ const handleBrowserNavigate: NativeToolHandler = async (
       const title = await stagehand.page.title();
       const url = stagehand.page.url();
       return {
-        content: [{ type: "text", text: `Navigated to: ${url}\nPage title: ${title}` }],
+        content: [
+          { type: "text", text: redactKnownSecrets(`Navigated to: ${url}\nPage title: ${title}`) },
+        ],
       };
     } catch (err) {
       await evictIfBrowserDead(err, sessionId);
+      const message = redactKnownSecrets(err instanceof Error ? err.message : String(err));
       return {
         content: [
           {
             type: "text",
-            text: `Browser navigate failed: ${err instanceof Error ? err.message : String(err)}`,
+            text: `Browser navigate failed: ${message}`,
           },
         ],
       };
@@ -146,7 +167,7 @@ const handleBrowserNavigate: NativeToolHandler = async (
 const browserActToolDef = tool({
   description:
     "[Web Agent] Perform an action on the current page using natural language. Examples: 'click the Sign In button', 'type {{credentials.github}} in the password field', 'scroll down', 'select the second item from the dropdown'. " +
-    "For credentials: ALWAYS reference them with `{{credentials.<type>}}` or `{{credentials.<credentialId>}}` placeholders — never paste raw passwords or tokens. The placeholder is expanded at the browser boundary so secret values never reach the chat history. " +
+    "For credentials: ALWAYS reference them with `{{credentials.<type>}}` or, when multiple credentials share a type, the safer `{{credentials.<credentialId>}}` placeholders — never paste raw passwords or tokens. The placeholder is expanded at the browser boundary so secret values never reach the chat history. " +
     "✓ Good: `type {{credentials.github}} in the password field`. " +
     "✗ Bad: `type ghp_abc123xyz... in the password field`.",
   parameters: z.object({
@@ -179,76 +200,296 @@ const browserActToolDef = tool({
 // known type cannot bypass the type picker (and skill scope) by id-match.
 const CREDENTIAL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export interface BrowserCredentialPick {
+  credentialType: string;
+  credentialId: string;
+  credentialName: string;
+  reason: PickResult["reason"];
+  pickedBy: PickResult["reason"];
+  candidateCount: number;
+  detail?: string;
+}
+
+export interface BrowserCredentialExpansion {
+  expanded: string;
+  secretsToSeal: string[];
+  expandedTypes: string[];
+  picks: BrowserCredentialPick[];
+}
+
+interface BrowserCredentialSelection {
+  ref: string;
+  type: string;
+  data: Record<string, string>;
+  pick: BrowserCredentialPick;
+}
+
+interface BrowserCredentialExpansionOptions {
+  urlEncode?: boolean;
+  allowedCredentialTypes?: string[];
+  preferredUsageContext?: string[];
+}
+
+interface InteractiveBrowserCredentialExpansionOptions extends BrowserCredentialExpansionOptions {
+  originClientId?: string;
+  toolName?: string;
+}
+
+function credentialRefs(text: string): Set<string> {
+  const refs = new Set<string>();
+  for (const m of text.matchAll(PLACEHOLDER_RE)) {
+    refs.add(parseCredRef(m[1]).type);
+  }
+  return refs;
+}
+
+function allowedTypesSet(allowedCredentialTypes?: string[]): Set<string> | null {
+  return allowedCredentialTypes && allowedCredentialTypes.length > 0
+    ? new Set(allowedCredentialTypes)
+    : null;
+}
+
+function assertAllowedType(credType: string, allowedTypes: Set<string> | null): void {
+  if (allowedTypes && !allowedTypes.has(credType)) {
+    throw new Error(
+      `[browser_tools] credential type "${credType}" is not allowed by the active skill scope`
+    );
+  }
+}
+
+function directIdSelection(
+  ref: string,
+  allowedTypes: Set<string> | null
+): BrowserCredentialSelection | null {
+  if (!CREDENTIAL_ID_RE.test(ref)) return null;
+  const byId = getCredentialData(ref);
+  if (!byId) return null;
+  assertAllowedType(byId.cred.type, allowedTypes);
+  return {
+    ref,
+    type: byId.cred.type,
+    data: byId.data,
+    pick: {
+      credentialType: byId.cred.type,
+      credentialId: byId.cred.id,
+      credentialName: byId.cred.name,
+      reason: "llm-picked",
+      pickedBy: "llm-picked",
+      candidateCount: 1,
+      detail: `placeholder referenced credential id "${byId.cred.name}"`,
+    },
+  };
+}
+
+function buildPickEvent(
+  credType: string,
+  pick: PickResult,
+  credentialName: string
+): BrowserCredentialPick {
+  return {
+    credentialType: credType,
+    credentialId: pick.credentialId,
+    credentialName,
+    reason: pick.reason,
+    pickedBy: pick.reason,
+    candidateCount: pick.candidateCount,
+    detail: pick.detail,
+  };
+}
+
+function ambiguousCredentialMessage(credType: string): string {
+  return (
+    `[browser_tools] multiple "${credType}" credentials are available and no pin or context ` +
+    `selected a clear winner. Use a specific {{credentials.<credentialId>[.field]}} placeholder ` +
+    `or pin a "${credType}" credential for this session before using browser credentials.`
+  );
+}
+
+function buildExpansion(
+  text: string,
+  selections: BrowserCredentialSelection[],
+  urlEncode?: boolean
+): BrowserCredentialExpansion {
+  const byType = new Map<string, Record<string, string>>();
+  const byRef = new Map<string, Record<string, string>>();
+  const seal: string[] = [];
+  const expandedTypes: string[] = [];
+  const picks: BrowserCredentialPick[] = [];
+
+  for (const selection of selections) {
+    byType.set(selection.type, selection.data);
+    byRef.set(selection.ref, selection.data);
+    // Type placeholders are also keyed in byRef for exact field-preserving
+    // substitution (`{{credentials.github.apiKey}}`).
+    byRef.set(selection.type, selection.data);
+    seal.push(...extractSecretValues(selection.data));
+    expandedTypes.push(selection.type);
+    picks.push(selection.pick);
+  }
+
+  return {
+    expanded: injectPlaceholders(text, { byRef, byType, urlEncode }),
+    secretsToSeal: seal,
+    expandedTypes: Array.from(new Set(expandedTypes)),
+    picks,
+  };
+}
+
+function syncTypeSelection(
+  ref: string,
+  sessionId: string,
+  opts: BrowserCredentialExpansionOptions,
+  allowedTypes: Set<string> | null
+): BrowserCredentialSelection {
+  const credType = ref;
+  assertAllowedType(credType, allowedTypes);
+  const pick = pickCredential(credType, {
+    sessionId,
+    allowedCredentialTypes: opts.allowedCredentialTypes,
+    preferredUsageContext: opts.preferredUsageContext,
+  });
+  if (!pick) {
+    throw new Error(
+      `[browser_tools] no credential of type or id "${credType}" available — add one in Settings > Credentials before referencing it`
+    );
+  }
+  if (pick.reason === "first-match-fallback" && pick.candidateCount > 1) {
+    throw new Error(ambiguousCredentialMessage(credType));
+  }
+  const full = getCredentialData(pick.credentialId);
+  if (!full) {
+    throw new Error(`[browser_tools] credential ${pick.credentialId} could not be decrypted`);
+  }
+  return {
+    ref,
+    type: credType,
+    data: full.data,
+    pick: buildPickEvent(credType, pick, full.cred.name),
+  };
+}
+
 export function expandBrowserCredentials(
   text: string,
   sessionId: string,
-  opts: { urlEncode?: boolean; allowedCredentialTypes?: string[] } = {}
-): { expanded: string; secretsToSeal: string[]; expandedTypes: string[] } {
+  opts: BrowserCredentialExpansionOptions = {}
+): BrowserCredentialExpansion {
   if (!hasCredentialPlaceholder(text)) {
-    return { expanded: text, secretsToSeal: [], expandedTypes: [] };
+    return { expanded: text, secretsToSeal: [], expandedTypes: [], picks: [] };
   }
   // Pull every `{{credentials.<type-or-id>[.field]}}` into maps. A ref whose
   // leading segment looks like a credential id is resolved directly; otherwise
   // we keep the Phase E type picker path. The id-shape gate stops a credential
   // whose id happens to collide with a registered type literal from bypassing
   // the picker (and skill-scope check).
-  const refs = new Set<string>();
-  for (const m of text.matchAll(PLACEHOLDER_RE)) {
-    refs.add(parseCredRef(m[1]).type);
-  }
-  const allowedTypes =
-    opts.allowedCredentialTypes && opts.allowedCredentialTypes.length > 0
-      ? new Set(opts.allowedCredentialTypes)
-      : null;
-  const byType = new Map<string, Record<string, string>>();
-  const byRef = new Map<string, Record<string, string>>();
-  const seal: string[] = [];
-  const expandedTypes: string[] = [];
+  const refs = credentialRefs(text);
+  const allowedTypes = allowedTypesSet(opts.allowedCredentialTypes);
+  const selections: BrowserCredentialSelection[] = [];
   for (const ref of refs) {
-    if (CREDENTIAL_ID_RE.test(ref)) {
-      const byId = getCredentialData(ref);
-      if (byId) {
-        if (allowedTypes && !allowedTypes.has(byId.cred.type)) {
-          throw new Error(
-            `[browser_tools] credential type "${byId.cred.type}" is not allowed by the active skill scope`
-          );
-        }
-        byRef.set(ref, byId.data);
-        seal.push(...extractSecretValues(byId.data));
-        expandedTypes.push(byId.cred.type);
-        continue;
-      }
-    }
+    const byId = directIdSelection(ref, allowedTypes);
+    selections.push(byId ?? syncTypeSelection(ref, sessionId, opts, allowedTypes));
+  }
+  return buildExpansion(text, selections, opts.urlEncode);
+}
 
-    const credType = ref;
-    if (allowedTypes && !allowedTypes.has(credType)) {
-      throw new Error(
-        `[browser_tools] credential type "${credType}" is not allowed by the active skill scope`
-      );
+async function interactiveTypeSelection(
+  ref: string,
+  sessionId: string,
+  opts: InteractiveBrowserCredentialExpansionOptions,
+  allowedTypes: Set<string> | null
+): Promise<BrowserCredentialSelection> {
+  const credType = ref;
+  assertAllowedType(credType, allowedTypes);
+  const pick = pickCredential(credType, {
+    sessionId,
+    allowedCredentialTypes: opts.allowedCredentialTypes,
+    preferredUsageContext: opts.preferredUsageContext,
+  });
+  if (!pick) {
+    throw new Error(
+      `[browser_tools] no credential of type or id "${credType}" available — add one in Settings > Credentials before referencing it`
+    );
+  }
+
+  let resolvedPick = pick;
+  if (pick.reason === "first-match-fallback" && pick.candidateCount > 1) {
+    if (!opts.originClientId) {
+      throw new Error(ambiguousCredentialMessage(credType));
     }
-    const pick = pickCredential(credType, {
+    const { requestCredentialChoice } = await import("../credential-choice.ts");
+    const choice = await requestCredentialChoice({
       sessionId,
-      allowedCredentialTypes: opts.allowedCredentialTypes,
+      originClientId: opts.originClientId,
+      credentialType: credType,
+      toolName: opts.toolName,
+      reason: pick.detail ?? `Multiple ${credType} credentials are available.`,
     });
-    if (!pick) {
+    if (!choice.ok) {
       throw new Error(
-        `[browser_tools] no credential of type or id "${credType}" available — add one in Settings > Credentials before referencing it`
+        choice.reason === "cancelled"
+          ? `[browser_tools] credential choice for "${credType}" was cancelled`
+          : choice.reason === "no-active-ui"
+            ? `[browser_tools] cannot prompt for "${credType}" credential choice — no active UI connection`
+            : `[browser_tools] credential choice for "${credType}" ${choice.reason}`
       );
     }
-    const full = getCredentialData(pick.credentialId);
-    if (!full) {
-      throw new Error(`[browser_tools] credential ${pick.credentialId} could not be decrypted`);
-    }
-    byType.set(credType, full.data);
-    byRef.set(credType, full.data);
-    seal.push(...extractSecretValues(full.data));
-    expandedTypes.push(credType);
+    resolvedPick = {
+      credentialId: choice.credentialId,
+      reason: "user-picked",
+      candidateCount: pick.candidateCount,
+      detail:
+        choice.action === "pin-session"
+          ? `user selected and pinned "${choice.credentialName}" for this session`
+          : `user selected "${choice.credentialName}" for this browser call`,
+    };
+  }
+
+  const full = getCredentialData(resolvedPick.credentialId);
+  if (!full) {
+    throw new Error(
+      `[browser_tools] credential ${resolvedPick.credentialId} could not be decrypted`
+    );
   }
   return {
-    expanded: injectPlaceholders(text, { byRef, byType, urlEncode: opts.urlEncode }),
-    secretsToSeal: seal,
-    expandedTypes: Array.from(new Set(expandedTypes)),
+    ref,
+    type: credType,
+    data: full.data,
+    pick: buildPickEvent(credType, resolvedPick, full.cred.name),
   };
+}
+
+export async function expandBrowserCredentialsInteractive(
+  text: string,
+  sessionId: string,
+  opts: InteractiveBrowserCredentialExpansionOptions = {}
+): Promise<BrowserCredentialExpansion> {
+  if (!hasCredentialPlaceholder(text)) {
+    return { expanded: text, secretsToSeal: [], expandedTypes: [], picks: [] };
+  }
+  const refs = credentialRefs(text);
+  const allowedTypes = allowedTypesSet(opts.allowedCredentialTypes);
+  const selections: BrowserCredentialSelection[] = [];
+  for (const ref of refs) {
+    const byId = directIdSelection(ref, allowedTypes);
+    selections.push(byId ?? (await interactiveTypeSelection(ref, sessionId, opts, allowedTypes)));
+  }
+  return buildExpansion(text, selections, opts.urlEncode);
+}
+
+function emitCredentialPicks(
+  context: NativeToolContext | undefined,
+  picks: BrowserCredentialPick[]
+): void {
+  if (!context?.emitEvent) return;
+  const seen = new Set<string>();
+  for (const pick of picks) {
+    const key = `${pick.credentialType}:${pick.credentialId}:${pick.reason}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    context.emitEvent({
+      type: "credential.resolved",
+      data: { ...pick, surface: "native" },
+    });
+  }
 }
 
 const handleBrowserAct: NativeToolHandler = async (
@@ -260,10 +501,19 @@ const handleBrowserAct: NativeToolHandler = async (
   let expanded: string;
   let secretsToSeal: string[];
   let expandedTypes: string[];
+  let picks: BrowserCredentialPick[] = [];
   try {
-    ({ expanded, secretsToSeal, expandedTypes } = expandBrowserCredentials(instruction, sessionId, {
-      allowedCredentialTypes: context?.allowedCredentialTypes,
-    }));
+    ({ expanded, secretsToSeal, expandedTypes, picks } = await expandBrowserCredentialsInteractive(
+      instruction,
+      sessionId,
+      {
+        allowedCredentialTypes: context?.allowedCredentialTypes,
+        preferredUsageContext: context?.preferredUsageContext,
+        originClientId: context?.originClientId,
+        toolName: BROWSER_ACT_NAME,
+      }
+    ));
+    emitCredentialPicks(context, picks);
   } catch (err) {
     return {
       content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
@@ -276,23 +526,25 @@ const handleBrowserAct: NativeToolHandler = async (
       const result = await withTimeout(stagehand.page.act(expanded), BROWSER_OP_TIMEOUT, "Action");
       const note =
         expandedTypes.length > 0 ? ` [credentials substituted: ${expandedTypes.join(", ")}]` : "";
+      const resultText = result ? redactKnownSecrets(JSON.stringify(result)) : "";
       return {
         content: [
           {
             type: "text",
             text: result
-              ? `Action completed: ${JSON.stringify(result)}${note}`
+              ? `Action completed: ${resultText}${note}`
               : `Action completed successfully.${note}`,
           },
         ],
       };
     } catch (err) {
       await evictIfBrowserDead(err, sessionId);
+      const message = redactKnownSecrets(err instanceof Error ? err.message : String(err));
       return {
         content: [
           {
             type: "text",
-            text: `Browser action failed: ${err instanceof Error ? err.message : String(err)}`,
+            text: `Browser action failed: ${message}`,
           },
         ],
       };

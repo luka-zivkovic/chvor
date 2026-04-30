@@ -42,9 +42,12 @@ If a user shares an API key, token, password, or secret directly in chat:
 4. For UNKNOWN services, ask the user what service it's for if not obvious.
 
 ### Using saved credentials
-- Use native__list_credentials to find the credential ID.
-- Use native__use_credential to retrieve the full secret values and connection instructions.
-- Follow the connection config / usageContext instructions exactly for authentication.
+- Use native__list_credentials to find the credential ID and safe metadata.
+- Use native__use_credential for redacted metadata/connection-hint templates, not raw values.
+- Pass credentials to downstream tools with {{credentials.<type>[.field]}} or {{credentials.<credentialId>[.field]}} placeholders. The value expands only at the external boundary.
+- If multiple credentials of the same type exist, prefer a specific credentialId placeholder or the tool's credentialId enum; do not rely on an ambiguous type placeholder.
+- Only request raw values with revealValues:true when the user explicitly asks to see/copy the secret; this requires approval.
+- Follow usageContext instructions exactly for authentication.
 - Always prefer using saved credentials over asking the user for them again.
 
 IMPORTANT: Never echo or display credential values (API keys, tokens, passwords) in your responses — use them only in tool call parameters.

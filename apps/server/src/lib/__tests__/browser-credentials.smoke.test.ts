@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,18 +7,44 @@ const tmp = mkdtempSync(join(tmpdir(), "chvor-browser-cred-"));
 process.env.CHVOR_DATA_DIR = tmp;
 
 let expandBrowserCredentials: typeof import("../native-tools/browser.ts").expandBrowserCredentials;
+let expandBrowserCredentialsInteractive: typeof import("../native-tools/browser.ts").expandBrowserCredentialsInteractive;
 let createCredential: typeof import("../../db/credential-store.ts").createCredential;
 let deleteCredential: typeof import("../../db/credential-store.ts").deleteCredential;
 let listCredentials: typeof import("../../db/credential-store.ts").listCredentials;
+let listPendingCredentialChoices: typeof import("../credential-choice.ts").listPendingCredentialChoices;
+let resolveCredentialChoice: typeof import("../credential-choice.ts").resolveCredentialChoice;
+let setWSInstance: typeof import("../../gateway/ws-instance.ts").setWSInstance;
 
 beforeAll(async () => {
-  ({ expandBrowserCredentials } = await import("../native-tools/browser.ts"));
+  ({ expandBrowserCredentials, expandBrowserCredentialsInteractive } =
+    await import("../native-tools/browser.ts"));
   ({ createCredential, deleteCredential, listCredentials } =
     await import("../../db/credential-store.ts"));
+  ({ listPendingCredentialChoices, resolveCredentialChoice } =
+    await import("../credential-choice.ts"));
+  ({ setWSInstance } = await import("../../gateway/ws-instance.ts"));
+  setWSInstance({
+    sendTo: () => true,
+    getClientsBySessionId: () => ["ws-1"],
+    broadcastToSession: () => undefined,
+  } as never);
+});
+
+afterAll(() => {
+  setWSInstance(null);
 });
 
 function reset() {
   for (const c of listCredentials()) deleteCredential(c.id);
+}
+
+async function waitForChoice(sessionId: string) {
+  for (let i = 0; i < 50; i++) {
+    const pending = listPendingCredentialChoices().filter((p) => p.sessionId === sessionId);
+    if (pending.length > 0) return pending[0];
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return listPendingCredentialChoices().find((p) => p.sessionId === sessionId) ?? null;
 }
 
 describe("expandBrowserCredentials — skill scope", () => {
@@ -50,14 +76,38 @@ describe("expandBrowserCredentials — skill scope", () => {
     expect(out.expanded).toBe("Bearer ghp_secret_value");
     expect(out.expandedTypes).toEqual(["github"]);
     expect(out.secretsToSeal).toContain("ghp_secret_value");
+    expect(out.picks[0]).toMatchObject({ reason: "single-match", pickedBy: "single-match" });
   });
 });
 
-describe("expandBrowserCredentials — id/type collision", () => {
+describe("expandBrowserCredentials — ambiguous credentials", () => {
   beforeEach(reset);
 
-  it("does not bypass type picker when credential id is not UUID-shaped", () => {
-    // Two credentials of the same type so the picker has to pick one.
+  it("fails closed instead of silently using first-match fallback in non-interactive expansion", () => {
+    createCredential("Work GitHub", "github", { apiKey: "ghp_work" }, "work");
+    createCredential("Personal GitHub", "github", { apiKey: "ghp_personal" }, "personal");
+
+    expect(() =>
+      expandBrowserCredentials("{{credentials.github}}", "sess-1", {
+        allowedCredentialTypes: ["github"],
+      })
+    ).toThrow(/multiple "github" credentials/);
+  });
+
+  it("still resolves without prompting when usage context picks a clear winner", () => {
+    createCredential("Work GitHub", "github", { apiKey: "ghp_work" }, "work enterprise");
+    createCredential("Personal GitHub", "github", { apiKey: "ghp_personal" }, "personal");
+
+    const out = expandBrowserCredentials("{{credentials.github}}", "sess-1", {
+      allowedCredentialTypes: ["github"],
+      preferredUsageContext: ["enterprise"],
+    });
+
+    expect(out.expanded).toBe("ghp_work");
+    expect(out.picks[0]).toMatchObject({ reason: "context-match", pickedBy: "context-match" });
+  });
+
+  it("asks the user for browser placeholder ambiguity in interactive expansion", async () => {
     createCredential("Work GitHub", "github", { apiKey: "ghp_work" }, "work");
     const personal = createCredential(
       "Personal GitHub",
@@ -65,16 +115,31 @@ describe("expandBrowserCredentials — id/type collision", () => {
       { apiKey: "ghp_personal" },
       "personal"
     );
-    // A non-UUID ref must NOT short-circuit to a direct id lookup. With
-    // allowedCredentialTypes restricting to "github" the picker still runs
-    // and the ref is treated as a type literal.
-    const out = expandBrowserCredentials("{{credentials.github}}", "sess-1", {
+
+    const promise = expandBrowserCredentialsInteractive("{{credentials.github}}", "sess-browser", {
       allowedCredentialTypes: ["github"],
+      originClientId: "ws-1",
+      toolName: "native__browser_act",
     });
-    // Picker resolves to alphabetically-first when no other tier wins —
-    // either "Personal GitHub" or "Work GitHub". Both are valid; the key
-    // assertion is the call succeeded through the picker, not via id-match.
-    expect(["ghp_personal", "ghp_work"]).toContain(out.expanded);
-    void personal;
+
+    const pending = await waitForChoice("sess-browser");
+    expect(pending).toBeTruthy();
+    const resolved = resolveCredentialChoice(
+      {
+        requestId: pending!.requestId,
+        action: "use-once",
+        credentialId: personal.id,
+      },
+      "ws-1"
+    );
+    expect(resolved.ok).toBe(true);
+
+    const out = await promise;
+    expect(out.expanded).toBe("ghp_personal");
+    expect(out.picks[0]).toMatchObject({
+      credentialId: personal.id,
+      reason: "user-picked",
+      pickedBy: "user-picked",
+    });
   });
 });
