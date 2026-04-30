@@ -25,6 +25,7 @@ import { getSessionPin } from "../db/session-pin-store.ts";
  */
 
 export type PickReason =
+  | "user-picked"
   | "llm-picked"
   | "tool-pinned"
   | "session-pin"

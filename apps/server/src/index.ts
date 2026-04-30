@@ -51,7 +51,13 @@ import brainConfigRoute from "./routes/brain-config.ts";
 import shellConfigRoute from "./routes/shell-config.ts";
 import securityConfigRoute from "./routes/security-config.ts";
 import templateRoutes from "./routes/templates.ts";
-import { runRetentionCleanup, startPeriodicCleanup, stopPeriodicCleanup, startDailyResetCheck, stopDailyResetCheck } from "./lib/session-cleanup.ts";
+import {
+  runRetentionCleanup,
+  startPeriodicCleanup,
+  stopPeriodicCleanup,
+  startDailyResetCheck,
+  stopDailyResetCheck,
+} from "./lib/session-cleanup.ts";
 import { startBrowserSweep, stopBrowserSweep, shutdownAllBrowsers } from "./lib/browser-manager.ts";
 import voiceRoute from "./routes/voice.ts";
 import whatsappRoute from "./routes/whatsapp.ts";
@@ -75,20 +81,38 @@ import sessionPinsRoute from "./routes/session-pins.ts";
 import adminRoute, { registerShutdownHandler } from "./routes/admin.ts";
 import { initDocker } from "./lib/sandbox.ts";
 import { startOAuthTokenRefresh, stopOAuthTokenRefresh } from "./lib/oauth-token-refresh.ts";
-import { handlePcAgentConnection, handlePcAgentMessage, handlePcAgentClose, onPcAgentEvent, onPcFrame, shutdownPcAgents, initLocalBackend } from "./lib/pc-control.ts";
+import {
+  handlePcAgentConnection,
+  handlePcAgentMessage,
+  handlePcAgentClose,
+  onPcAgentEvent,
+  onPcFrame,
+  shutdownPcAgents,
+  initLocalBackend,
+} from "./lib/pc-control.ts";
 import { getPcControlEnabled } from "./db/config-store.ts";
 import { initActivityTable } from "./db/activity-store.ts";
 import { initA2UIDb } from "./db/a2ui-store.ts";
 import a2uiRoute from "./routes/a2ui.ts";
 import { readAudio, startAudioCleanup, stopAudioCleanup } from "./lib/voice/audio-store.ts";
-import { getMediaDir, storeMediaFromBuffer, startMediaCleanup, stopMediaCleanup } from "./lib/media-store.ts";
+import {
+  getMediaDir,
+  storeMediaFromBuffer,
+  startMediaCleanup,
+  stopMediaCleanup,
+} from "./lib/media-store.ts";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
-import { resolveApproval, resolveCredentialRequest, resolveOAuthWizard } from "./lib/native-tools.ts";
+import {
+  resolveApproval,
+  resolveCredentialRequest,
+  resolveOAuthWizard,
+} from "./lib/native-tools.ts";
 import { resolveSynthesizedApproval } from "./lib/approval-gate.ts";
+import { resolveCredentialChoice } from "./lib/credential-choice.ts";
 import { rotateOldLogs } from "./lib/error-logger.ts";
 import { initManifest, shutdownManifest } from "./lib/health-manifest.ts";
 import { initKeepAwake, shutdownKeepAwake } from "./lib/keep-awake.ts";
@@ -97,8 +121,16 @@ import { startAutoUpdate, stopAutoUpdate } from "./lib/registry-updater.ts";
 import { startMemoryDecay, stopMemoryDecay } from "./lib/memory-decay.ts";
 import { startToolGraphDecay, stopToolGraphDecay } from "./lib/tool-graph-decay.ts";
 import { startCheckpointPrune, stopCheckpointPrune } from "./lib/checkpoint-manager.ts";
-import { startApprovalExpire, stopApprovalExpire, resolveHITLApproval } from "./lib/approval-gate-hitl.ts";
-import { startToolEmbeddingSync, stopToolEmbeddingSync, bootstrapToolEmbeddings } from "./lib/tool-embedding-job.ts";
+import {
+  startApprovalExpire,
+  stopApprovalExpire,
+  resolveHITLApproval,
+} from "./lib/approval-gate-hitl.ts";
+import {
+  startToolEmbeddingSync,
+  stopToolEmbeddingSync,
+  bootstrapToolEmbeddings,
+} from "./lib/tool-embedding-job.ts";
 import { startConsolidation, stopConsolidation } from "./lib/memory-consolidation.ts";
 import { initJobRunner, stopAllPeriodicJobs } from "./lib/job-runner.ts";
 import { reloadAll } from "./lib/capability-loader.ts";
@@ -139,19 +171,22 @@ whatsappChannel.onStatus((status, phoneNumber) => {
 });
 
 // Forward gateway events — execution events broadcast to all, everything else targeted only
-gateway.on("event", (event: import("@chvor/shared").GatewayServerEvent, targetClientId?: string) => {
-  if (event.type === "execution.event") {
-    // Execution events always broadcast (canvas animations)
-    wsManager.broadcast(event);
-  } else if (targetClientId) {
-    // Targeted event from a web client — send to that client only
-    wsManager.sendTo(targetClientId, event);
-  } else {
-    // No target client — non-web channel (telegram/discord/slack/whatsapp).
-    // Drop to prevent chat/voice events leaking to Canvas clients.
-    return;
+gateway.on(
+  "event",
+  (event: import("@chvor/shared").GatewayServerEvent, targetClientId?: string) => {
+    if (event.type === "execution.event") {
+      // Execution events always broadcast (canvas animations)
+      wsManager.broadcast(event);
+    } else if (targetClientId) {
+      // Targeted event from a web client — send to that client only
+      wsManager.sendTo(targetClientId, event);
+    } else {
+      // No target client — non-web channel (telegram/discord/slack/whatsapp).
+      // Drop to prevent chat/voice events leaking to Canvas clients.
+      return;
+    }
   }
-});
+);
 
 // Route WS client messages to the right channel
 wsManager.onClientMessage((clientId, event) => {
@@ -159,7 +194,10 @@ wsManager.onClientMessage((clientId, event) => {
     case "session.init": {
       const sessionId = event.data.sessionId;
       if (!wsManager.setSessionId(clientId, sessionId)) {
-        wsManager.sendTo(clientId, { type: "error", data: { message: "Invalid session ID format" } });
+        wsManager.sendTo(clientId, {
+          type: "error",
+          data: { message: "Invalid session ID format" },
+        });
         break;
       }
       wsManager.sendTo(clientId, { type: "session.ack", data: { sessionId } });
@@ -189,7 +227,11 @@ wsManager.onClientMessage((clientId, event) => {
       // TODO Phase 4: track per-workspace subscriptions
       break;
     case "command.respond": {
-      const resolved = resolveApproval(event.data.requestId, event.data.approved, !!event.data.alwaysAllow);
+      const resolved = resolveApproval(
+        event.data.requestId,
+        event.data.approved,
+        !!event.data.alwaysAllow
+      );
       if (!resolved) {
         wsManager.sendTo(clientId, {
           type: "error",
@@ -208,12 +250,25 @@ wsManager.onClientMessage((clientId, event) => {
       }
       break;
     }
+    case "credential.choice.respond": {
+      const result = resolveCredentialChoice(event.data, clientId);
+      if (!result.ok) {
+        wsManager.sendTo(clientId, {
+          type: "error",
+          data: { message: `Credential choice not actionable: ${result.reason}` },
+        });
+      }
+      break;
+    }
     case "synthesized.respond": {
       const resolved = resolveSynthesizedApproval(event.data.requestId, event.data, clientId);
       if (!resolved) {
         wsManager.sendTo(clientId, {
           type: "error",
-          data: { message: "No pending synthesized-tool confirmation with that ID (may have timed out, or another client originated it)" },
+          data: {
+            message:
+              "No pending synthesized-tool confirmation with that ID (may have timed out, or another client originated it)",
+          },
         });
       }
       break;
@@ -251,12 +306,15 @@ wsManager.onClientMessage((clientId, event) => {
 // onError). Records requestId, method, path, status, latency, sessionId.
 app.use("/*", requestLogger);
 
-app.use("/*", cors({
-  origin: process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
-    : "http://localhost:5173",
-  credentials: true,
-}));
+app.use(
+  "/*",
+  cors({
+    origin: process.env.ALLOWED_ORIGINS
+      ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+      : "http://localhost:5173",
+    credentials: true,
+  })
+);
 
 // Global security headers
 app.use("/*", async (c, next) => {
@@ -301,10 +359,20 @@ app.get("/api/media/:filename", async (c) => {
   const data = await readFile(filePath);
   const ext = safe.split(".").pop() ?? "";
   const contentTypes: Record<string, string> = {
-    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
-    webp: "image/webp", svg: "image/svg+xml", mp3: "audio/mpeg", wav: "audio/wav",
-    ogg: "audio/ogg", mp4: "video/mp4", webm: "video/webm", pdf: "application/pdf",
-    json: "application/json", txt: "text/plain",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    mp4: "video/mp4",
+    webm: "video/webm",
+    pdf: "application/pdf",
+    json: "application/json",
+    txt: "text/plain",
   };
   const ct = contentTypes[ext] ?? "application/octet-stream";
   const headers: Record<string, string> = {
@@ -347,9 +415,7 @@ app.post("/api/media/upload", async (c) => {
 });
 
 // --- Routes ---
-app.get("/api/health", (c) =>
-  c.json({ ok: true, timestamp: new Date().toISOString() })
-);
+app.get("/api/health", (c) => c.json({ ok: true, timestamp: new Date().toISOString() }));
 
 app.route("/api/credentials", credentials);
 app.route("/api/providers", providers);
@@ -418,12 +484,18 @@ app.get("/audio/:filename", (c) => {
 const pcAgentToken: string | null = (() => {
   if (process.env.CHVOR_TOKEN) return process.env.CHVOR_TOKEN;
   if (process.env.CHVOR_PC_NO_AUTH === "true") {
-    console.warn("[pc-control] WARNING: CHVOR_PC_NO_AUTH=true — PC agent endpoint is unauthenticated (localhost only)");
+    console.warn(
+      "[pc-control] WARNING: CHVOR_PC_NO_AUTH=true — PC agent endpoint is unauthenticated (localhost only)"
+    );
     return null;
   }
   const generated = crypto.randomUUID();
-  console.log(`[pc-control] No CHVOR_TOKEN set — generated session token: ${generated.slice(0, 8)}…`);
-  console.log(`[pc-control] Full token written to stdout once. Use: npx @chvor/pc-agent --server ws://localhost:${process.env.PORT ?? 9147}/ws/pc-agent --token ${generated}`);
+  console.log(
+    `[pc-control] No CHVOR_TOKEN set — generated session token: ${generated.slice(0, 8)}…`
+  );
+  console.log(
+    `[pc-control] Full token written to stdout once. Use: npx @chvor/pc-agent --server ws://localhost:${process.env.PORT ?? 9147}/ws/pc-agent --token ${generated}`
+  );
   return generated;
 })();
 
@@ -441,7 +513,10 @@ function verifyPcToken(provided: string | null, expected: string): boolean {
 }
 
 /** Check if a request originates from localhost using the actual TCP socket address. */
-function isLocalhostRequest(c: { env?: { incoming?: { socket?: { remoteAddress?: string } } }; req: { header: (name: string) => string | undefined } }): boolean {
+function isLocalhostRequest(c: {
+  env?: { incoming?: { socket?: { remoteAddress?: string } } };
+  req: { header: (name: string) => string | undefined };
+}): boolean {
   // Use the real socket address — never trust x-forwarded-for/x-real-ip for security gates
   const ip = c.env?.incoming?.socket?.remoteAddress ?? "";
   return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ip);
@@ -455,7 +530,9 @@ app.get(
       const authorized = isLocalhostRequest(c);
       if (!authorized) {
         return {
-          onOpen(_, ws) { ws.close(4001, "Unauthenticated PC agent restricted to localhost"); },
+          onOpen(_, ws) {
+            ws.close(4001, "Unauthenticated PC agent restricted to localhost");
+          },
           onMessage() {},
         };
       }
@@ -505,7 +582,13 @@ onPcFrame((agentId, screenshot) => {
   lastFrameTime.set(agentId, now);
   wsManager.broadcast({
     type: "pc.frame",
-    data: { agentId, screenshot: screenshot.data, width: screenshot.width, height: screenshot.height, mimeType: screenshot.mimeType ?? "image/jpeg" },
+    data: {
+      agentId,
+      screenshot: screenshot.data,
+      width: screenshot.width,
+      height: screenshot.height,
+      mimeType: screenshot.mimeType ?? "image/jpeg",
+    },
   });
 });
 
@@ -568,10 +651,18 @@ if (process.env.NODE_ENV === "production") {
       const data = await readFile(filePath);
       const ext = filePath.split(".").pop() ?? "";
       const mimeTypes: Record<string, string> = {
-        html: "text/html", js: "application/javascript", css: "text/css",
-        json: "application/json", png: "image/png", jpg: "image/jpeg",
-        jpeg: "image/jpeg", svg: "image/svg+xml", ico: "image/x-icon",
-        woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf",
+        html: "text/html",
+        js: "application/javascript",
+        css: "text/css",
+        json: "application/json",
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        svg: "image/svg+xml",
+        ico: "image/x-icon",
+        woff: "font/woff",
+        woff2: "font/woff2",
+        ttf: "font/ttf",
       };
       return new Response(data, {
         headers: {
@@ -592,9 +683,12 @@ if (process.env.NODE_ENV === "production") {
 const port = parseInt(process.env.PORT ?? "9147", 10);
 
 // Warn if no LLM provider is configured
-const hasLLM = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.GOOGLE_API_KEY;
+const hasLLM =
+  process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.GOOGLE_API_KEY;
 if (!hasLLM) {
-  console.warn("[chvor] No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY in .env");
+  console.warn(
+    "[chvor] No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY in .env"
+  );
 }
 
 const server = serve({ fetch: app.fetch, port }, () => {
@@ -603,7 +697,9 @@ const server = serve({ fetch: app.fetch, port }, () => {
 
 server.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
-    console.error(`[chvor] Port ${port} is already in use. Another instance may be running, or another application is using this port.`);
+    console.error(
+      `[chvor] Port ${port} is already in use. Another instance may be running, or another application is using this port.`
+    );
     console.error(`[chvor] Try a different port: PORT=<number> chvor start`);
     process.exit(1);
   }
@@ -620,7 +716,8 @@ const logRotationTimer = setInterval(() => rotateOldLogs(), 24 * 60 * 60 * 1000)
 
 // Purge any sensitive data accidentally stored as memories
 const purged = deleteSensitiveMemories();
-if (purged > 0) console.log(`[memory] purged ${purged} sensitive memor${purged === 1 ? "y" : "ies"}`);
+if (purged > 0)
+  console.log(`[memory] purged ${purged} sensitive memor${purged === 1 ? "y" : "ies"}`);
 
 // Prune old emotion data at startup
 try {
@@ -629,9 +726,13 @@ try {
   const snapshotsPruned = pruneOldSnapshots(90);
   const residuesPruned = pruneOldResidues(30);
   if (snapshotsPruned > 0 || residuesPruned > 0) {
-    console.log(`[emotion] pruned ${snapshotsPruned} old snapshots, ${residuesPruned} old residues`);
+    console.log(
+      `[emotion] pruned ${snapshotsPruned} old snapshots, ${residuesPruned} old residues`
+    );
   }
-} catch (err) { console.warn("[emotion] failed to prune old data:", (err as Error).message); }
+} catch (err) {
+  console.warn("[emotion] failed to prune old data:", (err as Error).message);
+}
 
 // Clean up orphaned ephemeral web sessions (ws-N format) from before persistent session IDs
 const cleanedOrphans = cleanupOrphanedWebSessions();
@@ -652,7 +753,7 @@ initEmbedder()
       console.log(`[knowledge] re-queuing ${stuck.length} stuck resource(s)`);
       for (const r of stuck) {
         ingestResource(r.id).catch((err: unknown) =>
-          console.error(`[knowledge] recovery ingestion failed for ${r.id}:`, err),
+          console.error(`[knowledge] recovery ingestion failed for ${r.id}:`, err)
         );
       }
     }
@@ -666,9 +767,7 @@ initScheduler(wsManager, channelSenderFn).catch((err) =>
   console.error("[scheduler] init failed:", err)
 );
 initWebhookExecutor(wsManager, channelSenderFn);
-initDaemon(wsManager).catch((err) =>
-  console.error("[daemon] init failed:", err)
-);
+initDaemon(wsManager).catch((err) => console.error("[daemon] init failed:", err));
 
 // Initialize local PC backend if available (fire-and-forget)
 initLocalBackend().catch((err) => console.error("[pc-control] local backend init failed:", err));
@@ -696,7 +795,7 @@ initKeepAwake();
 
 if (process.env.CHVOR_SYNTH_ALLOW_PRIVATE === "1") {
   console.warn(
-    "[synth] CHVOR_SYNTH_ALLOW_PRIVATE=1 is set — synthesized tool calls may reach private/internal networks. Only use this in trusted local dev.",
+    "[synth] CHVOR_SYNTH_ALLOW_PRIVATE=1 is set — synthesized tool calls may reach private/internal networks. Only use this in trusted local dev."
   );
 }
 
@@ -735,7 +834,11 @@ async function gracefulShutdown(reason: string = "signal"): Promise<void> {
   try {
     // Tell every connected browser the server is going away so they can
     // suppress reconnect loops during a clean restart.
-    try { wsManager.broadcast({ type: "system.shutdown", data: { reason } }); } catch { /* ignore */ }
+    try {
+      wsManager.broadcast({ type: "system.shutdown", data: { reason } });
+    } catch {
+      /* ignore */
+    }
 
     clearInterval(logRotationTimer);
     shutdownKeepAwake();
@@ -767,7 +870,11 @@ async function gracefulShutdown(reason: string = "signal"): Promise<void> {
   } finally {
     clearTimeout(failsafe);
     // Flush pino buffers — no-op for sync transports, important for async ones.
-    try { logger.flush?.(); } catch { /* ignore */ }
+    try {
+      logger.flush?.();
+    } catch {
+      /* ignore */
+    }
     process.exit(0);
   }
 }

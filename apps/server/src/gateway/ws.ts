@@ -12,6 +12,7 @@ const VALID_CLIENT_EVENT_TYPES = new Set([
   "approval.respond",
   "command.respond",
   "credential.respond",
+  "credential.choice.respond",
   "synthesized.respond",
   "oauth.synthesized.respond",
   "canvas.subscribe",
@@ -29,21 +30,34 @@ function isValidClientEvent(event: unknown): event is GatewayClientEvent {
     case "session.init":
       return typeof d.sessionId === "string";
     case "chat.send":
-      return typeof d.text === "string" && typeof d.workspaceId === "string"
-        && (!d.messageId || (typeof d.messageId === "string" && UUID_RE.test(d.messageId)));
+      return (
+        typeof d.text === "string" &&
+        typeof d.workspaceId === "string" &&
+        (!d.messageId || (typeof d.messageId === "string" && UUID_RE.test(d.messageId)))
+      );
     case "chat.stop":
       return true;
     case "command.respond":
       return typeof d.requestId === "string" && typeof d.approved === "boolean";
     case "approval.respond":
       // Phase D4 — HITL approvals: { approvalId, decision }.
-      return typeof d.approvalId === "string" &&
-        (d.decision === "allow-once" || d.decision === "allow-session" || d.decision === "deny");
+      return (
+        typeof d.approvalId === "string" &&
+        (d.decision === "allow-once" || d.decision === "allow-session" || d.decision === "deny")
+      );
     case "credential.respond":
       return typeof d.requestId === "string" && typeof d.cancelled === "boolean";
+    case "credential.choice.respond":
+      return (
+        typeof d.requestId === "string" &&
+        (d.action === "use-once" || d.action === "pin-session" || d.action === "cancel") &&
+        (d.action === "cancel" || typeof d.credentialId === "string")
+      );
     case "synthesized.respond":
-      return typeof d.requestId === "string" &&
-        (d.decision === "allow-once" || d.decision === "allow-session" || d.decision === "deny");
+      return (
+        typeof d.requestId === "string" &&
+        (d.decision === "allow-once" || d.decision === "allow-session" || d.decision === "deny")
+      );
     case "oauth.synthesized.respond":
       return typeof d.requestId === "string" && typeof d.cancelled === "boolean";
     case "canvas.subscribe":
@@ -171,7 +185,11 @@ export class WSManager {
       const seen = this.lastSeen.get(id) ?? now;
       if (now - seen > STALE_TIMEOUT_MS) {
         console.warn(`[ws] evicting stale client ${id} (idle ${now - seen}ms)`);
-        try { client.close(1001, "stale connection"); } catch { /* ignore */ }
+        try {
+          client.close(1001, "stale connection");
+        } catch {
+          /* ignore */
+        }
         this.handleClose(id);
         continue;
       }
@@ -187,7 +205,11 @@ export class WSManager {
     if (this.heartbeatTimer) return;
     this.heartbeatTimer = setInterval(() => this.heartbeatTick(), HEARTBEAT_INTERVAL_MS);
     // Don't keep the process alive just for heartbeats.
-    if (typeof this.heartbeatTimer === "object" && this.heartbeatTimer && "unref" in this.heartbeatTimer) {
+    if (
+      typeof this.heartbeatTimer === "object" &&
+      this.heartbeatTimer &&
+      "unref" in this.heartbeatTimer
+    ) {
       (this.heartbeatTimer as NodeJS.Timeout).unref?.();
     }
   }
@@ -210,7 +232,11 @@ export class WSManager {
    */
   closeAll(code: number = 1001, reason: string = "server shutting down"): void {
     for (const [id, client] of this.clients) {
-      try { client.close(code, reason); } catch { /* ignore */ }
+      try {
+        client.close(code, reason);
+      } catch {
+        /* ignore */
+      }
       this.clients.delete(id);
       this.sessionMap.delete(id);
       this.lastSeen.delete(id);

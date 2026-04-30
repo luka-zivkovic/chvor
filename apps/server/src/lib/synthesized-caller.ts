@@ -620,7 +620,7 @@ export async function callSynthesizedEndpoint(
       };
     }
   }
-  const pick = pickCredentialForCall(credType, context, tool.synthesized.credentialId, llmPickedId);
+  let pick = pickCredentialForCall(credType, context, tool.synthesized.credentialId, llmPickedId);
   if (!pick) {
     return {
       ok: false,
@@ -628,6 +628,46 @@ export async function callSynthesizedEndpoint(
       durationMs: Date.now() - started,
     };
   }
+
+  // Phase E4 — if automatic signals bottom out in ambiguous fallback, ask the
+  // user which same-type credential to use when an interactive session exists.
+  if (
+    pick.reason === "first-match-fallback" &&
+    pick.candidateCount > 1 &&
+    context.sessionId &&
+    context.originClientId
+  ) {
+    const { requestCredentialChoice } = await import("./credential-choice.ts");
+    const choice = await requestCredentialChoice({
+      sessionId: context.sessionId,
+      originClientId: context.originClientId,
+      credentialType: credType,
+      toolName: tool.metadata.name,
+      reason: pick.detail ?? `Multiple ${credType} credentials are available.`,
+    });
+    if (!choice.ok) {
+      return {
+        ok: false,
+        error:
+          choice.reason === "cancelled"
+            ? `credential choice for "${credType}" was cancelled`
+            : choice.reason === "no-active-ui"
+              ? `cannot prompt for "${credType}" credential choice — no active UI connection`
+              : `credential choice for "${credType}" ${choice.reason}`,
+        durationMs: Date.now() - started,
+      };
+    }
+    pick = {
+      credentialId: choice.credentialId,
+      reason: "user-picked",
+      candidateCount: pick.candidateCount,
+      detail:
+        choice.action === "pin-session"
+          ? `user selected and pinned "${choice.credentialName}" for this session`
+          : `user selected "${choice.credentialName}" for this call`,
+    };
+  }
+
   const credId = pick.credentialId;
   const cred = getCredentialData(credId);
   if (!cred) {
