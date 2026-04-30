@@ -28,6 +28,7 @@ import { getCognitiveMemoryConfig, getBrainConfig, getConfig, setConfig } from "
 import type { Memory } from "@chvor/shared";
 
 import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
+import { appendCognitiveLoopEvent } from "./cognitive-loop.ts";
 
 let lastConsolidationAt: string | null = getConfig("memory.lastConsolidationAt") ?? null;
 let consolidationInProgress: Promise<unknown> | null = null; // concurrency lock
@@ -256,7 +257,14 @@ async function weaveNarrative(
 
 // ─── Main consolidation runner ──────────────────────────────
 
-export async function runConsolidation(): Promise<{
+export interface RunConsolidationOptions {
+  loopId?: string;
+  reason?: "idle" | "pulse" | "manual" | "system";
+  /** Force a pass even when fewer than MIN_NEW_MEMORIES_FOR_CONSOLIDATION exist. */
+  force?: boolean;
+}
+
+export async function runConsolidation(options: RunConsolidationOptions = {}): Promise<{
   merged: number;
   insights: number;
   narratives: number;
@@ -265,10 +273,11 @@ export async function runConsolidation(): Promise<{
   // Prevent overlapping runs (timer + manual trigger)
   if (consolidationInProgress) {
     console.log("[consolidation] skipping — previous run still in progress");
+    appendCognitiveLoopEvent(options.loopId, "memory.consolidation.skipped", "Memory consolidation already running");
     return { merged: 0, insights: 0, narratives: 0, pruned: 0 };
   }
 
-  const run = doConsolidation();
+  const run = doConsolidation(options);
   consolidationInProgress = run;
   try {
     return await run;
@@ -277,7 +286,7 @@ export async function runConsolidation(): Promise<{
   }
 }
 
-async function doConsolidation(): Promise<{
+async function doConsolidation(options: RunConsolidationOptions): Promise<{
   merged: number;
   insights: number;
   narratives: number;
@@ -285,21 +294,30 @@ async function doConsolidation(): Promise<{
 }> {
   const config = getCognitiveMemoryConfig();
   if (!config.consolidationEnabled) {
+    appendCognitiveLoopEvent(options.loopId, "memory.consolidation.skipped", "Memory consolidation disabled");
     return { merged: 0, insights: 0, narratives: 0, pruned: 0 };
   }
 
   console.log("[consolidation] starting consolidation pass...");
+  appendCognitiveLoopEvent(options.loopId, "memory.consolidation.started", "Memory consolidation started", null, {
+    reason: options.reason ?? "system",
+    forced: options.force === true,
+  });
   let merged = 0;
   let insights = 0;
   let narratives = 0;
 
   // Check if there are enough new memories to justify consolidation
-  if (lastConsolidationAt) {
+  if (lastConsolidationAt && !options.force) {
     const newMemories = getMemoriesSince(lastConsolidationAt);
     if (newMemories.length < MIN_NEW_MEMORIES_FOR_CONSOLIDATION) {
       console.log(`[consolidation] skipping — only ${newMemories.length} new memories since last run`);
       lastConsolidationAt = new Date().toISOString();
       setConfig("memory.lastConsolidationAt", lastConsolidationAt);
+      appendCognitiveLoopEvent(options.loopId, "memory.consolidation.skipped", "Not enough new memories", null, {
+        newMemories: newMemories.length,
+        required: MIN_NEW_MEMORIES_FOR_CONSOLIDATION,
+      });
       return { merged: 0, insights: 0, narratives: 0, pruned: 0 };
     }
   }
@@ -338,6 +356,10 @@ async function doConsolidation(): Promise<{
       }
       merged++;
       console.log(`[consolidation] merged ${cluster.memories.length} fragments: "${mergedOpts.abstract}"`);
+      appendCognitiveLoopEvent(options.loopId, "memory.insight.created", "Merged related memory fragments", mergedOpts.abstract, {
+        sourceCount: cluster.memories.length,
+        memoryId: newMemory.id,
+      });
     } catch (err) {
       console.error(`[consolidation] failed to merge cluster, skipping:`, err);
     }
@@ -376,6 +398,10 @@ async function doConsolidation(): Promise<{
           }
           insights++;
           console.log(`[consolidation] synthesized insight: "${insightOpts.abstract}"`);
+          appendCognitiveLoopEvent(options.loopId, "memory.insight.created", "Synthesized memory insight", insightOpts.abstract, {
+            sourceCount: Math.min(unusedForInsight.length, 5),
+            memoryId: newInsight.id,
+          });
         }
       }
     }
@@ -405,6 +431,10 @@ async function doConsolidation(): Promise<{
         }
         narratives++;
         console.log(`[consolidation] wove narrative: "${narrativeOpts.abstract}"`);
+        appendCognitiveLoopEvent(options.loopId, "memory.insight.created", "Wove timeline narrative", narrativeOpts.abstract, {
+          sourceCount: cluster.memories.length,
+          memoryId: newNarrative.id,
+        });
       } catch (err) {
         console.error(`[consolidation] failed to weave narrative, skipping cluster:`, err);
       }
@@ -422,6 +452,12 @@ async function doConsolidation(): Promise<{
   lastConsolidationAt = new Date().toISOString();
   setConfig("memory.lastConsolidationAt", lastConsolidationAt);
   console.log(`[consolidation] complete — merged: ${merged}, insights: ${insights}, narratives: ${narratives}, pruned: ${pruned}`);
+  appendCognitiveLoopEvent(options.loopId, "memory.consolidation.completed", "Memory consolidation completed", null, {
+    merged,
+    insights,
+    narratives,
+    pruned,
+  });
 
   return { merged, insights, narratives, pruned };
 }

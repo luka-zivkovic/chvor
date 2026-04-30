@@ -1,4 +1,5 @@
 import type { ChatMessage, ChannelType, Session } from "@chvor/shared";
+import { randomUUID } from "node:crypto";
 import { getDb } from "./database.ts";
 
 interface SessionRow {
@@ -335,4 +336,96 @@ export function getSessionMessages(
   offset?: number
 ): ChatMessage[] {
   return getRecentMessages(id, limit ?? 500, offset ?? 0);
+}
+
+export interface SessionTimelineMessage {
+  id: string;
+  role: "user" | "assistant";
+  timestamp: string;
+  preview: string;
+}
+
+export function getSessionTimelineMessages(id: string): SessionTimelineMessage[] {
+  const db = getDb();
+  const rows = db.prepare(
+    `SELECT id, role, timestamp, SUBSTR(content, 1, 180) as preview
+     FROM messages WHERE session_id = ? ORDER BY timestamp ASC`
+  ).all(id) as Array<{ id: string; role: string; timestamp: string; preview: string }>;
+  return rows.map((row) => ({
+    id: row.id,
+    role: row.role as "user" | "assistant",
+    timestamp: row.timestamp,
+    preview: row.preview,
+  }));
+}
+
+export function branchSessionFromMessage(sourceSessionId: string, opts: {
+  messageId?: string;
+  title?: string;
+}): { id: string; bareId: string; messageCount: number } | null {
+  const db = getDb();
+  const source = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sourceSessionId) as SessionRow | undefined;
+  if (!source) return null;
+
+  const branchPoint = opts.messageId
+    ? db.prepare("SELECT timestamp FROM messages WHERE session_id = ? AND id = ?")
+        .get(sourceSessionId, opts.messageId) as { timestamp: string } | undefined
+    : db.prepare("SELECT timestamp FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1")
+        .get(sourceSessionId) as { timestamp: string } | undefined;
+
+  if (!branchPoint) return null;
+
+  const bareId = randomUUID();
+  const threadPart = source.thread_id ?? "default";
+  const branchId = `${source.channel_type}:${bareId}:${threadPart}`;
+  const now = new Date().toISOString();
+  const title = (opts.title?.trim() || `Branch of ${source.title ?? sourceSessionId}`).slice(0, 100);
+
+  const copy = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO sessions (id, channel_type, channel_id, thread_id, workspace_id, messages, summary, title, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?)`
+    ).run(
+      branchId,
+      source.channel_type,
+      bareId,
+      source.thread_id,
+      source.workspace_id,
+      source.summary,
+      title,
+      now,
+      now,
+    );
+
+    const rows = db.prepare(
+      `SELECT * FROM messages
+       WHERE session_id = ? AND timestamp <= ?
+       ORDER BY timestamp ASC`
+    ).all(sourceSessionId, branchPoint.timestamp) as MessageRow[];
+
+    const insert = db.prepare(
+      `INSERT INTO messages (id, session_id, role, content, channel_type, timestamp, execution_id, actions, media, token_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const row of rows) {
+      insert.run(
+        randomUUID(),
+        branchId,
+        row.role,
+        row.content,
+        row.channel_type,
+        row.timestamp,
+        row.execution_id,
+        row.actions,
+        row.media,
+        row.token_count,
+      );
+    }
+
+    db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now, branchId);
+    return rows.length;
+  });
+
+  const messageCount = copy();
+  return { id: branchId, bareId, messageCount };
 }

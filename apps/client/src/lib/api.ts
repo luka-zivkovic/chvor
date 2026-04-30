@@ -68,10 +68,13 @@ import type {
   DaemonPresence,
   DaemonTask,
   CreateDaemonTaskRequest,
+  CognitiveLoopRun,
+  CognitiveLoopWithEvents,
   MemoryGraphExport,
   MemoryStats,
   OAuthProviderDef,
   OAuthConnection,
+  OrchestratorCheckpoint,
 } from "@chvor/shared";
 
 export interface ProvidersResponse {
@@ -510,6 +513,11 @@ export const api = {
       request<null>(`/daemon/tasks/${id}`, { method: "DELETE" }),
   },
 
+  cognitiveLoops: {
+    list: (limit = 20) => request<CognitiveLoopRun[]>(`/cognitive-loops?limit=${limit}`),
+    get: (id: string) => request<CognitiveLoopWithEvents>(`/cognitive-loops/${encodeURIComponent(id)}`),
+  },
+
   templates: {
     exportYaml: () =>
       fetch(`${BASE}/templates/export`, { credentials: "same-origin" }).then((r) => {
@@ -595,6 +603,16 @@ export const api = {
       request<null>(`/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
     messages: (compositeId: string) =>
       request<ChatMessage[]>(`/sessions/${encodeURIComponent(compositeId)}/messages`),
+    timeline: (compositeId: string) =>
+      request<{
+        messages: Array<{ id: string; role: "user" | "assistant"; timestamp: string; preview: string }>;
+        checkpoints: OrchestratorCheckpoint[];
+      }>(`/sessions/${encodeURIComponent(compositeId)}/timeline`),
+    branch: (compositeId: string, body: { messageId?: string; title?: string }) =>
+      request<{ id: string; bareId: string; messageCount: number }>(
+        `/sessions/${encodeURIComponent(compositeId)}/branch`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
     generateTitle: (id: string) =>
       request<{ title: string | null; generated: boolean }>(
         `/sessions/${encodeURIComponent(id)}/generate-title`,
@@ -631,6 +649,8 @@ export const api = {
   a2ui: {
     listSurfaces: () => request<import("@chvor/shared").A2UISurfaceListItem[]>("/a2ui/surfaces"),
     getSurface: (id: string) => request<import("@chvor/shared").A2UISurface>(`/a2ui/surfaces/${encodeURIComponent(id)}`),
+    dispatchAction: (body: { surfaceId: string; eventName: string; sourceId?: string; payload?: Record<string, unknown> }) =>
+      request<DaemonTask>("/a2ui/actions", { method: "POST", body: JSON.stringify(body) }),
     deleteSurface: (id: string) =>
       request<{ id: string; deleted: boolean }>(`/a2ui/surfaces/${encodeURIComponent(id)}`, { method: "DELETE" }),
     deleteAll: () =>

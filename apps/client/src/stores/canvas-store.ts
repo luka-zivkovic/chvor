@@ -152,6 +152,26 @@ export interface GhostHubNodeData {
   [key: string]: unknown;
 }
 
+export interface MindAgentNodeData {
+  type: "mind-agent";
+  label: string;
+  agentId: string;
+  role: "researcher" | "planner" | "critic";
+  executionStatus: ExecStatus;
+  summary?: string;
+  durationMs?: number;
+  [key: string]: unknown;
+}
+
+export interface CanvasInputNodeData {
+  type: "canvas-input";
+  label: string;
+  inputKind: "file" | "url" | "text";
+  preview?: string;
+  executionStatus: ExecStatus;
+  [key: string]: unknown;
+}
+
 export type ChvorNodeData =
   | BrainNodeData
   | SkillNodeData
@@ -167,7 +187,9 @@ export type ChvorNodeData =
   | IntegrationsHubNodeData
   | WebhooksHubNodeData
   | WebhookNodeData
-  | GhostHubNodeData;
+  | GhostHubNodeData
+  | MindAgentNodeData
+  | CanvasInputNodeData;
 export type ChvorNode = Node<ChvorNodeData>;
 export type ChvorEdge = Edge & { data?: { active?: boolean; ghost?: boolean } };
 
@@ -187,6 +209,11 @@ interface CanvasState {
   resetExecution: () => void;
   updateBrainProvider: (providerId: string, model: string) => void;
   updateBrainLabel: (label: string) => void;
+  clearMindAgents: () => void;
+  upsertMindAgent: (agent: { agentId: string; role: MindAgentNodeData["role"]; title: string; status?: ExecStatus }) => void;
+  completeMindAgent: (agentId: string, title: string, summary: string, durationMs?: number) => void;
+  failMindAgent: (agentId: string, error: string) => void;
+  addCanvasInputNode: (input: { label: string; inputKind: CanvasInputNodeData["inputKind"]; preview?: string }) => void;
 }
 
 export const useCanvasStore = create<CanvasState>((set, get) => ({
@@ -499,9 +526,13 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       });
     });
 
+    const { nodes: previousNodes, edges: previousEdges } = get();
+    const transientNodes = previousNodes.filter((n) => n.type === "mind-agent" || n.type === "canvas-input");
+    const transientEdges = previousEdges.filter((e) => e.id.startsWith("edge-mind-") || e.id.startsWith("edge-input-"));
+
     set({
-      nodes: [brainNode, ...hubNodes],
-      edges: [...hubEdges],
+      nodes: [brainNode, ...hubNodes, ...transientNodes],
+      edges: [...hubEdges, ...transientEdges],
     });
   },
 
@@ -551,7 +582,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       data: { active: false, ghost: true },
     }));
 
-    set({ nodes: [brainNode, ...ghostNodes], edges: ghostEdges });
+    const { nodes: previousNodes, edges: previousEdges } = get();
+    const transientNodes = previousNodes.filter((n) => n.type === "mind-agent" || n.type === "canvas-input");
+    const transientEdges = previousEdges.filter((e) => e.id.startsWith("edge-mind-") || e.id.startsWith("edge-input-"));
+
+    set({ nodes: [brainNode, ...ghostNodes, ...transientNodes], edges: [...ghostEdges, ...transientEdges] });
   },
 
   deleteEdge: (edgeId: string) => {
@@ -618,5 +653,166 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const updated = [...nodes];
     updated[idx] = { ...nodes[idx], data: { ...nodes[idx].data, label } };
     set({ nodes: updated });
+  },
+
+  clearMindAgents: () => {
+    const { nodes, edges } = get();
+    set({
+      nodes: nodes.filter((n) => n.type !== "mind-agent"),
+      edges: edges.filter((e) => !e.id.startsWith("edge-mind-")),
+    });
+  },
+
+  upsertMindAgent: ({ agentId, role, title, status = "running" }) => {
+    const { nodes, edges } = get();
+    const existingIdx = nodes.findIndex((n) => n.id === `mind-${agentId}`);
+    const roleOrder: Record<MindAgentNodeData["role"], number> = { researcher: 0, planner: 1, critic: 2 };
+    const angle = -Math.PI / 2 + roleOrder[role] * ((2 * Math.PI) / 3);
+    const brain = nodes.find((n) => n.id === BRAIN_NODE_ID);
+    const origin = brain?.position ?? { x: -90, y: -90 };
+    const brainCenter = { x: origin.x + OFFSETS.brain.hw, y: origin.y + OFFSETS.brain.hh };
+    const pos = {
+      x: brainCenter.x + Math.cos(angle) * 245 - 58,
+      y: brainCenter.y + Math.sin(angle) * 205 - 48,
+    };
+
+    const nextData: MindAgentNodeData = {
+      type: "mind-agent",
+      label: title,
+      agentId,
+      role,
+      executionStatus: status,
+    };
+
+    let nextNodes = nodes;
+    if (existingIdx === -1) {
+      nextNodes = [
+        ...nodes,
+        {
+          id: `mind-${agentId}`,
+          type: "mind-agent" as const,
+          position: pos,
+          data: nextData,
+        },
+      ];
+    } else {
+      nextNodes = [...nodes];
+      nextNodes[existingIdx] = {
+        ...nodes[existingIdx],
+        data: { ...nodes[existingIdx].data, ...nextData },
+      } as ChvorNode;
+    }
+
+    const edgeId = `edge-mind-brain-${agentId}`;
+    let nextEdges = edges.some((e) => e.id === edgeId)
+      ? edges
+      : [
+          ...edges,
+          {
+            id: edgeId,
+            source: BRAIN_NODE_ID,
+            target: `mind-${agentId}`,
+            type: "animated",
+            animated: true,
+            data: { active: true },
+          },
+        ];
+
+    const peerNodes = nodes.filter((n) => n.type === "mind-agent" && n.id !== `mind-${agentId}`);
+    for (const peer of peerNodes) {
+      const peerEdgeId = `edge-mind-peer-${peer.id}-${agentId}`;
+      if (nextEdges.some((e) => e.id === peerEdgeId)) continue;
+      nextEdges = [
+        ...nextEdges,
+        {
+          id: peerEdgeId,
+          source: peer.id,
+          target: `mind-${agentId}`,
+          type: "animated",
+          animated: true,
+          data: { active: true },
+        },
+      ];
+    }
+
+    set({ nodes: nextNodes, edges: nextEdges });
+  },
+
+  completeMindAgent: (agentId, title, summary, durationMs) => {
+    const nodes = get().nodes;
+    const idx = nodes.findIndex((n) => n.id === `mind-${agentId}`);
+    if (idx === -1) return;
+    const updated = [...nodes];
+    updated[idx] = {
+      ...nodes[idx],
+      data: {
+        ...nodes[idx].data,
+        label: title,
+        summary,
+        durationMs,
+        executionStatus: "completed",
+      },
+    } as ChvorNode;
+    set({ nodes: updated });
+  },
+
+  failMindAgent: (agentId, error) => {
+    const nodes = get().nodes;
+    const idx = nodes.findIndex((n) => n.id === `mind-${agentId}`);
+    if (idx === -1) return;
+    const updated = [...nodes];
+    updated[idx] = {
+      ...nodes[idx],
+      data: { ...nodes[idx].data, summary: error, executionStatus: "failed" },
+    } as ChvorNode;
+    set({ nodes: updated });
+  },
+
+  addCanvasInputNode: ({ label, inputKind, preview }) => {
+    const { nodes, edges } = get();
+    const previousInputs = nodes.filter((n) => n.type === "canvas-input");
+    const retainedInputs = previousInputs.slice(-5);
+    const retainedInputIds = new Set(retainedInputs.map((n) => n.id));
+    const baseNodes = nodes.filter((n) => n.type !== "canvas-input" || retainedInputIds.has(n.id));
+    const baseEdges = edges.filter((e) => !e.id.startsWith("edge-input-") || retainedInputIds.has(e.source) || retainedInputIds.has(e.target));
+    const existingInputs = retainedInputs.length;
+    const id = `input-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    const brain = baseNodes.find((n) => n.id === BRAIN_NODE_ID);
+    const origin = brain?.position ?? { x: -90, y: -90 };
+    const brainCenter = { x: origin.x + OFFSETS.brain.hw, y: origin.y + OFFSETS.brain.hh };
+    const angle = Math.PI / 3 + existingInputs * 0.38;
+    const radius = 320 + Math.min(existingInputs, 4) * 18;
+    const position = {
+      x: brainCenter.x + Math.cos(angle) * radius - 72,
+      y: brainCenter.y + Math.sin(angle) * radius - 44,
+    };
+
+    const node: ChvorNode = {
+      id,
+      type: "canvas-input",
+      position,
+      data: {
+        type: "canvas-input",
+        label,
+        inputKind,
+        preview,
+        executionStatus: "completed",
+      },
+    };
+
+    set({
+      nodes: [...baseNodes, node],
+      edges: [
+        ...baseEdges,
+        {
+          id: `edge-input-brain-${id}`,
+          source: id,
+          target: BRAIN_NODE_ID,
+          type: "animated",
+          animated: true,
+          data: { active: true },
+        },
+      ],
+    });
   },
 }));

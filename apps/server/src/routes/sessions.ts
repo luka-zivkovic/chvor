@@ -5,11 +5,14 @@ import {
   deleteSession,
   deleteAllSessions,
   getSessionMessages,
+  getSessionTimelineMessages,
+  branchSessionFromMessage,
   listChannelTargets,
   updateSessionTitle,
   updateSessionArchive,
   getSessionTitle,
 } from "../db/session-store.ts";
+import { getCheckpoint, listCheckpointSummaries } from "../db/checkpoint-store.ts";
 
 const sessions = new Hono();
 
@@ -42,6 +45,34 @@ sessions.get("/:id/messages", (c) => {
     const offset = c.req.query("offset") ? parseInt(c.req.query("offset")!, 10) : undefined;
     const messages = getSessionMessages(id, limit, offset);
     return c.json({ data: messages });
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
+sessions.get("/:id/timeline", (c) => {
+  try {
+    const id = c.req.param("id");
+    const messages = getSessionTimelineMessages(id);
+    const checkpoints = listCheckpointSummaries({ sessionId: id, limit: 200 })
+      .map((summary) => getCheckpoint(summary.id))
+      .filter((checkpoint) => checkpoint !== null);
+    return c.json({ data: { messages, checkpoints } });
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
+sessions.post("/:id/branch", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as { messageId?: string; title?: string };
+    const branch = branchSessionFromMessage(id, {
+      messageId: typeof body.messageId === "string" ? body.messageId : undefined,
+      title: typeof body.title === "string" ? body.title : undefined,
+    });
+    if (!branch) return c.json({ error: "session or branch point not found" }, 404);
+    return c.json({ data: branch }, 201);
   } catch (err) {
     return c.json({ error: String(err) }, 500);
   }

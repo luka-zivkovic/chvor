@@ -5,6 +5,7 @@ import type { AnyProviderDef } from "./provider.js";
 import type { CommandApprovalRequest, CommandApprovalResponse } from "./shell.js";
 import type { ActivityEntry } from "./activity.js";
 import type { A2UISurfaceUpdate, A2UIDataModelUpdate, A2UIDeleteSurface } from "./a2ui.js";
+import type { CognitiveLoopEvent, CognitiveLoopRun } from "./cognitive-loop.js";
 import type { ProviderField } from "./provider.js";
 
 // ── Credential request (server-triggered modal) ────────────────
@@ -199,6 +200,8 @@ export type GatewayServerEvent =
   | { type: "pc.localAvailable"; data: { available: boolean; hostname: string; os: string } }
   | { type: "daemon.presence"; data: import("./daemon.js").DaemonPresence }
   | { type: "daemon.taskUpdate"; data: import("./daemon.js").DaemonTask }
+  | { type: "cognitive.loop.run"; data: CognitiveLoopRun }
+  | { type: "cognitive.loop.event"; data: CognitiveLoopEvent }
   | { type: "system.shutdown"; data: { reason: string } }
   | { type: "heartbeat"; data: Record<string, never> };
 

@@ -52,9 +52,24 @@ export interface MemoryRetrievalTrace {
   durationMs: number;
 }
 
+export type MultiMindRole = "researcher" | "planner" | "critic";
+
+export interface MultiMindInsight {
+  agentId: string;
+  role: MultiMindRole;
+  title: string;
+  text: string;
+  durationMs: number;
+}
+
 export type ExecutionEvent =
   | { type: "execution.started"; data: { executionId: string } }
   | { type: "brain.thinking"; data: { thought: string } }
+  | { type: "multi_mind.started"; data: { roles: MultiMindRole[] } }
+  | { type: "multi_mind.agent.started"; data: { agentId: string; role: MultiMindRole; title: string } }
+  | { type: "multi_mind.agent.completed"; data: MultiMindInsight }
+  | { type: "multi_mind.agent.failed"; data: { agentId: string; role: MultiMindRole; title: string; error: string } }
+  | { type: "multi_mind.completed"; data: { insights: MultiMindInsight[]; durationMs: number } }
   | {
       type: "brain.decision";
       data: { skillId?: string; toolId?: string; capabilityKind: "skill" | "tool"; reason: string };

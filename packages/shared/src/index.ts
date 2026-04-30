@@ -27,6 +27,7 @@ export * from "./types/backup.js";
 export * from "./types/pc-control.js";
 export * from "./types/sandbox.js";
 export * from "./types/daemon.js";
+export * from "./types/cognitive-loop.js";
 export * from "./types/action-event.js";
 export * from "./types/tool-group.js";
 export * from "./types/security.js";

@@ -11,6 +11,7 @@ interface DaemonTaskRow {
   status: string;
   progress: string | null;
   retry_count: number;
+  loop_id: string | null;
   result: string | null;
   error: string | null;
   created_at: string;
@@ -28,6 +29,7 @@ function rowToTask(row: DaemonTaskRow): DaemonTask {
     status: row.status as DaemonTaskStatus,
     progress: row.progress,
     retryCount: row.retry_count ?? 0,
+    loopId: row.loop_id ?? null,
     result: row.result,
     error: row.error,
     createdAt: row.created_at,
@@ -36,14 +38,14 @@ function rowToTask(row: DaemonTaskRow): DaemonTask {
   };
 }
 
-export function createDaemonTask(opts: CreateDaemonTaskRequest & { source?: DaemonTaskSource }): DaemonTask {
+export function createDaemonTask(opts: CreateDaemonTaskRequest & { source?: DaemonTaskSource; loopId?: string | null }): DaemonTask {
   const db = getDb();
   const id = randomUUID();
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO daemon_tasks (id, title, prompt, source, priority, status, created_at)
-     VALUES (?, ?, ?, ?, ?, 'queued', ?)`
-  ).run(id, opts.title, opts.prompt, opts.source ?? "user", opts.priority ?? 1, now);
+    `INSERT INTO daemon_tasks (id, title, prompt, source, priority, status, loop_id, created_at)
+     VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`
+  ).run(id, opts.title, opts.prompt, opts.source ?? "user", opts.priority ?? 1, opts.loopId ?? null, now);
   return getDaemonTask(id)!;
 }
 

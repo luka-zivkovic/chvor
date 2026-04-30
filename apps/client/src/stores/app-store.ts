@@ -20,6 +20,7 @@ import { useFeatureStore } from "./feature-store";
 import { useRuntimeStore } from "./runtime-store";
 import { useSessionStore } from "./session-store";
 import { useUIStore } from "./ui-store";
+import { useCanvasStore } from "./canvas-store";
 import { SESSION_ID_KEY } from "../lib/constants";
 import { api } from "../lib/api";
 
@@ -412,6 +413,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Reset streaming state when a new execution begins
         if (execEvent.type === "execution.started") {
           chunkBuffer = [];
+          useCanvasStore.getState().clearMindAgents();
           set({
             streamingContent: null, streamingTools: [], streamingStopped: false, pendingModelInfo: null,
             streamingThought: null, streamingDecisionReason: null, memoryTrace: null, tokenBudget: null, toolTrace: [],
@@ -486,6 +488,22 @@ export const useAppStore = create<AppState>((set, get) => ({
                   : next,
             };
           });
+        } else if (execEvent.type === "multi_mind.agent.started") {
+          useCanvasStore.getState().upsertMindAgent({
+            agentId: execEvent.data.agentId,
+            role: execEvent.data.role,
+            title: execEvent.data.title,
+            status: "running",
+          });
+        } else if (execEvent.type === "multi_mind.agent.completed") {
+          useCanvasStore.getState().completeMindAgent(
+            execEvent.data.agentId,
+            execEvent.data.title,
+            execEvent.data.text,
+            execEvent.data.durationMs,
+          );
+        } else if (execEvent.type === "multi_mind.agent.failed") {
+          useCanvasStore.getState().failMindAgent(execEvent.data.agentId, execEvent.data.error);
         }
         break;
       }
@@ -521,6 +539,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case "activity.new":
         useRuntimeStore.getState().handleActivityEvent(event.data);
+        break;
+      case "cognitive.loop.run":
+        useRuntimeStore.getState().handleCognitiveLoopRun(event.data);
+        break;
+      case "cognitive.loop.event":
+        useRuntimeStore.getState().handleCognitiveLoopEvent(event.data);
         break;
       case "pc.connected":
         useSessionStore.getState().handleAgentConnected(event.data);

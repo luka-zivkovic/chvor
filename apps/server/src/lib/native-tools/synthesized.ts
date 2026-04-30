@@ -48,6 +48,7 @@ const synthesizeToolDef = tool({
 
 const handleSynthesizeTool: NativeToolHandler = async (
   args: Record<string, unknown>,
+  context?: NativeToolContext,
 ): Promise<NativeToolResult> => {
   const serviceName = String(args.serviceName);
   const slug = String(args.slug).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -208,6 +209,18 @@ const handleSynthesizeTool: NativeToolHandler = async (
       const { invalidateToolCache } = await import("../tool-builder.ts");
       invalidateToolCache();
     } catch { /* non-critical */ }
+    if (context?.loopId) {
+      try {
+        const { appendCognitiveLoopEvent } = await import("../cognitive-loop.ts");
+        appendCognitiveLoopEvent(context.loopId, "tool.synthesized", `Synthesized tool: ${slug}`, `${finalEndpoints.length} endpoint(s) generated for ${serviceName}.`, {
+          slug,
+          serviceName,
+          endpointCount: finalEndpoints.length,
+          source: specSource,
+          verified,
+        });
+      } catch { /* non-critical */ }
+    }
 
     const endpointList = finalEndpoints.map((e) => `  - ${slug}__${e.name} (${e.method} ${e.path})`).join("\n");
     const verifiedTag = verified ? "verified (OpenAPI-grounded)" : "unverified (AI-drafted)";
@@ -341,6 +354,15 @@ const handleRepairSynthesizedTool: NativeToolHandler = async (
       const { invalidateToolCache } = await import("../tool-builder.ts");
       invalidateToolCache();
     } catch { /* non-critical */ }
+    if (context?.loopId) {
+      try {
+        const { appendCognitiveLoopEvent } = await import("../cognitive-loop.ts");
+        appendCognitiveLoopEvent(context.loopId, "tool.synthesized", `Repaired synthesized tool: ${slug}__${endpointName}`, `${updatedEndpoint.method} ${updatedEndpoint.path}`, {
+          slug,
+          endpointName,
+        });
+      } catch { /* non-critical */ }
+    }
 
     return {
       content: [{

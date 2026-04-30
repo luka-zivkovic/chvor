@@ -13,7 +13,7 @@ import { parseA2UIAction, type ParsedA2UIAction } from "@chvor/shared";
  * and dropped — the button/form silently no-ops rather than firing the action.
  */
 
-export type A2UIActionDispatcher = (action: ParsedA2UIAction, sourceId?: string) => void;
+export type A2UIActionDispatcher = (action: ParsedA2UIAction, sourceId?: string) => void | Promise<void>;
 
 const A2UIActionContext = createContext<A2UIActionDispatcher | null>(null);
 
@@ -31,14 +31,14 @@ export function A2UIActionProvider({
 
 export function useA2UIAction(): {
   /** Parse + dispatch a raw action string. Returns true if dispatched. */
-  fire: (raw: string, sourceId?: string) => boolean;
+  fire: (raw: string, sourceId?: string) => Promise<boolean>;
   /** True if a host dispatcher is registered (controls UI affordances). */
   enabled: boolean;
 } {
   const dispatch = useContext(A2UIActionContext);
   return {
     enabled: dispatch !== null,
-    fire: (raw: string, sourceId?: string): boolean => {
+    fire: async (raw: string, sourceId?: string): Promise<boolean> => {
       const parsed = parseA2UIAction(raw);
       if (!parsed) {
         console.warn(`[a2ui] dropped unsafe action${sourceId ? ` on "${sourceId}"` : ""}:`, raw);
@@ -49,7 +49,7 @@ export function useA2UIAction(): {
         return false;
       }
       try {
-        dispatch(parsed, sourceId);
+        await dispatch(parsed, sourceId);
       } catch (err) {
         console.error(`[a2ui] dispatcher threw on action${sourceId ? ` "${sourceId}"` : ""}:`, err);
         return false;

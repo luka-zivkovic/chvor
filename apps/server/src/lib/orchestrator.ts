@@ -52,6 +52,7 @@ import {
   reorderDefsByRanking,
   reorderToolsByRanking,
 } from "./tool-bag-resolver.ts";
+import { runParallelMultiMind } from "./multi-mind.ts";
 
 export type EventEmitter = (event: ExecutionEvent) => void;
 
@@ -148,6 +149,8 @@ export interface ExecuteOptions {
   abortSignal?: AbortSignal;
   /** Attribution for typed audit events. Defaults to actor_type=session, actor_id=sessionId. */
   actor?: { type: ActorType; id: string | null };
+  /** Cognitive loop lineage for autonomous runs spawned by pulse/daemon/A2UI. */
+  loopId?: string;
 }
 
 /** @deprecated Use ModelUsedInfo from @chvor/shared */
@@ -530,6 +533,22 @@ export async function executeConversation(
       false, // no regulation on first turn
     );
     fullVolatilePrompt += "\n\n" + advCtx;
+  }
+
+  try {
+    const multiMind = await runParallelMultiMind({
+      userText: lastUserMsg?.content ?? "",
+      memoryFacts,
+      channelType: options?.channelType,
+      loopId: options?.loopId,
+      abortSignal: options?.abortSignal,
+      emit,
+    });
+    if (multiMind.digest) {
+      fullVolatilePrompt += `\n\n${multiMind.digest}`;
+    }
+  } catch (err) {
+    console.warn("[orchestrator] multi-mind deliberation skipped:", err instanceof Error ? err.message : String(err));
   }
 
   const fullSystemPrompt = stablePrompt + "\n\n" + fullVolatilePrompt;
@@ -1163,6 +1182,7 @@ export async function executeConversation(
             originClientId: options?.originClientId,
             channelType: options?.channelType,
             channelId: options?.channelId,
+            loopId: options?.loopId,
             latestUserText,
             allowedCredentialTypes: bagScope.allowedCredentialTypes
               ? Array.from(bagScope.allowedCredentialTypes)

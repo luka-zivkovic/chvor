@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useUIStore } from "../../stores/ui-store";
 import { useRuntimeStore } from "../../stores/runtime-store";
-import { A2UIRenderer } from "./A2UIRenderer";
+import { A2UIHostRenderer } from "./A2UIHostRenderer";
 import { cn } from "@/lib/utils";
 
 const MIN_W = 360;
@@ -212,7 +212,7 @@ export function A2UIPreviewModal() {
         {/* ─── Body ─── */}
         <div className="flex-1 overflow-y-auto p-4">
           {activeSurface ? (
-            <A2UIRenderer surfaceId={activeSurface.surfaceId} surface={activeSurface} />
+            <A2UIHostRenderer surfaceId={activeSurface.surfaceId} surface={activeSurface} />
           ) : (
             <div className="flex h-full items-center justify-center">
               <p className="text-xs text-muted-foreground">

@@ -1026,6 +1026,50 @@ export function getDb(): Database.Database {
     console.log("[db] migration v28 applied: approvals (Phase D4 durable HITL)");
   }
 
+  if (currentVersion < 29) {
+    // ── Cognitive loops (next-gen autonomous remediation timeline) ───────
+    // A run is the visible "thought loop" started by pulse/A2UI/daemon.
+    // Events form the durable timeline shown on the canvas rail and can link
+    // downstream daemon tasks, memory consolidation, and synthesized tools.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cognitive_loop_runs (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running',
+        severity TEXT NOT NULL DEFAULT 'info',
+        trigger TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        current_stage TEXT,
+        surface_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_cognitive_loop_runs_status ON cognitive_loop_runs(status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_cognitive_loop_runs_created ON cognitive_loop_runs(created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS cognitive_loop_events (
+        id TEXT PRIMARY KEY,
+        loop_id TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT,
+        metadata TEXT,
+        ts TEXT NOT NULL,
+        FOREIGN KEY(loop_id) REFERENCES cognitive_loop_runs(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_cognitive_loop_events_loop ON cognitive_loop_events(loop_id, ts ASC);
+    `);
+    try {
+      db.exec("ALTER TABLE daemon_tasks ADD COLUMN loop_id TEXT");
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_daemon_tasks_loop ON daemon_tasks(loop_id)");
+    db.pragma("user_version = 29");
+    console.log("[db] migration v29 applied: cognitive loop runs/events + daemon task linkage");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }
