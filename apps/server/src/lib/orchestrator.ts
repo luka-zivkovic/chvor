@@ -1187,6 +1187,7 @@ export async function executeConversation(
             allowedCredentialTypes: bagScope.allowedCredentialTypes
               ? Array.from(bagScope.allowedCredentialTypes)
               : undefined,
+            preferredUsageContext,
           });
           const nativeMedia = extractMedia(nativeResult, PC_INTERNAL_MEDIA_TOOLS.has(tc.toolName) ? { internal: true } : undefined);
           // Persist observation with secret-safe payload for credential tools

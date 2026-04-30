@@ -54,6 +54,8 @@ export interface PickerContext {
     candidateCount: number;
     detail?: string;
   }) => void;
+  /** Fail closed by default instead of silently using first-match fallback. */
+  allowAmbiguousFallback?: boolean;
 }
 
 function loadPickedCredentialData(
@@ -65,6 +67,9 @@ function loadPickedCredentialData(
     preferredUsageContext: pickerCtx?.preferredUsageContext,
   });
   if (!pick) return null;
+  if (pick.reason === "first-match-fallback" && pick.candidateCount > 1 && !pickerCtx?.allowAmbiguousFallback) {
+    throw new Error(`[credential-resolver] multiple credentials of type "${reqType}" are available and no pin or usage_context selected a clear winner — pin a credential for this session or use a more specific credential reference`);
+  }
   const full = getCredentialData(pick.credentialId);
   if (!full) return null;
   if (pickerCtx?.onPick) {

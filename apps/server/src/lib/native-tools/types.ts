@@ -32,6 +32,12 @@ export interface NativeToolContext {
    * silently expand credentials forbidden by the active skill scope.
    */
   allowedCredentialTypes?: string[];
+  /**
+   * Active skills' credential usage hints. Browser/native placeholder
+   * expansion uses this as the same safe disambiguation signal as
+   * synthesized tools before it asks the user.
+   */
+  preferredUsageContext?: string[];
 }
 
 export type NativeToolHandler = (
