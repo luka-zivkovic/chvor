@@ -1,9 +1,13 @@
 // ─── Cognitive Loop Types ──────────────────────────────────
 
-export type CognitiveLoopStatus = "running" | "completed" | "failed";
+export type CognitiveLoopStatus = "running" | "paused" | "completed" | "failed";
 export type CognitiveLoopSeverity = "warning" | "critical" | "info";
 
 export type CognitiveLoopStage =
+  | "playbook.started"
+  | "playbook.step.started"
+  | "playbook.step.completed"
+  | "playbook.action.requested"
   | "pulse.detected"
   | "a2ui.action.received"
   | "memory.consolidation.started"
@@ -16,6 +20,8 @@ export type CognitiveLoopStage =
   | "daemon.task.failed"
   | "tool.synthesized"
   | "a2ui.surface.pinned"
+  | "loop.paused"
+  | "loop.resumed"
   | "loop.completed"
   | "loop.failed";
 
