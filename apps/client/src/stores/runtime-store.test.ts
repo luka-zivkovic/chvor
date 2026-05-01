@@ -1,7 +1,59 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { CognitiveLoopRun, CognitiveLoopWithEvents } from "@chvor/shared";
+
+const { mockListCognitiveLoops, mockGetCognitiveLoop } = vi.hoisted(() => ({
+  mockListCognitiveLoops: vi.fn(),
+  mockGetCognitiveLoop: vi.fn(),
+}));
+
+vi.mock("../lib/api", () => ({
+  api: {
+    cognitiveLoops: {
+      list: mockListCognitiveLoops,
+      get: mockGetCognitiveLoop,
+    },
+  },
+}));
+
 import { useRuntimeStore } from "./runtime-store";
 
+function makeLoop(overrides: Partial<CognitiveLoopRun> & Pick<CognitiveLoopRun, "id" | "title">): CognitiveLoopRun {
+  return {
+    id: overrides.id,
+    title: overrides.title,
+    status: "completed",
+    severity: "info",
+    trigger: "manual",
+    summary: `${overrides.title} summary`,
+    currentStage: null,
+    surfaceId: null,
+    createdAt: "2026-05-01T10:00:00.000Z",
+    updatedAt: "2026-05-01T10:00:00.000Z",
+    completedAt: "2026-05-01T10:05:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeLoopDetail(run: CognitiveLoopRun): CognitiveLoopWithEvents {
+  return {
+    run,
+    events: [
+      {
+        id: `${run.id}-event-1`,
+        loopId: run.id,
+        stage: "loop.completed",
+        title: `${run.title} event`,
+        body: `${run.title} body`,
+        metadata: null,
+        ts: "2026-05-01T10:01:00.000Z",
+      },
+    ],
+  };
+}
+
 beforeEach(() => {
+  mockListCognitiveLoops.mockReset();
+  mockGetCognitiveLoop.mockReset();
   useRuntimeStore.getState().resetAll();
 });
 
@@ -189,5 +241,107 @@ describe("a2ui-store", () => {
       expect(activeSurfaceId).toBeNull();
       expect(activeSurface).toBeNull();
     });
+  });
+});
+
+describe("cognitive-loop-store", () => {
+  it("keeps a manually selected history loop active when running loop updates arrive", async () => {
+    const runningLoop = makeLoop({
+      id: "loop-live",
+      title: "Live loop",
+      status: "running",
+      completedAt: null,
+    });
+    const historyLoop = makeLoop({ id: "loop-history", title: "History loop" });
+
+    const store = useRuntimeStore.getState();
+    store.handleCognitiveLoopRun(runningLoop);
+    store.handleCognitiveLoopRun(historyLoop);
+
+    mockGetCognitiveLoop.mockResolvedValue(makeLoopDetail(historyLoop));
+    await store.selectCognitiveLoop(historyLoop.id);
+
+    store.handleCognitiveLoopRun({
+      ...runningLoop,
+      summary: "Live loop updated",
+      updatedAt: "2026-05-01T10:02:00.000Z",
+    });
+
+    const state = useRuntimeStore.getState();
+    expect(state.selectedCognitiveLoopId).toBe(historyLoop.id);
+    expect(state.activeCognitiveLoop?.id).toBe(historyLoop.id);
+  });
+
+  it("fetchCognitiveLoops preserves a manual history selection and fetches its timeline", async () => {
+    const runningLoop = makeLoop({
+      id: "loop-live",
+      title: "Live loop",
+      status: "running",
+      completedAt: null,
+    });
+    const historyLoop = makeLoop({ id: "loop-history", title: "History loop" });
+
+    useRuntimeStore.setState({
+      cognitiveLoops: [runningLoop, historyLoop],
+      activeCognitiveLoop: historyLoop,
+      selectedCognitiveLoopId: historyLoop.id,
+      cognitiveLoopSelectionLoading: false,
+      cognitiveLoopEvents: {},
+    });
+
+    mockListCognitiveLoops.mockResolvedValue([runningLoop, historyLoop]);
+    mockGetCognitiveLoop.mockResolvedValue(makeLoopDetail(historyLoop));
+
+    await useRuntimeStore.getState().fetchCognitiveLoops();
+
+    const state = useRuntimeStore.getState();
+    expect(mockGetCognitiveLoop).toHaveBeenCalledWith(historyLoop.id);
+    expect(state.selectedCognitiveLoopId).toBe(historyLoop.id);
+    expect(state.activeCognitiveLoop?.id).toBe(historyLoop.id);
+    expect(state.cognitiveLoopEvents[historyLoop.id]).toHaveLength(1);
+  });
+
+  it("ignores stale select responses when a newer selection finishes first", async () => {
+    const firstLoop = makeLoop({ id: "loop-a", title: "Loop A" });
+    const secondLoop = makeLoop({
+      id: "loop-b",
+      title: "Loop B",
+      status: "running",
+      completedAt: null,
+    });
+
+    useRuntimeStore.setState({
+      cognitiveLoops: [secondLoop, firstLoop],
+      activeCognitiveLoop: secondLoop,
+      selectedCognitiveLoopId: secondLoop.id,
+      cognitiveLoopSelectionLoading: false,
+      cognitiveLoopEvents: {},
+    });
+
+    let resolveFirst: ((value: CognitiveLoopWithEvents) => void) | null = null;
+    let resolveSecond: ((value: CognitiveLoopWithEvents) => void) | null = null;
+    const firstPromise = new Promise<CognitiveLoopWithEvents>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const secondPromise = new Promise<CognitiveLoopWithEvents>((resolve) => {
+      resolveSecond = resolve;
+    });
+
+    mockGetCognitiveLoop
+      .mockReturnValueOnce(firstPromise)
+      .mockReturnValueOnce(secondPromise);
+
+    const firstSelection = useRuntimeStore.getState().selectCognitiveLoop(firstLoop.id);
+    const secondSelection = useRuntimeStore.getState().selectCognitiveLoop(secondLoop.id);
+
+    resolveSecond?.(makeLoopDetail(secondLoop));
+    await secondSelection;
+    resolveFirst?.(makeLoopDetail(firstLoop));
+    await firstSelection;
+
+    const state = useRuntimeStore.getState();
+    expect(state.selectedCognitiveLoopId).toBe(secondLoop.id);
+    expect(state.activeCognitiveLoop?.id).toBe(secondLoop.id);
+    expect(state.cognitiveLoopSelectionLoading).toBe(false);
   });
 });

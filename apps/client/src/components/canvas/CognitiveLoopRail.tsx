@@ -15,6 +15,8 @@ function severityColor(severity: string): string {
 export function CognitiveLoopRail() {
   const loops = useRuntimeStore((s) => s.cognitiveLoops);
   const activeLoop = useRuntimeStore((s) => s.activeCognitiveLoop);
+  const selectedCognitiveLoopId = useRuntimeStore((s) => s.selectedCognitiveLoopId);
+  const cognitiveLoopSelectionLoading = useRuntimeStore((s) => s.cognitiveLoopSelectionLoading);
   const eventsByLoop = useRuntimeStore((s) => s.cognitiveLoopEvents);
   const selectCognitiveLoop = useRuntimeStore((s) => s.selectCognitiveLoop);
   const openPreviewModal = useUIStore((s) => s.openPreviewModal);
@@ -45,6 +47,7 @@ export function CognitiveLoopRail() {
   const color = severityColor(activeLoop.severity);
   const isRunning = activeLoop.status === "running";
   const isPaused = activeLoop.status === "paused";
+  const isLiveSelection = selectedCognitiveLoopId === activeLoop.id && isRunning;
 
   return (
     <div className="pointer-events-none absolute left-5 top-5 z-20 w-[360px] max-w-[calc(100vw-2.5rem)]">
@@ -93,9 +96,14 @@ export function CognitiveLoopRail() {
 
         {loops.length > 1 && (
           <label className="mb-3 block text-[10px] uppercase tracking-[0.18em] text-white/35">
-            timeline
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span>timeline</span>
+              <span className="font-mono normal-case tracking-normal text-white/45">
+                {cognitiveLoopSelectionLoading ? "loading…" : isLiveSelection ? "live" : "history"}
+              </span>
+            </div>
             <select
-              value={activeLoop.id}
+              value={selectedCognitiveLoopId ?? activeLoop.id}
               className="mt-1 h-8 w-full rounded-lg border border-white/10 bg-black/30 px-2 text-xs normal-case tracking-normal text-white/75 outline-none transition hover:bg-white/5 focus:border-white/25"
               onChange={(event) => void selectCognitiveLoop(event.target.value)}
             >
