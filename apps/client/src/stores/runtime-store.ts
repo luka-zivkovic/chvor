@@ -47,9 +47,7 @@ function toComponentMap(entries: A2UIComponentEntry[]): Record<string, A2UICompo
 
 function upsertCognitiveLoop(loops: CognitiveLoopRun[], run: CognitiveLoopRun): CognitiveLoopRun[] {
   const existing = loops.some((loop) => loop.id === run.id);
-  return existing
-    ? loops.map((loop) => (loop.id === run.id ? run : loop))
-    : [run, ...loops];
+  return existing ? loops.map((loop) => (loop.id === run.id ? run : loop)) : [run, ...loops];
 }
 
 function resolvePreferredCognitiveLoop(
@@ -61,7 +59,12 @@ function resolvePreferredCognitiveLoop(
     const selectedLoop = loops.find((loop) => loop.id === selectedCognitiveLoopId);
     if (selectedLoop) return selectedLoop;
   }
-  return loops.find((loop) => loop.status === "running") ?? fallbackActiveCognitiveLoop ?? loops[0] ?? null;
+  return (
+    loops.find((loop) => loop.status === "running") ??
+    fallbackActiveCognitiveLoop ??
+    loops[0] ??
+    null
+  );
 }
 
 interface RuntimeState {
@@ -224,9 +227,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
           activeCognitiveLoop:
             s.selectedCognitiveLoopId === detail.run.id ? detail.run : s.activeCognitiveLoop,
           cognitiveLoopSelectionLoading:
-            s.selectedCognitiveLoopId === detail.run.id
-              ? false
-              : s.cognitiveLoopSelectionLoading,
+            s.selectedCognitiveLoopId === detail.run.id ? false : s.cognitiveLoopSelectionLoading,
         }));
       } else {
         set({ cognitiveLoopSelectionLoading: false });
@@ -241,8 +242,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     set((s) => ({
       selectedCognitiveLoopId: id,
       cognitiveLoopSelectionLoading: true,
-      activeCognitiveLoop:
-        s.cognitiveLoops.find((loop) => loop.id === id) ?? s.activeCognitiveLoop,
+      activeCognitiveLoop: s.cognitiveLoops.find((loop) => loop.id === id) ?? s.activeCognitiveLoop,
     }));
     try {
       const detail = await api.cognitiveLoops.get(id);
@@ -267,10 +267,11 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       const loops = upsertCognitiveLoop(s.cognitiveLoops, run).slice(0, 50);
       const selectedId = loops.some((loop) => loop.id === s.selectedCognitiveLoopId)
         ? s.selectedCognitiveLoopId
-        : resolvePreferredCognitiveLoop(loops, null, s.activeCognitiveLoop)?.id ?? null;
-      const active = selectedId === run.id
-        ? run
-        : loops.find((loop) => loop.id === selectedId) ?? s.activeCognitiveLoop ?? run;
+        : (resolvePreferredCognitiveLoop(loops, null, s.activeCognitiveLoop)?.id ?? null);
+      const active =
+        selectedId === run.id
+          ? run
+          : (loops.find((loop) => loop.id === selectedId) ?? s.activeCognitiveLoop ?? run);
       return {
         cognitiveLoops: loops,
         activeCognitiveLoop: active,
@@ -360,7 +361,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
 
   loadSessionHistory: async (sessionId: string) => {
     try {
-      const history = await api.get<EmotionSnapshot[]>(`/emotions/session/${sessionId}`) ?? [];
+      const history = (await api.get<EmotionSnapshot[]>(`/emotions/session/${sessionId}`)) ?? [];
       const last = history.length > 0 ? history[history.length - 1] : null;
       set({
         sessionHistory: history,
@@ -376,7 +377,10 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   },
 
   clearSession: () => {
-    if (shiftTimeoutId) { clearTimeout(shiftTimeoutId); shiftTimeoutId = null; }
+    if (shiftTimeoutId) {
+      clearTimeout(shiftTimeoutId);
+      shiftTimeoutId = null;
+    }
     set({
       currentSnapshot: null,
       previousSnapshot: null,
@@ -497,10 +501,18 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     const exists = surfaceList.some((s) => s.id === data.surfaceId);
     const newList = exists
       ? surfaceList.map((s) =>
-          s.id === data.surfaceId ? { ...s, title: effectiveTitle, updatedAt: new Date().toISOString() } : s
+          s.id === data.surfaceId
+            ? { ...s, title: effectiveTitle, updatedAt: new Date().toISOString() }
+            : s
         )
       : [
-          { id: data.surfaceId, title: effectiveTitle, rendering: rootValid, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+          {
+            id: data.surfaceId,
+            title: effectiveTitle,
+            rendering: rootValid,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
           ...surfaceList,
         ];
 
@@ -552,19 +564,20 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   },
 
   setActiveSurface: (id) => {
-    const surface = id ? get().surfaces[id] ?? null : null;
+    const surface = id ? (get().surfaces[id] ?? null) : null;
     set({ activeSurfaceId: id, activeSurface: surface });
   },
 
-  resetAll: () => set({
-    cognitiveLoops: [],
-    activeCognitiveLoop: null,
-    selectedCognitiveLoopId: null,
-    cognitiveLoopSelectionLoading: false,
-    cognitiveLoopEvents: {},
-    surfaces: {},
-    surfaceList: [],
-    activeSurfaceId: null,
-    activeSurface: null,
-  }),
+  resetAll: () =>
+    set({
+      cognitiveLoops: [],
+      activeCognitiveLoop: null,
+      selectedCognitiveLoopId: null,
+      cognitiveLoopSelectionLoading: false,
+      cognitiveLoopEvents: {},
+      surfaces: {},
+      surfaceList: [],
+      activeSurfaceId: null,
+      activeSurface: null,
+    }),
 }));

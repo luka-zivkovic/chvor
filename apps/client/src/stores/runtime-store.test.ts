@@ -17,20 +17,23 @@ vi.mock("../lib/api", () => ({
 
 import { useRuntimeStore } from "./runtime-store";
 
-function makeLoop(overrides: Partial<CognitiveLoopRun> & Pick<CognitiveLoopRun, "id" | "title">): CognitiveLoopRun {
+function makeLoop(
+  overrides: Partial<CognitiveLoopRun> & Pick<CognitiveLoopRun, "id" | "title">
+): CognitiveLoopRun {
+  const { id, title, ...rest } = overrides;
   return {
-    id: overrides.id,
-    title: overrides.title,
+    id,
+    title,
     status: "completed",
     severity: "info",
     trigger: "manual",
-    summary: `${overrides.title} summary`,
+    summary: `${title} summary`,
     currentStage: null,
     surfaceId: null,
     createdAt: "2026-05-01T10:00:00.000Z",
     updatedAt: "2026-05-01T10:00:00.000Z",
     completedAt: "2026-05-01T10:05:00.000Z",
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -327,16 +330,16 @@ describe("cognitive-loop-store", () => {
       resolveSecond = resolve;
     });
 
-    mockGetCognitiveLoop
-      .mockReturnValueOnce(firstPromise)
-      .mockReturnValueOnce(secondPromise);
+    mockGetCognitiveLoop.mockReturnValueOnce(firstPromise).mockReturnValueOnce(secondPromise);
 
     const firstSelection = useRuntimeStore.getState().selectCognitiveLoop(firstLoop.id);
     const secondSelection = useRuntimeStore.getState().selectCognitiveLoop(secondLoop.id);
 
-    resolveSecond?.(makeLoopDetail(secondLoop));
+    expect(resolveSecond).not.toBeNull();
+    resolveSecond!(makeLoopDetail(secondLoop));
     await secondSelection;
-    resolveFirst?.(makeLoopDetail(firstLoop));
+    expect(resolveFirst).not.toBeNull();
+    resolveFirst!(makeLoopDetail(firstLoop));
     await firstSelection;
 
     const state = useRuntimeStore.getState();
