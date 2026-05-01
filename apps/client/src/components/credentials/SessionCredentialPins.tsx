@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, type SessionCredentialPinInfo } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
+  getSessionPinRefreshDelays,
+  readSessionPinsChangedDetail,
   SESSION_PINS_CHANGED_EVENT,
   notifySessionPinsChanged,
 } from "../../lib/session-pins-events";
@@ -31,6 +33,7 @@ export function SessionCredentialPins({ compact = false, showEmpty = true, class
   const [pins, setPins] = useState<SessionCredentialPinInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const refreshTimersRef = useRef<number[]>([]);
 
   const loadPins = useCallback(async () => {
     if (!sessionId) {
@@ -53,9 +56,29 @@ export function SessionCredentialPins({ compact = false, showEmpty = true, class
   }, [loadPins]);
 
   useEffect(() => {
-    const onChanged = () => void loadPins();
+    const clearRefreshTimers = () => {
+      for (const timer of refreshTimersRef.current) window.clearTimeout(timer);
+      refreshTimersRef.current = [];
+    };
+
+    const onChanged = (event: Event) => {
+      clearRefreshTimers();
+      const detail = readSessionPinsChangedDetail(event);
+      const delays = getSessionPinRefreshDelays(detail.reason);
+      for (const delay of delays) {
+        const timer = window.setTimeout(() => {
+          refreshTimersRef.current = refreshTimersRef.current.filter((value) => value !== timer);
+          void loadPins();
+        }, delay);
+        refreshTimersRef.current.push(timer);
+      }
+    };
+
     window.addEventListener(SESSION_PINS_CHANGED_EVENT, onChanged);
-    return () => window.removeEventListener(SESSION_PINS_CHANGED_EVENT, onChanged);
+    return () => {
+      clearRefreshTimers();
+      window.removeEventListener(SESSION_PINS_CHANGED_EVENT, onChanged);
+    };
   }, [loadPins]);
 
   const unpin = useCallback(
@@ -65,7 +88,7 @@ export function SessionCredentialPins({ compact = false, showEmpty = true, class
       try {
         await api.sessions.deleteCredentialPin(sessionId, credentialType);
         await loadPins();
-        notifySessionPinsChanged();
+        notifySessionPinsChanged({ reason: "unpin" });
         toast.success(`Unpinned ${credentialType} for this session`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to unpin credential");
@@ -82,7 +105,7 @@ export function SessionCredentialPins({ compact = false, showEmpty = true, class
     try {
       await api.sessions.clearCredentialPins(sessionId);
       await loadPins();
-      notifySessionPinsChanged();
+      notifySessionPinsChanged({ reason: "clear-all" });
       toast.success("Cleared session credential pins");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to clear pins");

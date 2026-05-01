@@ -33,7 +33,7 @@ export function CredentialChoicePrompt({ request, onSend }: Props) {
       });
       respondToCredentialChoice(request.requestId);
       if (action === "pin-session") {
-        window.setTimeout(() => notifySessionPinsChanged(), 250);
+        notifySessionPinsChanged({ reason: "pin-session" });
       }
     },
     [onSend, request.requestId, respondToCredentialChoice, selectedId]
