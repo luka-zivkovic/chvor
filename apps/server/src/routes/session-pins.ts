@@ -6,7 +6,7 @@ import {
   listSessionPins,
   setSessionPin,
 } from "../db/session-pin-store.ts";
-import { listCredentials } from "../db/credential-store.ts";
+import { listCredentialMetadata } from "../db/credential-store.ts";
 import { appendAudit } from "../db/audit-log-store.ts";
 import type { AuthEnv } from "../middleware/auth.ts";
 
@@ -20,7 +20,7 @@ sessionPinsRoute.get("/:sessionId/credential-pins", (c) => {
   const sessionId = c.req.param("sessionId");
   const pins = listSessionPins(sessionId);
   // Enrich with credential names + types so the UI doesn't need a second roundtrip.
-  const summary = listCredentials();
+  const summary = listCredentialMetadata();
   const byId = new Map(summary.map((s) => [s.id, s]));
   return c.json({
     data: pins.map((p) => ({
@@ -37,7 +37,7 @@ sessionPinsRoute.get("/:sessionId/credential-pins", (c) => {
 sessionPinsRoute.get("/:sessionId/credential-pins/:type", (c) => {
   const pin = getSessionPin(c.req.param("sessionId"), c.req.param("type"));
   if (!pin) return c.json({ data: null });
-  const summary = listCredentials().find((s) => s.id === pin.credentialId);
+  const summary = listCredentialMetadata().find((s) => s.id === pin.credentialId);
   return c.json({
     data: {
       ...pin,
@@ -63,7 +63,7 @@ sessionPinsRoute.post("/:sessionId/credential-pins", async (c) => {
     return c.json({ error: "credentialType and credentialId required" }, 400);
   }
 
-  const cred = listCredentials().find((s) => s.id === credentialId);
+  const cred = listCredentialMetadata().find((s) => s.id === credentialId);
   if (!cred) {
     return c.json({ error: `credential ${credentialId} not found` }, 404);
   }
