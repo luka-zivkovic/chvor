@@ -66,6 +66,29 @@ Rules:
 - Summarize what changed versus the original timeline.`;
 }
 
+function branchOrigin(events: ReturnType<typeof listCognitiveLoopEvents>): {
+  sourceLoopId: string;
+  sourceEventId: string | null;
+  sourceStage: string | null;
+} | null {
+  for (const event of events) {
+    const metadata = event.metadata;
+    const sourceLoopId = metadata?.sourceLoopId;
+    if (typeof sourceLoopId === "string" && sourceLoopId.trim()) {
+      return {
+        sourceLoopId: sourceLoopId.trim(),
+        sourceEventId: typeof metadata?.sourceEventId === "string" ? metadata.sourceEventId : null,
+        sourceStage: typeof metadata?.sourceStage === "string" ? metadata.sourceStage : null,
+      };
+    }
+  }
+  return null;
+}
+
+function finalEvent(events: ReturnType<typeof listCognitiveLoopEvents>) {
+  return events[events.length - 1] ?? null;
+}
+
 cognitiveLoop.get("/", (c) => {
   const limit = Math.min(Math.max(1, parseInt(c.req.query("limit") ?? "20", 10) || 20), 100);
   return c.json({ data: listCognitiveLoopRuns(limit) });
@@ -148,6 +171,44 @@ cognitiveLoop.post("/:id/branch", async (c) => {
     },
     201
   );
+});
+
+cognitiveLoop.get("/:id/diff", (c) => {
+  const branchRun = getCognitiveLoopRun(c.req.param("id"));
+  if (!branchRun) return c.json({ error: "not found" }, 404);
+
+  const branchEvents = listCognitiveLoopEvents(branchRun.id);
+  const origin = branchOrigin(branchEvents);
+  if (!origin) return c.json({ error: "loop has no branch origin" }, 404);
+
+  const sourceRun = getCognitiveLoopRun(origin.sourceLoopId);
+  if (!sourceRun) return c.json({ error: "source loop not found" }, 404);
+
+  const sourceEvents = listCognitiveLoopEvents(sourceRun.id);
+  const sourceEventIndex = origin.sourceEventId
+    ? sourceEvents.findIndex((event) => event.id === origin.sourceEventId)
+    : sourceEvents.length - 1;
+  const sourceEvent = sourceEventIndex >= 0 ? sourceEvents[sourceEventIndex] : null;
+  const sourceTimeline = sourceEventIndex >= 0 ? sourceEvents.slice(0, sourceEventIndex + 1) : [];
+
+  return c.json({
+    data: {
+      sourceLoop: sourceRun,
+      branchLoop: branchRun,
+      sourceEvent,
+      sourceStage: origin.sourceStage,
+      sourceTimeline,
+      branchEvents,
+      comparison: {
+        sourceStatus: sourceRun.status,
+        branchStatus: branchRun.status,
+        sourceFinalStage: finalEvent(sourceEvents)?.stage ?? sourceRun.currentStage,
+        branchFinalStage: finalEvent(branchEvents)?.stage ?? branchRun.currentStage,
+        sourceEventCount: sourceEvents.length,
+        branchEventCount: branchEvents.length,
+      },
+    },
+  });
 });
 
 cognitiveLoop.get("/:id", (c) => {

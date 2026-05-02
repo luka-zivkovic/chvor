@@ -69,6 +69,7 @@ import type {
   DaemonTask,
   CreateDaemonTaskRequest,
   CognitiveLoopRun,
+  CognitiveLoopEvent,
   CognitiveLoopWithEvents,
   MemoryGraphExport,
   MemoryStats,
@@ -113,10 +114,27 @@ export interface BranchCognitiveLoopRequest {
 
 export interface BranchCognitiveLoopResponse {
   run: CognitiveLoopRun;
-  events: import("@chvor/shared").CognitiveLoopEvent[];
+  events: CognitiveLoopEvent[];
   task: DaemonTask;
   sourceLoopId: string;
   sourceEventId: string | null;
+}
+
+export interface CognitiveLoopDiffResponse {
+  sourceLoop: CognitiveLoopRun;
+  branchLoop: CognitiveLoopRun;
+  sourceEvent: CognitiveLoopEvent | null;
+  sourceStage: string | null;
+  sourceTimeline: CognitiveLoopEvent[];
+  branchEvents: CognitiveLoopEvent[];
+  comparison: {
+    sourceStatus: CognitiveLoopRun["status"];
+    branchStatus: CognitiveLoopRun["status"];
+    sourceFinalStage: string | null;
+    branchFinalStage: string | null;
+    sourceEventCount: number;
+    branchEventCount: number;
+  };
 }
 
 const BASE = "/api";
@@ -543,6 +561,8 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
+    diff: (id: string) =>
+      request<CognitiveLoopDiffResponse>(`/cognitive-loops/${encodeURIComponent(id)}/diff`),
   },
 
   templates: {
