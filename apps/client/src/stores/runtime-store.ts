@@ -87,6 +87,11 @@ interface RuntimeState {
   cognitiveLoopEvents: Record<string, CognitiveLoopEvent[]>;
   fetchCognitiveLoops: () => Promise<void>;
   selectCognitiveLoop: (id: string) => Promise<void>;
+  branchCognitiveLoop: (
+    sourceLoopId: string,
+    eventId?: string,
+    instruction?: string
+  ) => Promise<void>;
   handleCognitiveLoopRun: (run: CognitiveLoopRun) => void;
   handleCognitiveLoopEvent: (event: CognitiveLoopEvent) => void;
 
@@ -260,6 +265,23 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       }
       console.warn("[cognitive-loop] failed to select loop:", err);
     }
+  },
+
+  branchCognitiveLoop: async (sourceLoopId, eventId, instruction) => {
+    const result = await api.cognitiveLoops.branch(sourceLoopId, {
+      eventId,
+      ...(instruction ? { instruction } : {}),
+    });
+    set((s) => ({
+      cognitiveLoops: upsertCognitiveLoop(s.cognitiveLoops, result.run).slice(0, 50),
+      activeCognitiveLoop: result.run,
+      selectedCognitiveLoopId: result.run.id,
+      cognitiveLoopSelectionLoading: false,
+      cognitiveLoopEvents: {
+        ...s.cognitiveLoopEvents,
+        [result.run.id]: s.cognitiveLoopEvents[result.run.id] ?? [],
+      },
+    }));
   },
 
   handleCognitiveLoopRun: (run) => {

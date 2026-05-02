@@ -105,6 +105,19 @@ export interface SessionCredentialPinInfo {
   pinnedAt: string;
 }
 
+export interface BranchCognitiveLoopRequest {
+  eventId?: string;
+  title?: string;
+  instruction?: string;
+}
+
+export interface BranchCognitiveLoopResponse {
+  run: CognitiveLoopRun;
+  task: DaemonTask;
+  sourceLoopId: string;
+  sourceEventId: string | null;
+}
+
 const BASE = "/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -524,6 +537,11 @@ export const api = {
   cognitiveLoops: {
     list: (limit = 20) => request<CognitiveLoopRun[]>(`/cognitive-loops?limit=${limit}`),
     get: (id: string) => request<CognitiveLoopWithEvents>(`/cognitive-loops/${encodeURIComponent(id)}`),
+    branch: (id: string, body: BranchCognitiveLoopRequest) =>
+      request<BranchCognitiveLoopResponse>(`/cognitive-loops/${encodeURIComponent(id)}/branch`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
   },
 
   templates: {

@@ -19,9 +19,11 @@ export function CognitiveLoopRail() {
   const cognitiveLoopSelectionLoading = useRuntimeStore((s) => s.cognitiveLoopSelectionLoading);
   const eventsByLoop = useRuntimeStore((s) => s.cognitiveLoopEvents);
   const selectCognitiveLoop = useRuntimeStore((s) => s.selectCognitiveLoop);
+  const branchCognitiveLoop = useRuntimeStore((s) => s.branchCognitiveLoop);
   const openPreviewModal = useUIStore((s) => s.openPreviewModal);
   const [dismissedLoopId, setDismissedLoopId] = useState<string | null>(null);
   const [scrubIndex, setScrubIndex] = useState<number | null>(null);
+  const [branching, setBranching] = useState(false);
   const activeLoopId = activeLoop?.id;
   const events = useMemo(
     () => (activeLoopId ? (eventsByLoop[activeLoopId] ?? []) : []),
@@ -48,6 +50,27 @@ export function CognitiveLoopRail() {
   const isRunning = activeLoop.status === "running";
   const isPaused = activeLoop.status === "paused";
   const isLiveSelection = selectedCognitiveLoopId === activeLoop.id && isRunning;
+  const branchFromSelected = async () => {
+    if (!selectedEvent || branching) return;
+    const instruction = window.prompt(
+      "Optional branch instruction. Leave blank to continue safely from this event.",
+      ""
+    );
+    if (instruction === null) return;
+    setBranching(true);
+    try {
+      await branchCognitiveLoop(activeLoop.id, selectedEvent.id, instruction.trim() || undefined);
+      void import("sonner").then(({ toast }) => {
+        toast.success("Branched cognitive loop from selected event");
+      });
+    } catch (err) {
+      void import("sonner").then(({ toast }) => {
+        toast.error(err instanceof Error ? err.message : "Failed to branch loop");
+      });
+    } finally {
+      setBranching(false);
+    }
+  };
 
   return (
     <div className="pointer-events-none absolute left-5 top-5 z-20 w-[360px] max-w-[calc(100vw-2.5rem)]">
@@ -183,6 +206,14 @@ export function CognitiveLoopRail() {
                     {selectedEvent.body}
                   </div>
                 )}
+                <button
+                  type="button"
+                  className="mt-2 rounded-full border border-white/10 bg-white/8 px-3 py-1.5 text-[11px] text-white/70 transition hover:bg-white/12 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={branching}
+                  onClick={() => void branchFromSelected()}
+                >
+                  {branching ? "Branching…" : "Branch from here"}
+                </button>
               </div>
             )}
           </div>

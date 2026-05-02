@@ -1,16 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { CognitiveLoopRun, CognitiveLoopWithEvents } from "@chvor/shared";
 
-const { mockListCognitiveLoops, mockGetCognitiveLoop } = vi.hoisted(() => ({
-  mockListCognitiveLoops: vi.fn(),
-  mockGetCognitiveLoop: vi.fn(),
-}));
+const { mockListCognitiveLoops, mockGetCognitiveLoop, mockBranchCognitiveLoop } = vi.hoisted(
+  () => ({
+    mockListCognitiveLoops: vi.fn(),
+    mockGetCognitiveLoop: vi.fn(),
+    mockBranchCognitiveLoop: vi.fn(),
+  })
+);
 
 vi.mock("../lib/api", () => ({
   api: {
     cognitiveLoops: {
       list: mockListCognitiveLoops,
       get: mockGetCognitiveLoop,
+      branch: mockBranchCognitiveLoop,
     },
   },
 }));
@@ -57,6 +61,7 @@ function makeLoopDetail(run: CognitiveLoopRun): CognitiveLoopWithEvents {
 beforeEach(() => {
   mockListCognitiveLoops.mockReset();
   mockGetCognitiveLoop.mockReset();
+  mockBranchCognitiveLoop.mockReset();
   useRuntimeStore.getState().resetAll();
 });
 
@@ -346,5 +351,39 @@ describe("cognitive-loop-store", () => {
     expect(state.selectedCognitiveLoopId).toBe(secondLoop.id);
     expect(state.activeCognitiveLoop?.id).toBe(secondLoop.id);
     expect(state.cognitiveLoopSelectionLoading).toBe(false);
+  });
+
+  it("selects a newly branched loop", async () => {
+    const sourceLoop = makeLoop({ id: "loop-source", title: "Source loop" });
+    const branchLoop = makeLoop({
+      id: "loop-branch",
+      title: "Branch loop",
+      status: "running",
+      completedAt: null,
+    });
+
+    useRuntimeStore.setState({
+      cognitiveLoops: [sourceLoop],
+      activeCognitiveLoop: sourceLoop,
+      selectedCognitiveLoopId: sourceLoop.id,
+      cognitiveLoopSelectionLoading: false,
+      cognitiveLoopEvents: { [sourceLoop.id]: makeLoopDetail(sourceLoop).events },
+    });
+    mockBranchCognitiveLoop.mockResolvedValue({
+      run: branchLoop,
+      task: { id: "task-branch", title: "Branch loop" },
+      sourceLoopId: sourceLoop.id,
+      sourceEventId: `${sourceLoop.id}-event-1`,
+    });
+
+    await useRuntimeStore.getState().branchCognitiveLoop(sourceLoop.id, `${sourceLoop.id}-event-1`);
+
+    const state = useRuntimeStore.getState();
+    expect(mockBranchCognitiveLoop).toHaveBeenCalledWith(sourceLoop.id, {
+      eventId: `${sourceLoop.id}-event-1`,
+    });
+    expect(state.selectedCognitiveLoopId).toBe(branchLoop.id);
+    expect(state.activeCognitiveLoop?.id).toBe(branchLoop.id);
+    expect(state.cognitiveLoops[0].id).toBe(branchLoop.id);
   });
 });
