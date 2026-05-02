@@ -27,14 +27,15 @@ function buildBranchPrompt(opts: {
   timeline: ReturnType<typeof listCognitiveLoopEvents>;
   instruction: string;
 }): string {
+  const safeSourceTitle = safeText(opts.source.title, 200);
   const selected = opts.selectedEvent
-    ? `${opts.selectedEvent.stage}: ${opts.selectedEvent.title}${opts.selectedEvent.body ? ` — ${safeText(opts.selectedEvent.body, 600)}` : ""}`
-    : `${opts.source.currentStage ?? "loop.start"}: ${opts.source.summary}`;
+    ? `${opts.selectedEvent.stage}: ${safeText(opts.selectedEvent.title, 240)}${opts.selectedEvent.body ? ` — ${safeText(opts.selectedEvent.body, 600)}` : ""}`
+    : `${opts.source.currentStage ?? "loop.start"}: ${safeText(opts.source.summary, 800)}`;
   const timeline = opts.timeline
     .slice(-20)
     .map((event, index) => {
       const body = event.body ? ` — ${safeText(event.body, 500)}` : "";
-      return `${index + 1}. ${event.stage}: ${event.title}${body}`;
+      return `${index + 1}. ${event.stage}: ${safeText(event.title, 240)}${body}`;
     })
     .join("\n");
 
@@ -44,7 +45,7 @@ You are branching from a previous cognitive loop. Continue from the selected poi
 
 Source loop:
 - id: ${opts.source.id}
-- title: ${opts.source.title}
+- title: ${safeSourceTitle}
 - trigger: ${opts.source.trigger}
 - severity: ${opts.source.severity}
 - status at branch time: ${opts.source.status}
@@ -88,16 +89,17 @@ cognitiveLoop.post("/:id/branch", async (c) => {
   const timeline = eventIndex >= 0 ? events.slice(0, eventIndex + 1) : [];
   const instruction = safeText(body.instruction, 4000);
   const titleFromBody = safeText(body.title, 180);
-  const title = titleFromBody || `Branch: ${source.title}`.slice(0, 180);
+  const sourceTitle = safeText(source.title, 180);
+  const title = titleFromBody || `Branch: ${sourceTitle}`.slice(0, 180);
   const selectedLabel = selectedEvent
-    ? `${selectedEvent.stage}: ${selectedEvent.title}`
-    : source.summary;
+    ? `${selectedEvent.stage}: ${safeText(selectedEvent.title, 240)}`
+    : safeText(source.summary, 800);
 
   const branchRun = createCognitiveLoopRun({
     title,
     severity: source.severity,
     trigger: "manual",
-    summary: `Branch from "${source.title}" at ${selectedLabel}`.slice(0, 2000),
+    summary: `Branch from "${sourceTitle}" at ${selectedLabel}`.slice(0, 2000),
   });
 
   appendCognitiveLoopEvent(
@@ -132,10 +134,13 @@ cognitiveLoop.post("/:id/branch", async (c) => {
   );
   getWSInstance()?.broadcast({ type: "daemon.taskUpdate", data: task });
 
+  const run = getCognitiveLoopRun(branchRun.id) ?? branchRun;
+  const branchEvents = listCognitiveLoopEvents(branchRun.id);
   return c.json(
     {
       data: {
-        run: getCognitiveLoopRun(branchRun.id) ?? branchRun,
+        run,
+        events: branchEvents,
         task,
         sourceLoopId: source.id,
         sourceEventId: selectedEvent?.id ?? null,

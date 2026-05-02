@@ -279,7 +279,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       cognitiveLoopSelectionLoading: false,
       cognitiveLoopEvents: {
         ...s.cognitiveLoopEvents,
-        [result.run.id]: s.cognitiveLoopEvents[result.run.id] ?? [],
+        [result.run.id]: result.events,
       },
     }));
   },

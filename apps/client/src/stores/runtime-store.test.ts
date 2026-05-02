@@ -371,6 +371,7 @@ describe("cognitive-loop-store", () => {
     });
     mockBranchCognitiveLoop.mockResolvedValue({
       run: branchLoop,
+      events: makeLoopDetail(branchLoop).events,
       task: { id: "task-branch", title: "Branch loop" },
       sourceLoopId: sourceLoop.id,
       sourceEventId: `${sourceLoop.id}-event-1`,
@@ -385,5 +386,6 @@ describe("cognitive-loop-store", () => {
     expect(state.selectedCognitiveLoopId).toBe(branchLoop.id);
     expect(state.activeCognitiveLoop?.id).toBe(branchLoop.id);
     expect(state.cognitiveLoops[0].id).toBe(branchLoop.id);
+    expect(state.cognitiveLoopEvents[branchLoop.id]).toEqual(makeLoopDetail(branchLoop).events);
   });
 });

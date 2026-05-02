@@ -113,6 +113,7 @@ export interface BranchCognitiveLoopRequest {
 
 export interface BranchCognitiveLoopResponse {
   run: CognitiveLoopRun;
+  events: import("@chvor/shared").CognitiveLoopEvent[];
   task: DaemonTask;
   sourceLoopId: string;
   sourceEventId: string | null;
