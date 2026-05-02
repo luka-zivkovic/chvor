@@ -45,6 +45,28 @@ function toComponentMap(entries: A2UIComponentEntry[]): Record<string, A2UICompo
   return map;
 }
 
+function upsertCognitiveLoop(loops: CognitiveLoopRun[], run: CognitiveLoopRun): CognitiveLoopRun[] {
+  const existing = loops.some((loop) => loop.id === run.id);
+  return existing ? loops.map((loop) => (loop.id === run.id ? run : loop)) : [run, ...loops];
+}
+
+function resolvePreferredCognitiveLoop(
+  loops: CognitiveLoopRun[],
+  selectedCognitiveLoopId: string | null,
+  fallbackActiveCognitiveLoop: CognitiveLoopRun | null
+): CognitiveLoopRun | null {
+  if (selectedCognitiveLoopId) {
+    const selectedLoop = loops.find((loop) => loop.id === selectedCognitiveLoopId);
+    if (selectedLoop) return selectedLoop;
+  }
+  return (
+    loops.find((loop) => loop.status === "running") ??
+    fallbackActiveCognitiveLoop ??
+    loops[0] ??
+    null
+  );
+}
+
 interface RuntimeState {
   // ── activity-store ───────────────────────────────────────────────────────
   activities: ActivityEntry[];
@@ -60,8 +82,11 @@ interface RuntimeState {
   // ── cognitive-loop-store ────────────────────────────────────────────────
   cognitiveLoops: CognitiveLoopRun[];
   activeCognitiveLoop: CognitiveLoopRun | null;
+  selectedCognitiveLoopId: string | null;
+  cognitiveLoopSelectionLoading: boolean;
   cognitiveLoopEvents: Record<string, CognitiveLoopEvent[]>;
   fetchCognitiveLoops: () => Promise<void>;
+  selectCognitiveLoop: (id: string) => Promise<void>;
   handleCognitiveLoopRun: (run: CognitiveLoopRun) => void;
   handleCognitiveLoopEvent: (event: CognitiveLoopEvent) => void;
 
@@ -173,40 +198,84 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   // ── cognitive-loop-store ────────────────────────────────────────────────
   cognitiveLoops: [],
   activeCognitiveLoop: null,
+  selectedCognitiveLoopId: null,
+  cognitiveLoopSelectionLoading: false,
   cognitiveLoopEvents: {},
 
   fetchCognitiveLoops: async () => {
     try {
       const loops = await api.cognitiveLoops.list(20);
-      set((s) => ({
+      const preferred = resolvePreferredCognitiveLoop(
+        loops,
+        get().selectedCognitiveLoopId,
+        get().activeCognitiveLoop
+      );
+      set({
         cognitiveLoops: loops,
-        activeCognitiveLoop: loops.find((loop) => loop.status === "running") ?? s.activeCognitiveLoop ?? loops[0] ?? null,
-      }));
-      const active = loops.find((loop) => loop.status === "running") ?? loops[0];
-      if (active) {
-        const detail = await api.cognitiveLoops.get(active.id);
+        activeCognitiveLoop: preferred,
+        selectedCognitiveLoopId: preferred?.id ?? null,
+        cognitiveLoopSelectionLoading: preferred !== null,
+      });
+      if (preferred) {
+        const detail = await api.cognitiveLoops.get(preferred.id);
         set((s) => ({
-          cognitiveLoopEvents: { ...s.cognitiveLoopEvents, [detail.run.id]: detail.events },
-          activeCognitiveLoop: detail.run,
+          cognitiveLoops: upsertCognitiveLoop(s.cognitiveLoops, detail.run).slice(0, 50),
+          cognitiveLoopEvents: {
+            ...s.cognitiveLoopEvents,
+            [detail.run.id]: detail.events,
+          },
+          activeCognitiveLoop:
+            s.selectedCognitiveLoopId === detail.run.id ? detail.run : s.activeCognitiveLoop,
+          cognitiveLoopSelectionLoading:
+            s.selectedCognitiveLoopId === detail.run.id ? false : s.cognitiveLoopSelectionLoading,
         }));
+      } else {
+        set({ cognitiveLoopSelectionLoading: false });
       }
     } catch (err) {
+      set({ cognitiveLoopSelectionLoading: false });
       console.warn("[cognitive-loop] failed to fetch loops:", err);
+    }
+  },
+
+  selectCognitiveLoop: async (id) => {
+    set((s) => ({
+      selectedCognitiveLoopId: id,
+      cognitiveLoopSelectionLoading: true,
+      activeCognitiveLoop: s.cognitiveLoops.find((loop) => loop.id === id) ?? s.activeCognitiveLoop,
+    }));
+    try {
+      const detail = await api.cognitiveLoops.get(id);
+      set((s) => ({
+        cognitiveLoops: upsertCognitiveLoop(s.cognitiveLoops, detail.run).slice(0, 50),
+        cognitiveLoopEvents: { ...s.cognitiveLoopEvents, [detail.run.id]: detail.events },
+        activeCognitiveLoop:
+          s.selectedCognitiveLoopId === detail.run.id ? detail.run : s.activeCognitiveLoop,
+        cognitiveLoopSelectionLoading:
+          s.selectedCognitiveLoopId === detail.run.id ? false : s.cognitiveLoopSelectionLoading,
+      }));
+    } catch (err) {
+      if (get().selectedCognitiveLoopId === id) {
+        set({ cognitiveLoopSelectionLoading: false });
+      }
+      console.warn("[cognitive-loop] failed to select loop:", err);
     }
   },
 
   handleCognitiveLoopRun: (run) => {
     set((s) => {
-      const existing = s.cognitiveLoops.some((loop) => loop.id === run.id);
-      const loops = existing
-        ? s.cognitiveLoops.map((loop) => (loop.id === run.id ? run : loop))
-        : [run, ...s.cognitiveLoops];
-      const active = run.status === "running" || s.activeCognitiveLoop?.id === run.id
-        ? run
-        : s.activeCognitiveLoop ?? run;
+      const loops = upsertCognitiveLoop(s.cognitiveLoops, run).slice(0, 50);
+      const selectedId = loops.some((loop) => loop.id === s.selectedCognitiveLoopId)
+        ? s.selectedCognitiveLoopId
+        : (resolvePreferredCognitiveLoop(loops, null, s.activeCognitiveLoop)?.id ?? null);
+      const active =
+        selectedId === run.id
+          ? run
+          : (loops.find((loop) => loop.id === selectedId) ?? s.activeCognitiveLoop ?? run);
       return {
-        cognitiveLoops: loops.slice(0, 50),
+        cognitiveLoops: loops,
         activeCognitiveLoop: active,
+        selectedCognitiveLoopId: selectedId,
       };
     });
   },
@@ -292,7 +361,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
 
   loadSessionHistory: async (sessionId: string) => {
     try {
-      const history = await api.get<EmotionSnapshot[]>(`/emotions/session/${sessionId}`) ?? [];
+      const history = (await api.get<EmotionSnapshot[]>(`/emotions/session/${sessionId}`)) ?? [];
       const last = history.length > 0 ? history[history.length - 1] : null;
       set({
         sessionHistory: history,
@@ -308,7 +377,10 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   },
 
   clearSession: () => {
-    if (shiftTimeoutId) { clearTimeout(shiftTimeoutId); shiftTimeoutId = null; }
+    if (shiftTimeoutId) {
+      clearTimeout(shiftTimeoutId);
+      shiftTimeoutId = null;
+    }
     set({
       currentSnapshot: null,
       previousSnapshot: null,
@@ -429,10 +501,18 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     const exists = surfaceList.some((s) => s.id === data.surfaceId);
     const newList = exists
       ? surfaceList.map((s) =>
-          s.id === data.surfaceId ? { ...s, title: effectiveTitle, updatedAt: new Date().toISOString() } : s
+          s.id === data.surfaceId
+            ? { ...s, title: effectiveTitle, updatedAt: new Date().toISOString() }
+            : s
         )
       : [
-          { id: data.surfaceId, title: effectiveTitle, rendering: rootValid, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+          {
+            id: data.surfaceId,
+            title: effectiveTitle,
+            rendering: rootValid,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
           ...surfaceList,
         ];
 
@@ -484,9 +564,20 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   },
 
   setActiveSurface: (id) => {
-    const surface = id ? get().surfaces[id] ?? null : null;
+    const surface = id ? (get().surfaces[id] ?? null) : null;
     set({ activeSurfaceId: id, activeSurface: surface });
   },
 
-  resetAll: () => set({ surfaces: {}, surfaceList: [], activeSurfaceId: null, activeSurface: null }),
+  resetAll: () =>
+    set({
+      cognitiveLoops: [],
+      activeCognitiveLoop: null,
+      selectedCognitiveLoopId: null,
+      cognitiveLoopSelectionLoading: false,
+      cognitiveLoopEvents: {},
+      surfaces: {},
+      surfaceList: [],
+      activeSurfaceId: null,
+      activeSurface: null,
+    }),
 }));
