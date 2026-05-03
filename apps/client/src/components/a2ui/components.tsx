@@ -16,6 +16,7 @@ import { resolveValue, resolveArray } from "./resolve";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useA2UIAction } from "./action-context";
+import type { A2UIActionState } from "../../stores/runtime-store";
 
 type FormValues = Record<string, string>;
 const A2UIFormContext = createContext<{
@@ -39,10 +40,38 @@ function clampFormValues(values: FormValues): FormValues {
 function mergeFormValuesIntoAction(raw: string, values: FormValues): string {
   const parsed = parseA2UIAction(raw);
   if (!parsed || parsed.kind !== "emit") return raw;
-  const payload = parsed.payload && typeof parsed.payload === "object" && !Array.isArray(parsed.payload)
-    ? parsed.payload as Record<string, unknown>
-    : {};
+  const payload =
+    parsed.payload && typeof parsed.payload === "object" && !Array.isArray(parsed.payload)
+      ? (parsed.payload as Record<string, unknown>)
+      : {};
   return `emit:${parsed.eventName}?${encodeURIComponent(JSON.stringify({ ...payload, form: clampFormValues(values) }))}`;
+}
+
+const ACTIVE_ACTION_STATUSES = new Set<A2UIActionState["status"]>(["queued", "running"]);
+const ACTION_STATUS_LABEL: Record<A2UIActionState["status"], string> = {
+  queued: "Queued",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+function A2UIActionStatusLine({ state }: { state: A2UIActionState | null }) {
+  if (!state) return null;
+  const isBad = state.status === "failed" || state.status === "cancelled";
+  const isDone = state.status === "completed";
+  return (
+    <div
+      className={cn(
+        "mt-1.5 max-w-full text-[11px]",
+        isBad ? "text-destructive" : isDone ? "text-emerald-500" : "text-muted-foreground"
+      )}
+    >
+      <span className="font-medium">{ACTION_STATUS_LABEL[state.status]}</span>
+      <span className="text-muted-foreground"> · {state.title}</span>
+      {state.error && <span className="block truncate">{state.error}</span>}
+    </div>
+  );
 }
 
 /* ─── Shared child renderer ─── */
@@ -50,7 +79,12 @@ function mergeFormValuesIntoAction(raw: string, values: FormValues): string {
 interface ChildProps {
   nodeId: string;
   surface: A2UISurface;
-  renderNode: (nodeId: string, surface: A2UISurface, visited?: Set<string>, depth?: number) => React.ReactNode;
+  renderNode: (
+    nodeId: string,
+    surface: A2UISurface,
+    visited?: Set<string>,
+    depth?: number
+  ) => React.ReactNode;
 }
 
 function Child({ nodeId, surface, renderNode }: ChildProps) {
@@ -101,7 +135,12 @@ export function A2UIColumn({
 }: {
   spec: A2UIColumnComponent["Column"];
   surface: A2UISurface;
-  renderNode: (nodeId: string, surface: A2UISurface, visited?: Set<string>, depth?: number) => React.ReactNode;
+  renderNode: (
+    nodeId: string,
+    surface: A2UISurface,
+    visited?: Set<string>,
+    depth?: number
+  ) => React.ReactNode;
 }) {
   const align = ALIGN_MAP[spec.align ?? "start"] ?? "";
   const gap = spec.gap ?? 8;
@@ -124,7 +163,12 @@ export function A2UIRow({
 }: {
   spec: A2UIRowComponent["Row"];
   surface: A2UISurface;
-  renderNode: (nodeId: string, surface: A2UISurface, visited?: Set<string>, depth?: number) => React.ReactNode;
+  renderNode: (
+    nodeId: string,
+    surface: A2UISurface,
+    visited?: Set<string>,
+    depth?: number
+  ) => React.ReactNode;
 }) {
   const align = ALIGN_MAP[spec.align ?? "start"] ?? "";
   const gap = spec.gap ?? 8;
@@ -193,15 +237,17 @@ export function A2UITable({
   if (rows.length === 0) {
     return (
       <div className="rounded-lg border border-border p-6 text-center">
-        <p className="text-xs text-muted-foreground">
-          {spec.emptyText ?? "No data to display"}
-        </p>
+        <p className="text-xs text-muted-foreground">{spec.emptyText ?? "No data to display"}</p>
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border" role="region" aria-label="Scrollable table">
+    <div
+      className="overflow-x-auto rounded-lg border border-border"
+      role="region"
+      aria-label="Scrollable table"
+    >
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted">
@@ -220,17 +266,20 @@ export function A2UITable({
           {rows.map((row, i) => {
             const rowKey = spec.columns.map((c) => String(row[c.key] ?? "")).join("|") || String(i);
             return (
-            <tr
-              key={rowKey}
-              className="border-b border-border last:border-0 hover:bg-muted transition-colors"
-            >
-              {spec.columns.map((col) => (
-                <td key={col.key} className="px-3 py-2 text-foreground tabular-nums max-w-xs truncate">
-                  {row[col.key] != null ? String(row[col.key]) : ""}
-                </td>
-              ))}
-            </tr>
-          );
+              <tr
+                key={rowKey}
+                className="border-b border-border last:border-0 hover:bg-muted transition-colors"
+              >
+                {spec.columns.map((col) => (
+                  <td
+                    key={col.key}
+                    className="px-3 py-2 text-foreground tabular-nums max-w-xs truncate"
+                  >
+                    {row[col.key] != null ? String(row[col.key]) : ""}
+                  </td>
+                ))}
+              </tr>
+            );
           })}
         </tbody>
       </table>
@@ -257,33 +306,45 @@ export function A2UIButton({
 }) {
   const label = resolveValue(spec.label, bindings);
   const variant = VARIANT_MAP[spec.variant ?? "primary"] ?? "default";
-  const { fire, enabled } = useA2UIAction();
+  const { fire, enabled, state } = useA2UIAction(sourceId);
   const [pending, setPending] = useState(false);
   // The button is enabled only when a host dispatcher is registered AND the
   // action string passes the allowlist. Anything else renders disabled with
   // a hint, so the user can see something was filtered out.
   const isNoop = !spec.action || spec.action === "noop";
-  const disabled = !enabled || isNoop || pending;
+  const actionActive = state ? ACTIVE_ACTION_STATUSES.has(state.status) : false;
+  const disabled = !enabled || isNoop || pending || actionActive;
 
   return (
-    <Button
-      variant={variant}
-      size="sm"
-      disabled={disabled}
-      aria-busy={pending}
-      title={!enabled ? "Actions disabled — no host dispatcher" : isNoop ? "No action bound" : pending ? "Action is being queued" : undefined}
-      onClick={async () => {
-        if (isNoop || pending) return;
-        setPending(true);
-        try {
-          await fire(spec.action, sourceId);
-        } finally {
-          setPending(false);
+    <div className="inline-flex max-w-full flex-col items-start">
+      <Button
+        variant={variant}
+        size="sm"
+        disabled={disabled}
+        aria-busy={pending || actionActive}
+        title={
+          !enabled
+            ? "Actions disabled — no host dispatcher"
+            : isNoop
+              ? "No action bound"
+              : pending || actionActive
+                ? "Action is in progress"
+                : undefined
         }
-      }}
-    >
-      {pending ? "Queuing…" : label}
-    </Button>
+        onClick={async () => {
+          if (isNoop || pending || actionActive) return;
+          setPending(true);
+          try {
+            await fire(spec.action, sourceId);
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        {pending ? "Queuing…" : actionActive ? ACTION_STATUS_LABEL[state!.status] : label}
+      </Button>
+      <A2UIActionStatusLine state={state} />
+    </div>
   );
 }
 
@@ -297,19 +358,28 @@ export function A2UIForm({
 }: {
   spec: A2UIFormComponent["Form"];
   surface: A2UISurface;
-  renderNode: (nodeId: string, surface: A2UISurface, visited?: Set<string>, depth?: number) => React.ReactNode;
+  renderNode: (
+    nodeId: string,
+    surface: A2UISurface,
+    visited?: Set<string>,
+    depth?: number
+  ) => React.ReactNode;
   sourceId?: string;
 }) {
   const children = spec.children?.explicitList ?? [];
-  const { fire, enabled } = useA2UIAction();
+  const { fire, enabled, state } = useA2UIAction(sourceId);
   const isNoop = !spec.submitAction || spec.submitAction === "noop";
   const [values, setValues] = useState<FormValues>({});
   const [pending, setPending] = useState(false);
-  const disabled = !enabled || isNoop || pending;
-  const formContextValue = useMemo(() => ({
-    values,
-    setValue: (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value })),
-  }), [values]);
+  const actionActive = state ? ACTIVE_ACTION_STATUSES.has(state.status) : false;
+  const disabled = !enabled || isNoop || pending || actionActive;
+  const formContextValue = useMemo(
+    () => ({
+      values,
+      setValue: (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value })),
+    }),
+    [values]
+  );
 
   return (
     <A2UIFormContext.Provider value={formContextValue}>
@@ -317,7 +387,7 @@ export function A2UIForm({
         className="flex flex-col gap-3 rounded-lg border border-border p-4"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (isNoop || pending) return;
+          if (isNoop || pending || actionActive) return;
           setPending(true);
           try {
             await fire(mergeFormValuesIntoAction(spec.submitAction, values), sourceId);
@@ -334,22 +404,31 @@ export function A2UIForm({
           size="sm"
           className="self-start mt-1"
           disabled={disabled}
-          aria-busy={pending}
-          title={!enabled ? "Form submission disabled — no host dispatcher" : isNoop ? "No submit action bound" : pending ? "Submission is being queued" : undefined}
+          aria-busy={pending || actionActive}
+          title={
+            !enabled
+              ? "Form submission disabled — no host dispatcher"
+              : isNoop
+                ? "No submit action bound"
+                : pending || actionActive
+                  ? "Submission is in progress"
+                  : undefined
+          }
         >
-          {pending ? "Queuing…" : spec.submitLabel ?? "Submit"}
+          {pending
+            ? "Queuing…"
+            : actionActive
+              ? ACTION_STATUS_LABEL[state!.status]
+              : (spec.submitLabel ?? "Submit")}
         </Button>
+        <A2UIActionStatusLine state={state} />
       </form>
     </A2UIFormContext.Provider>
   );
 }
 
 /* ─── Input ─── */
-export function A2UIInput({
-  spec,
-}: {
-  spec: A2UIInputComponent["Input"];
-}) {
+export function A2UIInput({ spec }: { spec: A2UIInputComponent["Input"] }) {
   const inputId = useId();
   const form = useContext(A2UIFormContext);
   const value = form?.values[spec.bindTo] ?? "";
@@ -366,7 +445,11 @@ export function A2UIInput({
         type={spec.inputType ?? "text"}
         placeholder={spec.placeholder ?? ""}
         {...(form
-          ? { value, onChange: (e: ChangeEvent<HTMLInputElement>) => form.setValue(spec.bindTo, e.target.value) }
+          ? {
+              value,
+              onChange: (e: ChangeEvent<HTMLInputElement>) =>
+                form.setValue(spec.bindTo, e.target.value),
+            }
           : {})}
         className="h-9 w-full rounded-md border border-border bg-input px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
@@ -435,11 +518,15 @@ export function A2UIChart({
 
     return (
       <div className="space-y-2">
-        {spec.title && (
-          <p className="text-sm font-medium text-foreground">{spec.title}</p>
-        )}
+        {spec.title && <p className="text-sm font-medium text-foreground">{spec.title}</p>}
         <div className="overflow-x-auto rounded-lg border border-border p-3">
-          <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ minWidth: width }} role="img" aria-label={`${chartTitle}: ${dataDesc}`}>
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="w-full"
+            style={{ minWidth: width }}
+            role="img"
+            aria-label={`${chartTitle}: ${dataDesc}`}
+          >
             <title>{chartTitle}</title>
             {/* Grid lines */}
             {ticks.map((tick, i) => {
@@ -510,11 +597,14 @@ export function A2UIChart({
 
   return (
     <div className="space-y-2">
-      {spec.title && (
-        <p className="text-sm font-medium text-foreground">{spec.title}</p>
-      )}
+      {spec.title && <p className="text-sm font-medium text-foreground">{spec.title}</p>}
       <div className="rounded-lg border border-border p-3">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label={`${chartTitle}: ${dataDesc}`}>
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="w-full"
+          role="img"
+          aria-label={`${chartTitle}: ${dataDesc}`}
+        >
           <title>{chartTitle}</title>
           {/* Grid lines */}
           {ticks.map((tick, i) => {
@@ -559,14 +649,7 @@ export function A2UIChart({
             const color = CHART_COLORS[i % CHART_COLORS.length];
             return (
               <g key={i}>
-                <rect
-                  x={x}
-                  y={y}
-                  width={barWidth}
-                  height={h}
-                  rx={2}
-                  fill={color}
-                />
+                <rect x={x} y={y} width={barWidth} height={h} rx={2} fill={color} />
                 <text
                   x={x + barWidth / 2}
                   y={padTop + chartHeight + 16}

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { CognitiveLoopRun, CognitiveLoopWithEvents } from "@chvor/shared";
+import type { CognitiveLoopRun, CognitiveLoopWithEvents, DaemonTask } from "@chvor/shared";
 
 const { mockListCognitiveLoops, mockGetCognitiveLoop, mockBranchCognitiveLoop } = vi.hoisted(
   () => ({
@@ -58,6 +58,27 @@ function makeLoopDetail(run: CognitiveLoopRun): CognitiveLoopWithEvents {
         ts: "2026-05-01T10:01:00.000Z",
       },
     ],
+  };
+}
+
+function makeTask(overrides: Partial<DaemonTask> & Pick<DaemonTask, "id" | "title">): DaemonTask {
+  const { id, title, ...rest } = overrides;
+  return {
+    id,
+    title,
+    prompt: `${title} prompt`,
+    source: "a2ui",
+    priority: 1,
+    status: "queued",
+    progress: null,
+    retryCount: 0,
+    loopId: null,
+    result: null,
+    error: null,
+    createdAt: "2026-05-01T10:00:00.000Z",
+    startedAt: null,
+    completedAt: null,
+    ...rest,
   };
 }
 
@@ -251,6 +272,65 @@ describe("a2ui-store", () => {
       const { activeSurfaceId, activeSurface } = useRuntimeStore.getState();
       expect(activeSurfaceId).toBeNull();
       expect(activeSurface).toBeNull();
+    });
+  });
+
+  describe("A2UI action lifecycle", () => {
+    it("tracks queued actions by surface/source and daemon task updates", () => {
+      const store = useRuntimeStore.getState();
+      store.handleA2UIActionQueued({
+        surfaceId: "surface-1",
+        sourceId: "button-1",
+        task: makeTask({ id: "task-1", title: "Run action", loopId: "loop-1" }),
+      });
+
+      expect(useRuntimeStore.getState().a2uiActionStates["surface-1:button-1"]).toMatchObject({
+        taskId: "task-1",
+        status: "queued",
+        loopId: "loop-1",
+      });
+
+      store.handleDaemonTaskUpdate(
+        makeTask({
+          id: "task-1",
+          title: "Run action",
+          status: "running",
+          loopId: "loop-1",
+        })
+      );
+
+      expect(useRuntimeStore.getState().a2uiActionStates["surface-1:button-1"]).toMatchObject({
+        status: "running",
+      });
+
+      store.handleDaemonTaskUpdate(
+        makeTask({
+          id: "task-1",
+          title: "Run action",
+          status: "failed",
+          loopId: "loop-1",
+          error: "boom",
+        })
+      );
+
+      expect(useRuntimeStore.getState().a2uiActionStates["surface-1:button-1"]).toMatchObject({
+        status: "failed",
+        error: "boom",
+      });
+    });
+
+    it("clears action state when a surface is deleted", () => {
+      const store = useRuntimeStore.getState();
+      store.handleSurfaceUpdate({ surfaceId: "surface-1", components: [] });
+      store.handleA2UIActionQueued({
+        surfaceId: "surface-1",
+        sourceId: "button-1",
+        task: makeTask({ id: "task-1", title: "Run action" }),
+      });
+
+      store.handleDelete({ surfaceId: "surface-1" });
+
+      expect(useRuntimeStore.getState().a2uiActionStates["surface-1:button-1"]).toBeUndefined();
     });
   });
 });

@@ -102,6 +102,10 @@ put the action data in the persisted `emit:*` JSON; clients must echo that
 payload exactly. For Form payloads, persisted top-level fields are fixed and the
 client may add submitted input values only under `payload.form`.
 
+After dispatch, the client shows queued/running/completed/failed status on the
+Button/Form based on the daemon task lifecycle, so clear action labels and task
+titles help users understand what is happening.
+
 ### Data binding
 
 Text values accept either a literal or a binding reference:

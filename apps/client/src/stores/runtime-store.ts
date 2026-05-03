@@ -21,6 +21,7 @@ import type {
   A2UISurfaceListItem,
   CognitiveLoopRun,
   CognitiveLoopEvent,
+  DaemonTask,
 } from "@chvor/shared";
 import {
   upgradeLegacyEmotion,
@@ -65,6 +66,27 @@ function resolvePreferredCognitiveLoop(
     loops[0] ??
     null
   );
+}
+
+export type A2UIActionLifecycleStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface A2UIActionState {
+  surfaceId: string;
+  sourceId: string;
+  taskId: string;
+  title: string;
+  loopId: string | null;
+  status: A2UIActionLifecycleStatus;
+  error: string | null;
+  updatedAt: string;
+}
+
+export function a2uiActionKey(surfaceId: string, sourceId: string): string {
+  return `${surfaceId}:${sourceId}`;
+}
+
+function taskStatusToA2UI(status: DaemonTask["status"]): A2UIActionLifecycleStatus {
+  return status;
 }
 
 interface RuntimeState {
@@ -126,6 +148,9 @@ interface RuntimeState {
   /** In-memory surfaces for real-time WebSocket updates */
   surfaces: Record<string, A2UISurface>;
 
+  /** A2UI action lifecycle by surface/source component. */
+  a2uiActionStates: Record<string, A2UIActionState>;
+
   /** REST API actions */
   fetchSurfaces: () => Promise<void>;
   fetchSurface: (id: string) => Promise<void>;
@@ -136,6 +161,12 @@ interface RuntimeState {
   handleDataUpdate: (data: A2UIDataModelUpdate) => void;
   handleDelete: (data: A2UIDeleteSurface) => void;
   handleDeleteAll: () => void;
+  handleA2UIActionQueued: (data: {
+    surfaceId: string;
+    sourceId?: string;
+    task: DaemonTask;
+  }) => void;
+  handleDaemonTaskUpdate: (task: DaemonTask) => void;
 
   setActiveSurface: (id: string | null) => void;
   resetAll: () => void;
@@ -421,6 +452,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   activeSurface: null,
   activeSurfaceId: null,
   surfaces: {},
+  a2uiActionStates: {},
 
   fetchSurfaces: async () => {
     try {
@@ -451,11 +483,15 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       const { [id]: _, ...rest } = surfaces;
       const newList = surfaceList.filter((s) => s.id !== id);
       const newActive = activeSurfaceId === id ? null : activeSurfaceId;
+      const actionStates = Object.fromEntries(
+        Object.entries(get().a2uiActionStates).filter(([, state]) => state.surfaceId !== id)
+      );
       set({
         surfaces: rest,
         surfaceList: newList,
         activeSurfaceId: newActive,
         activeSurface: newActive && rest[newActive] ? rest[newActive] : null,
+        a2uiActionStates: actionStates,
       });
     } catch (err) {
       console.error("[a2ui] failed to delete surface:", err);
@@ -572,17 +608,73 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     const { [data.surfaceId]: _, ...rest } = surfaces;
     const newList = surfaceList.filter((s) => s.id !== data.surfaceId);
     const newActive = activeSurfaceId === data.surfaceId ? null : activeSurfaceId;
+    const actionStates = Object.fromEntries(
+      Object.entries(get().a2uiActionStates).filter(
+        ([, state]) => state.surfaceId !== data.surfaceId
+      )
+    );
 
     set({
       surfaces: rest,
       surfaceList: newList,
       activeSurfaceId: newActive,
       activeSurface: newActive && rest[newActive] ? rest[newActive] : null,
+      a2uiActionStates: actionStates,
     });
   },
 
   handleDeleteAll: () => {
-    set({ surfaces: {}, surfaceList: [], activeSurfaceId: null, activeSurface: null });
+    set({
+      surfaces: {},
+      surfaceList: [],
+      activeSurfaceId: null,
+      activeSurface: null,
+      a2uiActionStates: {},
+    });
+  },
+
+  handleA2UIActionQueued: ({ surfaceId, sourceId, task }) => {
+    if (!sourceId) return;
+    const key = a2uiActionKey(surfaceId, sourceId);
+    set((s) => ({
+      a2uiActionStates: {
+        ...s.a2uiActionStates,
+        [key]: {
+          surfaceId,
+          sourceId,
+          taskId: task.id,
+          title: task.title,
+          loopId: task.loopId,
+          status: taskStatusToA2UI(task.status),
+          error: task.error,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    }));
+  },
+
+  handleDaemonTaskUpdate: (task) => {
+    set((s) => {
+      let changed = false;
+      const next = Object.fromEntries(
+        Object.entries(s.a2uiActionStates).map(([key, state]) => {
+          if (state.taskId !== task.id) return [key, state];
+          changed = true;
+          return [
+            key,
+            {
+              ...state,
+              title: task.title,
+              loopId: task.loopId,
+              status: taskStatusToA2UI(task.status),
+              error: task.error,
+              updatedAt: new Date().toISOString(),
+            },
+          ];
+        })
+      );
+      return changed ? { a2uiActionStates: next } : s;
+    });
   },
 
   setActiveSurface: (id) => {
@@ -598,6 +690,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       cognitiveLoopSelectionLoading: false,
       cognitiveLoopEvents: {},
       surfaces: {},
+      a2uiActionStates: {},
       surfaceList: [],
       activeSurfaceId: null,
       activeSurface: null,

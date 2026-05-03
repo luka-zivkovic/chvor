@@ -190,6 +190,11 @@ This prevents arbitrary clients from spoofing actions for a surface or turning a
 non-interactive component into daemon work, and prevents one valid button or form
 from being replayed with a different top-level action payload.
 
+After a valid `emit:*` dispatch, the client tracks the returned daemon task and
+updates the Button/Form affordance as the task moves through queued, running,
+completed, failed, or cancelled states. If the task is linked to a cognitive
+loop, the client selects that loop so the rail can show the live action history.
+
 ---
 
 ## Security
