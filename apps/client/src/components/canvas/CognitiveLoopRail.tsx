@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRuntimeStore } from "../../stores/runtime-store";
 import { useUIStore } from "../../stores/ui-store";
+import { api, type CognitiveLoopDiffResponse } from "../../lib/api";
 
 function stageLabel(stage: string): string {
   return stage.replace(/\./g, " › ");
@@ -10,6 +11,16 @@ function severityColor(severity: string): string {
   if (severity === "critical") return "oklch(0.67 0.19 25)";
   if (severity === "warning") return "oklch(0.74 0.15 75)";
   return "oklch(0.70 0.14 220)";
+}
+
+function branchSourceLoopId(
+  events: Array<{ metadata: Record<string, unknown> | null }>
+): string | null {
+  for (const event of events) {
+    const sourceLoopId = event.metadata?.sourceLoopId;
+    if (typeof sourceLoopId === "string" && sourceLoopId.trim()) return sourceLoopId.trim();
+  }
+  return null;
 }
 
 export function CognitiveLoopRail() {
@@ -24,6 +35,8 @@ export function CognitiveLoopRail() {
   const [dismissedLoopId, setDismissedLoopId] = useState<string | null>(null);
   const [scrubIndex, setScrubIndex] = useState<number | null>(null);
   const [branching, setBranching] = useState(false);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diff, setDiff] = useState<CognitiveLoopDiffResponse | null>(null);
   const activeLoopId = activeLoop?.id;
   const events = useMemo(
     () => (activeLoopId ? (eventsByLoop[activeLoopId] ?? []) : []),
@@ -33,6 +46,10 @@ export function CognitiveLoopRail() {
   const selectedIndex =
     events.length === 0 ? -1 : Math.min(scrubIndex ?? events.length - 1, events.length - 1);
   const selectedEvent = selectedIndex >= 0 ? events[selectedIndex] : null;
+  const sourceLoopId = useMemo(
+    () => activeLoop?.parentLoopId ?? branchSourceLoopId(events),
+    [activeLoop?.parentLoopId, events]
+  );
 
   useEffect(() => {
     if (activeLoop && dismissedLoopId !== null && activeLoop.id !== dismissedLoopId)
@@ -41,6 +58,7 @@ export function CognitiveLoopRail() {
 
   useEffect(() => {
     setScrubIndex(null);
+    setDiff(null);
   }, [activeLoopId, events.length]);
 
   if (!activeLoop) return null;
@@ -50,6 +68,19 @@ export function CognitiveLoopRail() {
   const isRunning = activeLoop.status === "running";
   const isPaused = activeLoop.status === "paused";
   const isLiveSelection = selectedCognitiveLoopId === activeLoop.id && isRunning;
+  const compareWithSource = async () => {
+    if (!sourceLoopId || diffLoading) return;
+    setDiffLoading(true);
+    try {
+      setDiff(await api.cognitiveLoops.diff(activeLoop.id));
+    } catch (err) {
+      void import("sonner").then(({ toast }) => {
+        toast.error(err instanceof Error ? err.message : "Failed to compare branch");
+      });
+    } finally {
+      setDiffLoading(false);
+    }
+  };
   const branchFromSelected = async () => {
     if (!selectedEvent || branching) return;
     const instruction = window.prompt(
@@ -165,6 +196,62 @@ export function CognitiveLoopRail() {
           <div className="mb-3 rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2 text-[11px] text-white/45">
             Current stage{" "}
             <span className="ml-1 text-white/70">{stageLabel(activeLoop.currentStage)}</span>
+          </div>
+        )}
+
+        {sourceLoopId && (
+          <div className="mb-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2 text-xs">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/35">
+                  branch lineage
+                </div>
+                <div className="mt-0.5 font-mono text-[10px] text-white/45">
+                  from {sourceLoopId.slice(0, 8)}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="rounded-full border border-white/10 bg-white/8 px-3 py-1.5 text-[11px] text-white/70 transition hover:bg-white/12 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={diffLoading}
+                onClick={() => void compareWithSource()}
+              >
+                {diffLoading ? "Comparing…" : diff ? "Refresh diff" : "Compare"}
+              </button>
+            </div>
+            {diff && (
+              <div className="space-y-2 border-t border-white/8 pt-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg bg-black/20 px-2 py-1.5">
+                    <div className="text-[10px] uppercase tracking-[0.14em] text-white/30">
+                      source
+                    </div>
+                    <div className="mt-0.5 truncate text-white/65">
+                      {diff.sourceEvent?.title ?? diff.sourceLoop.title}
+                    </div>
+                    <div className="mt-0.5 font-mono text-[10px] text-white/35">
+                      {diff.comparison.sourceStatus} · {diff.comparison.sourceEventCount} events
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-black/20 px-2 py-1.5">
+                    <div className="text-[10px] uppercase tracking-[0.14em] text-white/30">
+                      branch
+                    </div>
+                    <div className="mt-0.5 truncate text-white/65">{diff.branchLoop.title}</div>
+                    <div className="mt-0.5 font-mono text-[10px] text-white/35">
+                      {diff.comparison.branchStatus} · {diff.comparison.branchEventCount} events
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] text-white/55 transition hover:bg-white/8 hover:text-white"
+                  onClick={() => void selectCognitiveLoop(diff.sourceLoop.id)}
+                >
+                  Open source loop
+                </button>
+              </div>
+            )}
           </div>
         )}
 

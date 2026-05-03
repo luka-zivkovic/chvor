@@ -1070,6 +1070,26 @@ export function getDb(): Database.Database {
     console.log("[db] migration v29 applied: cognitive loop runs/events + daemon task linkage");
   }
 
+  if (currentVersion < 30) {
+    // Store cognitive-loop branch lineage on the run itself. The original branch
+    // event metadata remains as audit history, while these fields make lineage
+    // identity-level data that can be queried without scanning events.
+    for (const statement of [
+      "ALTER TABLE cognitive_loop_runs ADD COLUMN parent_loop_id TEXT",
+      "ALTER TABLE cognitive_loop_runs ADD COLUMN parent_event_id TEXT",
+      "ALTER TABLE cognitive_loop_runs ADD COLUMN branch_reason TEXT",
+    ]) {
+      try {
+        db.exec(statement);
+      } catch (e: unknown) {
+        if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
+      }
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_cognitive_loop_runs_parent ON cognitive_loop_runs(parent_loop_id, created_at DESC)");
+    db.pragma("user_version = 30");
+    console.log("[db] migration v30 applied: cognitive loop run lineage");
+  }
+
   console.log(`[db] SQLite ready (${join(DATA_DIR, "chvor.db")})`);
   return db;
 }
