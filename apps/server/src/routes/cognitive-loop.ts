@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import {
   createCognitiveLoopRun,
   getCognitiveLoopRun,
+  listCognitiveLoopBranches,
   listCognitiveLoopEvents,
   listCognitiveLoopRuns,
 } from "../db/cognitive-loop-store.ts";
@@ -66,7 +67,7 @@ Rules:
 - Summarize what changed versus the original timeline.`;
 }
 
-function branchOrigin(events: ReturnType<typeof listCognitiveLoopEvents>): {
+function branchOriginFromEvents(events: ReturnType<typeof listCognitiveLoopEvents>): {
   sourceLoopId: string;
   sourceEventId: string | null;
   sourceStage: string | null;
@@ -83,6 +84,30 @@ function branchOrigin(events: ReturnType<typeof listCognitiveLoopEvents>): {
     }
   }
   return null;
+}
+
+function branchOrigin(
+  run: NonNullable<ReturnType<typeof getCognitiveLoopRun>>,
+  events: ReturnType<typeof listCognitiveLoopEvents>
+): {
+  sourceLoopId: string;
+  sourceEventId: string | null;
+  sourceStage: string | null;
+} | null {
+  const eventOrigin = branchOriginFromEvents(events);
+  if (run.parentLoopId) {
+    return {
+      sourceLoopId: run.parentLoopId,
+      sourceEventId: run.parentEventId,
+      sourceStage:
+        eventOrigin?.sourceLoopId === run.parentLoopId &&
+        eventOrigin.sourceEventId === run.parentEventId
+          ? eventOrigin.sourceStage
+          : null,
+    };
+  }
+
+  return eventOrigin;
 }
 
 function finalEvent(events: ReturnType<typeof listCognitiveLoopEvents>) {
@@ -123,6 +148,9 @@ cognitiveLoop.post("/:id/branch", async (c) => {
     severity: source.severity,
     trigger: "manual",
     summary: `Branch from "${sourceTitle}" at ${selectedLabel}`.slice(0, 2000),
+    parentLoopId: source.id,
+    parentEventId: selectedEvent?.id ?? null,
+    branchReason: instruction || null,
   });
 
   appendCognitiveLoopEvent(
@@ -178,7 +206,7 @@ cognitiveLoop.get("/:id/diff", (c) => {
   if (!branchRun) return c.json({ error: "not found" }, 404);
 
   const branchEvents = listCognitiveLoopEvents(branchRun.id);
-  const origin = branchOrigin(branchEvents);
+  const origin = branchOrigin(branchRun, branchEvents);
   if (!origin) return c.json({ error: "loop has no branch origin" }, 404);
 
   const sourceRun = getCognitiveLoopRun(origin.sourceLoopId);
@@ -187,7 +215,7 @@ cognitiveLoop.get("/:id/diff", (c) => {
   const sourceEvents = listCognitiveLoopEvents(sourceRun.id);
   const sourceEventIndex = origin.sourceEventId
     ? sourceEvents.findIndex((event) => event.id === origin.sourceEventId)
-    : sourceEvents.length - 1;
+    : -1;
   const sourceEvent = sourceEventIndex >= 0 ? sourceEvents[sourceEventIndex] : null;
   const sourceTimeline = sourceEventIndex >= 0 ? sourceEvents.slice(0, sourceEventIndex + 1) : [];
 
@@ -196,8 +224,9 @@ cognitiveLoop.get("/:id/diff", (c) => {
       sourceLoop: sourceRun,
       branchLoop: branchRun,
       sourceEvent,
-      sourceStage: origin.sourceStage,
+      sourceStage: origin.sourceStage ?? sourceEvent?.stage ?? null,
       sourceTimeline,
+      sourceFullTimeline: sourceEvents,
       branchEvents,
       comparison: {
         sourceStatus: sourceRun.status,
@@ -207,6 +236,19 @@ cognitiveLoop.get("/:id/diff", (c) => {
         sourceEventCount: sourceEvents.length,
         branchEventCount: branchEvents.length,
       },
+    },
+  });
+});
+
+cognitiveLoop.get("/:id/branches", (c) => {
+  const sourceLoop = getCognitiveLoopRun(c.req.param("id"));
+  if (!sourceLoop) return c.json({ error: "not found" }, 404);
+
+  const limit = Math.min(Math.max(1, parseInt(c.req.query("limit") ?? "50", 10) || 50), 100);
+  return c.json({
+    data: {
+      sourceLoop,
+      branches: listCognitiveLoopBranches(sourceLoop.id, limit),
     },
   });
 });

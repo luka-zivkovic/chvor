@@ -30,7 +30,8 @@ beforeAll(async () => {
   } = await import("../../db/cognitive-loop-store.ts"));
   ({ createDaemonTask } = await import("../../db/daemon-store.ts"));
   ({ completeCognitiveLoop, recoverStaleCognitiveLoops } = await import("../cognitive-loop.ts"));
-  ({ startLoopPlaybook, queueLoopPlaybookDaemonStep } = await import("../cognitive-loop-playbooks.ts"));
+  ({ startLoopPlaybook, queueLoopPlaybookDaemonStep } =
+    await import("../cognitive-loop-playbooks.ts"));
   ({ getDb } = await import("../../db/database.ts"));
 });
 
@@ -43,6 +44,9 @@ describe("cognitive-loop store", () => {
       summary: "Something happened",
     });
     expect(run.status).toBe("running");
+    expect(run.parentLoopId).toBeNull();
+    expect(run.parentEventId).toBeNull();
+    expect(run.branchReason).toBeNull();
     expect(listRunningCognitiveLoopRuns().some((r) => r.id === run.id)).toBe(true);
 
     const event = appendCognitiveLoopEvent({
@@ -69,6 +73,35 @@ describe("cognitive-loop store", () => {
       completedAt: new Date().toISOString(),
     });
     expect(completed?.status).toBe("completed");
+  });
+
+  it("persists run-level branch lineage", () => {
+    const source = createCognitiveLoopRun({
+      title: "Source loop",
+      severity: "info",
+      trigger: "manual",
+      summary: "Original timeline",
+    });
+    const event = appendCognitiveLoopEvent({
+      loopId: source.id,
+      stage: "pulse.detected",
+      title: "Branch point",
+    });
+
+    const branch = createCognitiveLoopRun({
+      title: "Branch loop",
+      severity: "info",
+      trigger: "manual",
+      summary: "Alternative timeline",
+      parentLoopId: source.id,
+      parentEventId: event.id,
+      branchReason: "Try a safer path",
+    });
+
+    expect(branch.parentLoopId).toBe(source.id);
+    expect(branch.parentEventId).toBe(event.id);
+    expect(branch.branchReason).toBe("Try a safer path");
+    expect(getCognitiveLoopRun(branch.id)?.parentLoopId).toBe(source.id);
   });
 
   it("completeCognitiveLoop transitions a running loop to completed via the wrapper", () => {
@@ -106,7 +139,9 @@ describe("cognitive-loop store", () => {
 
     // Backdate the stale loop's updated_at to an hour ago — past the 30-min default cutoff.
     const oldTs = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    getDb().prepare("UPDATE cognitive_loop_runs SET updated_at = ? WHERE id = ?").run(oldTs, stale.id);
+    getDb()
+      .prepare("UPDATE cognitive_loop_runs SET updated_at = ? WHERE id = ?")
+      .run(oldTs, stale.id);
 
     const recovered = recoverStaleCognitiveLoops();
     expect(recovered).toBeGreaterThanOrEqual(1);

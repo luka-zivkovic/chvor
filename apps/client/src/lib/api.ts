@@ -125,7 +125,10 @@ export interface CognitiveLoopDiffResponse {
   branchLoop: CognitiveLoopRun;
   sourceEvent: CognitiveLoopEvent | null;
   sourceStage: string | null;
+  /** Events up to and including the branch point: the branch "base commit" context. */
   sourceTimeline: CognitiveLoopEvent[];
+  /** Entire current source-loop timeline for full source-vs-branch comparisons. */
+  sourceFullTimeline: CognitiveLoopEvent[];
   branchEvents: CognitiveLoopEvent[];
   comparison: {
     sourceStatus: CognitiveLoopRun["status"];
@@ -135,6 +138,11 @@ export interface CognitiveLoopDiffResponse {
     sourceEventCount: number;
     branchEventCount: number;
   };
+}
+
+export interface CognitiveLoopBranchesResponse {
+  sourceLoop: CognitiveLoopRun;
+  branches: CognitiveLoopRun[];
 }
 
 const BASE = "/api";
@@ -563,6 +571,10 @@ export const api = {
       }),
     diff: (id: string) =>
       request<CognitiveLoopDiffResponse>(`/cognitive-loops/${encodeURIComponent(id)}/diff`),
+    branches: (id: string, limit = 50) =>
+      request<CognitiveLoopBranchesResponse>(
+        `/cognitive-loops/${encodeURIComponent(id)}/branches?limit=${limit}`
+      ),
   },
 
   templates: {

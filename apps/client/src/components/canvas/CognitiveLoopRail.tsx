@@ -46,7 +46,10 @@ export function CognitiveLoopRail() {
   const selectedIndex =
     events.length === 0 ? -1 : Math.min(scrubIndex ?? events.length - 1, events.length - 1);
   const selectedEvent = selectedIndex >= 0 ? events[selectedIndex] : null;
-  const sourceLoopId = useMemo(() => branchSourceLoopId(events), [events]);
+  const sourceLoopId = useMemo(
+    () => activeLoop?.parentLoopId ?? branchSourceLoopId(events),
+    [activeLoop?.parentLoopId, events]
+  );
 
   useEffect(() => {
     if (activeLoop && dismissedLoopId !== null && activeLoop.id !== dismissedLoopId)

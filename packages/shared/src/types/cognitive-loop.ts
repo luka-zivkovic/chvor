@@ -34,6 +34,9 @@ export interface CognitiveLoopRun {
   summary: string;
   currentStage: CognitiveLoopStage | null;
   surfaceId: string | null;
+  parentLoopId: string | null;
+  parentEventId: string | null;
+  branchReason: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;

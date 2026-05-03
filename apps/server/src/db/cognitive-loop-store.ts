@@ -17,6 +17,9 @@ interface CognitiveLoopRunRow {
   summary: string;
   current_stage: string | null;
   surface_id: string | null;
+  parent_loop_id: string | null;
+  parent_event_id: string | null;
+  branch_reason: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -42,6 +45,9 @@ function rowToRun(row: CognitiveLoopRunRow): CognitiveLoopRun {
     summary: row.summary,
     currentStage: row.current_stage as CognitiveLoopStage | null,
     surfaceId: row.surface_id,
+    parentLoopId: row.parent_loop_id,
+    parentEventId: row.parent_event_id,
+    branchReason: row.branch_reason,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
@@ -74,14 +80,17 @@ export function createCognitiveLoopRun(opts: {
   trigger: CognitiveLoopRun["trigger"];
   summary: string;
   surfaceId?: string | null;
+  parentLoopId?: string | null;
+  parentEventId?: string | null;
+  branchReason?: string | null;
 }): CognitiveLoopRun {
   const db = getDb();
   const id = randomUUID();
   const now = new Date().toISOString();
   db.prepare(`
     INSERT INTO cognitive_loop_runs
-      (id, title, status, severity, trigger, summary, current_stage, surface_id, created_at, updated_at)
-    VALUES (?, ?, 'running', ?, ?, ?, NULL, ?, ?, ?)
+      (id, title, status, severity, trigger, summary, current_stage, surface_id, parent_loop_id, parent_event_id, branch_reason, created_at, updated_at)
+    VALUES (?, ?, 'running', ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     opts.title.slice(0, 200),
@@ -89,6 +98,9 @@ export function createCognitiveLoopRun(opts: {
     opts.trigger,
     opts.summary.slice(0, 2000),
     opts.surfaceId ?? null,
+    opts.parentLoopId?.trim() || null,
+    opts.parentEventId?.trim() || null,
+    opts.branchReason?.trim().slice(0, 2000) || null,
     now,
     now,
   );
@@ -105,6 +117,16 @@ export function listCognitiveLoopRuns(limit = 20): CognitiveLoopRun[] {
   const rows = getDb()
     .prepare("SELECT * FROM cognitive_loop_runs ORDER BY created_at DESC LIMIT ?")
     .all(safeLimit) as CognitiveLoopRunRow[];
+  return rows.map(rowToRun);
+}
+
+export function listCognitiveLoopBranches(parentLoopId: string, limit = 50): CognitiveLoopRun[] {
+  const safeLimit = Math.min(Math.max(1, Math.floor(limit) || 50), 100);
+  const rows = getDb()
+    .prepare(
+      "SELECT * FROM cognitive_loop_runs WHERE parent_loop_id = ? ORDER BY created_at DESC LIMIT ?"
+    )
+    .all(parentLoopId, safeLimit) as CognitiveLoopRunRow[];
   return rows.map(rowToRun);
 }
 
