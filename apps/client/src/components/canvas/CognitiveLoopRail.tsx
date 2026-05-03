@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { CognitiveLoopRun } from "@chvor/shared";
 import { useRuntimeStore } from "../../stores/runtime-store";
 import { useUIStore } from "../../stores/ui-store";
 import { api, type CognitiveLoopDiffResponse } from "../../lib/api";
@@ -37,6 +38,8 @@ export function CognitiveLoopRail() {
   const [branching, setBranching] = useState(false);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diff, setDiff] = useState<CognitiveLoopDiffResponse | null>(null);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branches, setBranches] = useState<CognitiveLoopRun[]>([]);
   const activeLoopId = activeLoop?.id;
   const events = useMemo(
     () => (activeLoopId ? (eventsByLoop[activeLoopId] ?? []) : []),
@@ -60,6 +63,31 @@ export function CognitiveLoopRail() {
     setScrubIndex(null);
     setDiff(null);
   }, [activeLoopId, events.length]);
+
+  useEffect(() => {
+    if (!activeLoopId) {
+      setBranches([]);
+      return;
+    }
+    let cancelled = false;
+    setBranchesLoading(true);
+    api.cognitiveLoops
+      .branches(activeLoopId, 8)
+      .then((result) => {
+        if (!cancelled) setBranches(result.branches);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn("[cognitive-loop] failed to load branches:", err);
+        setBranches([]);
+      })
+      .finally(() => {
+        if (!cancelled) setBranchesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLoopId, loops.length]);
 
   if (!activeLoop) return null;
   if (dismissedLoopId === activeLoop.id && activeLoop.status !== "running") return null;
@@ -250,6 +278,56 @@ export function CognitiveLoopRail() {
                 >
                   Open source loop
                 </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {(branchesLoading || branches.length > 0) && (
+          <div className="mb-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2 text-xs">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/35">
+                  branches from this loop
+                </div>
+                <div className="mt-0.5 font-mono text-[10px] text-white/45">
+                  {branchesLoading
+                    ? "loading…"
+                    : `${branches.length} branch${branches.length === 1 ? "" : "es"}`}
+                </div>
+              </div>
+            </div>
+            {branches.length > 0 && (
+              <div className="space-y-1.5 border-t border-white/8 pt-2">
+                {branches.map((branch) => (
+                  <button
+                    key={branch.id}
+                    type="button"
+                    className="w-full rounded-lg border border-white/8 bg-black/20 px-2 py-1.5 text-left transition hover:bg-white/8"
+                    onClick={() => void selectCognitiveLoop(branch.id)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-[11px] font-medium text-white/70">
+                          {branch.title}
+                        </div>
+                        <div className="mt-0.5 line-clamp-1 text-[10px] text-white/35">
+                          {branch.branchReason || branch.summary}
+                        </div>
+                      </div>
+                      <div className="shrink-0 rounded-full border border-white/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-white/45">
+                        {branch.status}
+                      </div>
+                    </div>
+                    <div className="mt-1 font-mono text-[9px] text-white/30">
+                      {new Date(branch.createdAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                      {branch.parentEventId ? ` · ${branch.parentEventId.slice(0, 8)}` : ""}
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
           </div>
