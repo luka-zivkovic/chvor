@@ -1,4 +1,4 @@
-/* ─── A2UI Protocol Types (v0.8) ─── */
+/* ─── A2UI Protocol Types (v0.9) ─── */
 
 // ── Value types ──
 
