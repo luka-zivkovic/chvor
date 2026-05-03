@@ -66,10 +66,12 @@ export function CognitiveLoopRail() {
 
   useEffect(() => {
     if (!activeLoopId) {
+      setBranchesLoading(false);
       setBranches([]);
       return;
     }
     let cancelled = false;
+    setBranches([]);
     setBranchesLoading(true);
     api.cognitiveLoops
       .branches(activeLoopId, 8)
