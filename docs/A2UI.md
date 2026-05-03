@@ -181,8 +181,14 @@ The server rejects the dispatch unless:
 2. `sourceId` points to a Button or Form on that surface, and
 3. the stored component action emits the same `eventName`.
 
+Button payloads are canonicalized from the persisted `emit:*` JSON; the request
+payload must match it. Form actions may add submitted input values only under
+`payload.form`; persisted top-level payload fields cannot be overridden by the
+client request.
+
 This prevents arbitrary clients from spoofing actions for a surface or turning a
-non-interactive component into daemon work.
+non-interactive component into daemon work, and prevents one valid button or form
+from being replayed with a different top-level action payload.
 
 ---
 
@@ -190,7 +196,7 @@ non-interactive component into daemon work.
 
 - **Image sources** are validated against an allowlist (http/https, data:image/\*, relative paths). `javascript:` and `data:text/html` are blocked.
 - **Data binding paths** block prototype pollution (`__proto__`, `constructor`, `prototype`).
-- **Actions** are allowlisted (`navigate:*`, `emit:*`, `noop`) and re-validated server-side against the persisted surface component before daemon work is queued.
+- **Actions** are allowlisted (`navigate:*`, `emit:*`, `noop`) and re-validated server-side against the persisted surface component before daemon work is queued. Button payloads must match the persisted action payload; forms can add only sanitized `payload.form` field values.
 - **Recursive rendering** is capped at depth 50 with circular reference detection.
 - **Component count** is capped at 500 per surface to prevent memory exhaustion.
 - A2UI is disabled by default — enabling it adds the tools to the AI's system prompt.

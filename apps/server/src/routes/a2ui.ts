@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { parseA2UIAction, type A2UISurface } from "@chvor/shared";
+import { parseA2UIAction, type A2UISurface, type ParsedA2UIAction } from "@chvor/shared";
 import {
   listSurfaces,
   getSurface,
@@ -18,6 +18,12 @@ import {
 const a2ui = new Hono();
 
 const EVENT_NAME_RE = /^[a-z][a-z0-9_.-]{0,63}$/i;
+const FORM_VALUE_MAX_CHARS = 512;
+const FORM_KEY_MAX_CHARS = 80;
+const FORM_MAX_FIELDS = 50;
+
+type A2UIActionSourceKind = "button" | "form";
+type A2UIEmitAction = Extract<ParsedA2UIAction, { kind: "emit" }>;
 
 function payloadRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -33,28 +39,88 @@ function payloadString(payload: Record<string, unknown>, keys: string[]): string
   return null;
 }
 
+function hasOwn(obj: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, index) => jsonEqual(item, b[index]));
+  }
+  if (
+    a &&
+    b &&
+    typeof a === "object" &&
+    typeof b === "object" &&
+    !Array.isArray(a) &&
+    !Array.isArray(b)
+  ) {
+    const aRecord = a as Record<string, unknown>;
+    const bRecord = b as Record<string, unknown>;
+    const aKeys = Object.keys(aRecord).sort();
+    const bKeys = Object.keys(bRecord).sort();
+    return (
+      aKeys.length === bKeys.length &&
+      aKeys.every((key, index) => key === bKeys[index] && jsonEqual(aRecord[key], bRecord[key]))
+    );
+  }
+  return false;
+}
+
+function validatedRequestPayload(
+  value: unknown
+): { ok: true; payload: Record<string, unknown> } | { ok: false; error: string } {
+  if (value === undefined) return { ok: true, payload: {} };
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ok: true, payload: value as Record<string, unknown> };
+  }
+  return { ok: false, error: "payload must be an object" };
+}
+
+function sanitizeFormPayload(value: unknown): Record<string, string> {
+  const form = payloadRecord(value);
+  const out: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(form).slice(0, FORM_MAX_FIELDS)) {
+    const key = rawKey.trim().slice(0, FORM_KEY_MAX_CHARS);
+    if (!key || key === "__proto__" || key === "constructor" || key === "prototype") continue;
+    out[key] = typeof rawValue === "string" ? rawValue.slice(0, FORM_VALUE_MAX_CHARS) : "";
+  }
+  return out;
+}
+
+function payloadWithoutForm(payload: Record<string, unknown>): Record<string, unknown> {
+  const rest = { ...payload };
+  delete rest.form;
+  return rest;
+}
+
 function actionableComponentAction(
   surface: A2UISurface,
   sourceId: string | undefined
-): string | null {
+): { rawAction: string; sourceKind: A2UIActionSourceKind } | null {
   if (!sourceId) return null;
   const component = surface.components[sourceId]?.component;
   if (!component) return null;
-  if ("Button" in component) return component.Button.action;
-  if ("Form" in component) return component.Form.submitAction;
+  if ("Button" in component) return { rawAction: component.Button.action, sourceKind: "button" };
+  if ("Form" in component) return { rawAction: component.Form.submitAction, sourceKind: "form" };
   return null;
 }
 
-function validateActionOrigin(opts: {
-  surfaceId: string;
-  sourceId?: string;
-  eventName: string;
-}): { ok: true; surface: A2UISurface } | { ok: false; status: 400 | 403 | 404; error: string } {
+function validateActionOrigin(opts: { surfaceId: string; sourceId?: string; eventName: string }):
+  | {
+      ok: true;
+      surface: A2UISurface;
+      action: A2UIEmitAction;
+      sourceKind: A2UIActionSourceKind;
+    }
+  | { ok: false; status: 400 | 403 | 404; error: string } {
   const surface = getSurface(opts.surfaceId);
   if (!surface) return { ok: false, status: 404, error: "surface not found" };
 
-  const rawAction = actionableComponentAction(surface, opts.sourceId);
-  if (!rawAction) {
+  const actionable = actionableComponentAction(surface, opts.sourceId);
+  if (!actionable) {
     return {
       ok: false,
       status: 400,
@@ -62,7 +128,7 @@ function validateActionOrigin(opts: {
     };
   }
 
-  const parsed = parseA2UIAction(rawAction);
+  const parsed = parseA2UIAction(actionable.rawAction);
   if (!parsed || parsed.kind !== "emit" || parsed.eventName !== opts.eventName) {
     return {
       ok: false,
@@ -71,7 +137,52 @@ function validateActionOrigin(opts: {
     };
   }
 
-  return { ok: true, surface };
+  return { ok: true, surface, action: parsed, sourceKind: actionable.sourceKind };
+}
+
+function trustedActionPayload(opts: {
+  sourceKind: A2UIActionSourceKind;
+  action: A2UIEmitAction;
+  requestPayload: Record<string, unknown>;
+}): { ok: true; payload: Record<string, unknown> } | { ok: false; status: 403; error: string } {
+  const storedPayload = payloadRecord(opts.action.payload);
+
+  if (opts.sourceKind === "button") {
+    if (!jsonEqual(opts.requestPayload, storedPayload)) {
+      return {
+        ok: false,
+        status: 403,
+        error: "payload does not match the source component action",
+      };
+    }
+    return { ok: true, payload: storedPayload };
+  }
+
+  if (hasOwn(storedPayload, "form")) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'stored form action payload cannot include reserved "form" key',
+    };
+  }
+
+  const requestedStaticPayload = payloadWithoutForm(opts.requestPayload);
+  if (!jsonEqual(requestedStaticPayload, storedPayload)) {
+    return {
+      ok: false,
+      status: 403,
+      error: "form payload may only add submitted fields under form",
+    };
+  }
+
+  if (!hasOwn(opts.requestPayload, "form")) return { ok: true, payload: storedPayload };
+  return {
+    ok: true,
+    payload: {
+      ...storedPayload,
+      form: sanitizeFormPayload(opts.requestPayload.form),
+    },
+  };
 }
 
 // GET /api/a2ui/surfaces — lightweight list for sidebar
@@ -135,7 +246,16 @@ a2ui.post("/actions", async (c) => {
     const origin = validateActionOrigin({ surfaceId, sourceId, eventName });
     if (!origin.ok) return c.json({ error: origin.error }, origin.status);
 
-    const payload = payloadRecord(body.payload);
+    const requestPayload = validatedRequestPayload(body.payload);
+    if (!requestPayload.ok) return c.json({ error: requestPayload.error }, 400);
+    const trustedPayload = trustedActionPayload({
+      sourceKind: origin.sourceKind,
+      action: origin.action,
+      requestPayload: requestPayload.payload,
+    });
+    if (!trustedPayload.ok) return c.json({ error: trustedPayload.error }, trustedPayload.status);
+
+    const payload = trustedPayload.payload;
     if (eventName.startsWith("cognitive_loop.")) {
       const task = handleCognitiveLoopDashboardAction(eventName, payload);
       if (!task) return c.json({ error: "unknown cognitive loop action or loop not found" }, 404);
