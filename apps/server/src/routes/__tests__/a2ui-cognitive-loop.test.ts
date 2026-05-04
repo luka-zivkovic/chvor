@@ -14,6 +14,7 @@ let updateCognitiveLoopRun: typeof import("../../db/cognitive-loop-store.ts").up
 let listDaemonTasks: typeof import("../../db/daemon-store.ts").listDaemonTasks;
 let initA2UIDb: typeof import("../../db/a2ui-store.ts").initA2UIDb;
 let upsertSurface: typeof import("../../db/a2ui-store.ts").upsertSurface;
+let getSurface: typeof import("../../db/a2ui-store.ts").getSurface;
 
 beforeAll(async () => {
   app = (await import("../a2ui.ts")).default;
@@ -24,7 +25,7 @@ beforeAll(async () => {
     updateCognitiveLoopRun,
   } = await import("../../db/cognitive-loop-store.ts"));
   ({ listDaemonTasks } = await import("../../db/daemon-store.ts"));
-  ({ initA2UIDb, upsertSurface } = await import("../../db/a2ui-store.ts"));
+  ({ initA2UIDb, upsertSurface, getSurface } = await import("../../db/a2ui-store.ts"));
   initA2UIDb();
 });
 
@@ -281,6 +282,25 @@ describe("POST /a2ui/actions — cognitive_loop dashboard branch", () => {
     expect(body.data.title).toBe("Refresh dashboard");
     expect(body.data.source).toBe("a2ui");
     expect(getCognitiveLoopRun(body.data.loopId)?.trigger).toBe("a2ui");
+
+    const loopDashboard = getSurface(`cognitive-loop-${body.data.loopId}`);
+    expect(loopDashboard?.bindings.playbookLine).toContain("A2UI action execution");
+    expect(loopDashboard?.bindings.playbookSteps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          step: "Receive UI event",
+          status: "completed",
+        }),
+        expect.objectContaining({
+          step: "Validate payload",
+          status: "completed",
+        }),
+        expect.objectContaining({
+          step: "Queue daemon work",
+          status: "completed",
+        }),
+      ])
+    );
   });
 
   it("accepts matching form submit actions", async () => {
