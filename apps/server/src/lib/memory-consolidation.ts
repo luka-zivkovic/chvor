@@ -292,7 +292,7 @@ export async function runConsolidation(options: RunConsolidationOptions = {}): P
       "memory.consolidation.skipped",
       "Memory consolidation already running",
       null,
-      playbookStepRefForLoop(options.loopId, "health_anomaly", 1)
+      { ...playbookStepRefForLoop(options.loopId, "health_anomaly", 1) }
     );
     return { merged: 0, insights: 0, narratives: 0, pruned: 0 };
   }
@@ -319,7 +319,7 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
       "memory.consolidation.skipped",
       "Memory consolidation disabled",
       null,
-      playbookStepRefForLoop(options.loopId, "health_anomaly", 1)
+      { ...playbookStepRefForLoop(options.loopId, "health_anomaly", 1) }
     );
     return { merged: 0, insights: 0, narratives: 0, pruned: 0 };
   }

@@ -205,7 +205,7 @@ describe("cognitive-loop store", () => {
 
     setConfig("memory.consolidationEnabled", "false");
     try {
-      await runConsolidation({ loopId: run.id, reason: "test" });
+      await runConsolidation({ loopId: run.id, reason: "manual" });
     } finally {
       setConfig("memory.consolidationEnabled", "true");
     }

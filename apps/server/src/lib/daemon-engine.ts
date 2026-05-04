@@ -430,7 +430,7 @@ function handleEscalation(resultText: string, _healthContext: string, loopId?: s
       "daemon.task.failed",
       "Daemon remediation skipped",
       "Daemon or auto-remediation is disabled.",
-      playbookStepRefForLoop(loopId, "health_anomaly", 3)
+      { ...playbookStepRefForLoop(loopId, "health_anomaly", 3) }
     );
     return false;
   }
@@ -442,7 +442,7 @@ function handleEscalation(resultText: string, _healthContext: string, loopId?: s
       "daemon.task.failed",
       "Daemon remediation skipped",
       "Escalation rate limit reached.",
-      playbookStepRefForLoop(loopId, "health_anomaly", 3)
+      { ...playbookStepRefForLoop(loopId, "health_anomaly", 3) }
     );
     return false;
   }
