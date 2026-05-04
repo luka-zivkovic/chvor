@@ -33,6 +33,12 @@ export interface CognitiveLoopPlaybookStepRef {
   stepName: string;
 }
 
+export interface MemoryInsightFollowupContext {
+  memoryId: string | null;
+  sourceCount: number | null;
+  insight: string | null;
+}
+
 const PLAYBOOKS: Record<CognitiveLoopPlaybookId, CognitiveLoopPlaybook> = {
   health_anomaly: {
     id: "health_anomaly",
@@ -105,6 +111,45 @@ function metadataRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function metadataNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function playbookContext(events: CognitiveLoopEvent[]): Record<string, unknown> {
+  const started = events.find((event) => event.stage === "playbook.started");
+  return metadataRecord(metadataRecord(started?.metadata).context);
+}
+
+function memoryInsightContextFromEvents(
+  events: CognitiveLoopEvent[]
+): MemoryInsightFollowupContext {
+  const context = playbookContext(events);
+  const insightEvent = events.find((event) => event.stage === "memory.insight.created");
+  const insightMetadata = metadataRecord(insightEvent?.metadata);
+  const contextMemoryId = context.memoryId;
+  const eventMemoryId = insightMetadata.memoryId;
+  const memoryId =
+    typeof eventMemoryId === "string" && eventMemoryId.trim()
+      ? eventMemoryId.trim()
+      : typeof contextMemoryId === "string" && contextMemoryId.trim()
+        ? contextMemoryId.trim()
+        : null;
+  const sourceCount =
+    metadataNumber(insightMetadata.sourceCount) ?? metadataNumber(context.sourceCount);
+  const insight = safeText(insightEvent?.body ?? insightEvent?.title ?? null, 1200) || null;
+  return { memoryId, sourceCount, insight };
+}
+
+function memoryInsightMetadata(
+  context: MemoryInsightFollowupContext | null
+): Record<string, unknown> {
+  if (!context) return {};
+  return {
+    ...(context.memoryId ? { memoryId: context.memoryId } : {}),
+    ...(context.sourceCount !== null ? { sourceCount: context.sourceCount } : {}),
+  };
+}
+
 export function playbookStepRef(
   playbookId: CognitiveLoopPlaybookId,
   stepIndex: number
@@ -126,6 +171,24 @@ function currentPlaybookId(events: CognitiveLoopEvent[]): CognitiveLoopPlaybookI
     return fromMetadata as CognitiveLoopPlaybookId;
   }
   return null;
+}
+
+export function currentCognitiveLoopPlaybookId(
+  loopId: string | null | undefined
+): CognitiveLoopPlaybookId | null {
+  if (!loopId) return null;
+  const run = getCognitiveLoopRun(loopId);
+  if (!run) return null;
+  return currentPlaybookId(listCognitiveLoopEvents(run.id));
+}
+
+export function memoryInsightFollowupContextForLoop(
+  loopId: string | null | undefined
+): MemoryInsightFollowupContext {
+  if (!loopId) return { memoryId: null, sourceCount: null, insight: null };
+  const run = getCognitiveLoopRun(loopId);
+  if (!run) return { memoryId: null, sourceCount: null, insight: null };
+  return memoryInsightContextFromEvents(listCognitiveLoopEvents(run.id));
 }
 
 function inferPlaybookId(
@@ -175,6 +238,7 @@ function playbookPrompt(opts: {
   playbook: CognitiveLoopPlaybook;
   action: "retry" | "escalate" | "continue";
   events: CognitiveLoopEvent[];
+  memoryContext?: MemoryInsightFollowupContext | null;
   reason?: string;
 }): string {
   const actionLine =
@@ -183,6 +247,10 @@ function playbookPrompt(opts: {
       : opts.action === "escalate"
         ? "Escalate this loop: perform a deeper autonomous investigation and produce a concrete recommendation or safe fix."
         : "Continue the next safe step in this loop.";
+  const sourceInsight =
+    opts.playbook.id === "memory_insight_followup"
+      ? `\nSource insight:\n- memory id: ${opts.memoryContext?.memoryId ?? "unknown"}\n- insight: ${safeText(opts.memoryContext?.insight, 800) || opts.run.summary}\n`
+      : "";
 
   return `[COGNITIVE LOOP PLAYBOOK — ${opts.playbook.name}]
 
@@ -202,6 +270,7 @@ Loop:
 
 Action request:
 ${actionLine}${opts.reason ? `\nReason: ${opts.reason}` : ""}
+${sourceInsight}
 
 Recent loop events:
 ${recentEventDigest(opts.events) || "- none yet"}
@@ -260,6 +329,13 @@ export function queueLoopPlaybookDaemonStep(opts: {
   const events = listCognitiveLoopEvents(run.id);
   const playbook = PLAYBOOKS[inferPlaybookId(run, events)];
   const action = opts.action ?? "continue";
+  const memoryContext =
+    playbook.id === "memory_insight_followup" ? memoryInsightContextFromEvents(events) : null;
+  const actionMetadata = {
+    playbookId: playbook.id,
+    action,
+    ...memoryInsightMetadata(memoryContext),
+  };
 
   if (run.status !== "running") {
     resumeCognitiveLoop(run.id, "Loop resumed by playbook action", opts.reason ?? null);
@@ -270,15 +346,12 @@ export function queueLoopPlaybookDaemonStep(opts: {
     "playbook.action.requested",
     `Playbook action requested: ${action}`,
     opts.reason ?? null,
-    {
-      playbookId: playbook.id,
-      action,
-    }
+    actionMetadata
   );
 
   const task = createDaemonTask({
     title: opts.title ?? `${playbook.name}: ${action}`,
-    prompt: playbookPrompt({ run, playbook, action, events, reason: opts.reason }),
+    prompt: playbookPrompt({ run, playbook, action, events, memoryContext, reason: opts.reason }),
     source: opts.source ?? "system",
     priority: Math.max(
       0,
@@ -298,6 +371,7 @@ export function queueLoopPlaybookDaemonStep(opts: {
       priority: task.priority,
       playbookId: playbook.id,
       action,
+      ...memoryInsightMetadata(memoryContext),
       ...playbookStepRef(playbook.id, 2),
     }
   );
