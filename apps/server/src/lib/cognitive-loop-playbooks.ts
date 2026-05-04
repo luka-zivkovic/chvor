@@ -119,6 +119,15 @@ export function playbookStepRef(
   };
 }
 
+function currentPlaybookId(events: CognitiveLoopEvent[]): CognitiveLoopPlaybookId | null {
+  const started = events.find((event) => event.stage === "playbook.started");
+  const fromMetadata = metadataRecord(started?.metadata).playbookId;
+  if (fromMetadata && typeof fromMetadata === "string" && fromMetadata in PLAYBOOKS) {
+    return fromMetadata as CognitiveLoopPlaybookId;
+  }
+  return null;
+}
+
 function inferPlaybookId(
   run: CognitiveLoopRun,
   events: CognitiveLoopEvent[]
@@ -320,6 +329,21 @@ export function handleCognitiveLoopDashboardAction(
       reason: "User clicked Escalate on the loop dashboard.",
       title: "Escalate cognitive loop",
       priority: 3,
+      source: "a2ui",
+    });
+  }
+
+  if (eventName === "cognitive_loop.followup") {
+    const run = getCognitiveLoopRun(loopId);
+    const events = run ? listCognitiveLoopEvents(run.id) : [];
+    if (!run || currentPlaybookId(events) !== "memory_insight_followup") return null;
+
+    return queueLoopPlaybookDaemonStep({
+      loopId,
+      action: "continue",
+      reason: "User clicked Follow up on the loop dashboard.",
+      title: "Follow up cognitive loop insight",
+      priority: 2,
       source: "a2ui",
     });
   }

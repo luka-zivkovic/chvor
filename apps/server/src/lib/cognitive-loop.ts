@@ -56,6 +56,11 @@ function playbookLine(events: CognitiveLoopEvent[]): string {
   return `${name}${stepCount ? ` • ${stepCount} steps` : ""}`;
 }
 
+function isMemoryInsightFollowupPlaybook(events: CognitiveLoopEvent[]): boolean {
+  const playbook = events.find((event) => event.stage === "playbook.started");
+  return metadataValue(playbook?.metadata ?? null, "playbookId") === "memory_insight_followup";
+}
+
 type PlaybookStepStatus = "pending" | "running" | "completed" | "failed";
 
 function playbookSteps(events: CognitiveLoopEvent[]): string[] {
@@ -243,7 +248,14 @@ function stripSeverity(resultText: string): string {
   return resultText.replace(/^\[(CRITICAL|WARNING)]\s*/i, "").trim();
 }
 
-function surfaceComponents(loopId: string): A2UIComponentEntry[] {
+function surfaceComponents(loopId: string, opts: { showFollowUp: boolean }): A2UIComponentEntry[] {
+  const actionChildren = [
+    "retry",
+    "escalate",
+    ...(opts.showFollowUp ? ["follow-up"] : []),
+    "open-activity",
+  ];
+
   return [
     {
       id: "title",
@@ -315,6 +327,20 @@ function surfaceComponents(loopId: string): A2UIComponentEntry[] {
         },
       },
     },
+    ...(opts.showFollowUp
+      ? [
+          {
+            id: "follow-up",
+            component: {
+              Button: {
+                label: { literalString: "Follow up" },
+                action: loopAction("cognitive_loop.followup", loopId),
+                variant: "secondary",
+              },
+            },
+          } satisfies A2UIComponentEntry,
+        ]
+      : []),
     {
       id: "open-activity",
       component: {
@@ -329,7 +355,7 @@ function surfaceComponents(loopId: string): A2UIComponentEntry[] {
       id: "actions",
       component: {
         Row: {
-          children: { explicitList: ["retry", "escalate", "open-activity"] },
+          children: { explicitList: actionChildren },
           gap: 8,
           align: "start",
         },
@@ -363,19 +389,19 @@ function componentMap(entries: A2UIComponentEntry[]): Record<string, A2UICompone
   return Object.fromEntries(entries.map((entry) => [entry.id, entry]));
 }
 
-// Track which loops have already had their A2UI surface schema published.
-// The schema (component tree) is identical for every event in a given loop —
-// only `bindings` change as events accrue. By republishing the schema once
-// (or on toast), follow-up events do a cheap bindings-only DB write + a
-// single `a2ui.data` broadcast instead of two writes + two broadcasts.
-const surfacePublished = new Set<string>();
+// Track each loop dashboard schema variant already published. Most follow-up
+// events only change `bindings`, but the memory-insight playbook toggles the
+// Follow up action, so schema changes must be republished when that variant flips.
+const surfaceSchemaKeys = new Map<string, string>();
 
 function refreshLoopDashboard(loopId: string, opts: { toast?: boolean } = {}): void {
   const run = getCognitiveLoopRun(loopId);
   if (!run) return;
   const surfaceId = run.surfaceId ?? `cognitive-loop-${run.id}`;
   const events = listCognitiveLoopEvents(run.id);
-  const components = surfaceComponents(run.id);
+  const showFollowUp = isMemoryInsightFollowupPlaybook(events);
+  const schemaKey = showFollowUp ? "memory-insight-followup" : "default";
+  const components = surfaceComponents(run.id, { showFollowUp });
   const bindings = {
     summary: run.summary,
     statusLine: `${run.severity.toUpperCase()} • ${run.status} • ${run.currentStage?.replace(/\./g, " › ") ?? "starting"}`,
@@ -385,7 +411,7 @@ function refreshLoopDashboard(loopId: string, opts: { toast?: boolean } = {}): v
   };
 
   const isFinalStatus = run.status === "completed" || run.status === "failed";
-  const needsSchema = opts.toast || !surfacePublished.has(surfaceId);
+  const needsSchema = opts.toast || surfaceSchemaKeys.get(surfaceId) !== schemaKey;
 
   try {
     if (needsSchema) {
@@ -396,7 +422,7 @@ function refreshLoopDashboard(loopId: string, opts: { toast?: boolean } = {}): v
         components: componentMap(components),
         rendering: true,
       });
-      surfacePublished.add(surfaceId);
+      surfaceSchemaKeys.set(surfaceId, schemaKey);
     }
     updateBindings(surfaceId, bindings);
   } catch (err) {
@@ -417,7 +443,7 @@ function refreshLoopDashboard(loopId: string, opts: { toast?: boolean } = {}): v
   if (opts.toast) {
     ws?.broadcast({ type: "a2ui.toast", data: { surfaceId, title: "Cognitive loop started" } });
   }
-  if (isFinalStatus) surfacePublished.delete(surfaceId);
+  if (isFinalStatus) surfaceSchemaKeys.delete(surfaceId);
 }
 
 export function startPulseCognitiveLoop(
