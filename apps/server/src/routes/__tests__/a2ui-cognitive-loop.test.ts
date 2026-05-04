@@ -12,6 +12,7 @@ let listCognitiveLoopEvents: typeof import("../../db/cognitive-loop-store.ts").l
 let getCognitiveLoopRun: typeof import("../../db/cognitive-loop-store.ts").getCognitiveLoopRun;
 let updateCognitiveLoopRun: typeof import("../../db/cognitive-loop-store.ts").updateCognitiveLoopRun;
 let appendCognitiveLoopEvent: typeof import("../../lib/cognitive-loop.ts").appendCognitiveLoopEvent;
+let startLoopPlaybook: typeof import("../../lib/cognitive-loop-playbooks.ts").startLoopPlaybook;
 let listDaemonTasks: typeof import("../../db/daemon-store.ts").listDaemonTasks;
 let initA2UIDb: typeof import("../../db/a2ui-store.ts").initA2UIDb;
 let upsertSurface: typeof import("../../db/a2ui-store.ts").upsertSurface;
@@ -26,6 +27,7 @@ beforeAll(async () => {
     updateCognitiveLoopRun,
   } = await import("../../db/cognitive-loop-store.ts"));
   ({ appendCognitiveLoopEvent } = await import("../../lib/cognitive-loop.ts"));
+  ({ startLoopPlaybook } = await import("../../lib/cognitive-loop-playbooks.ts"));
   ({ listDaemonTasks } = await import("../../db/daemon-store.ts"));
   ({ initA2UIDb, upsertSurface, getSurface } = await import("../../db/a2ui-store.ts"));
   initA2UIDb();
@@ -145,6 +147,61 @@ describe("POST /a2ui/actions — cognitive_loop dashboard branch", () => {
     const body = (await res.json()) as { data: { priority: number; loopId: string } };
     expect(body.data.priority).toBe(3);
     expect(body.data.loopId).toBe(run.id);
+  });
+
+  it("queues a safe follow-up task from memory insight dashboards", async () => {
+    const run = createCognitiveLoopRun({
+      title: "Memory insight loop",
+      severity: "info",
+      trigger: "manual",
+      summary: "A useful memory insight needs user-approved follow-up",
+    });
+    startLoopPlaybook(run.id, "memory_insight_followup", { reason: "test insight" });
+    appendCognitiveLoopEvent(
+      run.id,
+      "memory.insight.created",
+      "Memory insight captured",
+      "Repeated credential failures were observed.",
+      { stepIndex: 0, stepId: "capture-insight" },
+      { toast: true }
+    );
+
+    const dashboard = getSurface(`cognitive-loop-${run.id}`);
+    expect(dashboard?.components["follow-up"]?.component).toMatchObject({
+      Button: {
+        label: { literalString: "Follow up" },
+        action: emitAction("cognitive_loop.followup", { loopId: run.id }),
+      },
+    });
+
+    const res = await postAction({
+      surfaceId: `cognitive-loop-${run.id}`,
+      sourceId: "follow-up",
+      eventName: "cognitive_loop.followup",
+      payload: { loopId: run.id },
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      data: { title: string; priority: number; loopId: string; source: string; prompt: string };
+    };
+    expect(body.data.title).toBe("Follow up cognitive loop insight");
+    expect(body.data.priority).toBe(2);
+    expect(body.data.loopId).toBe(run.id);
+    expect(body.data.source).toBe("a2ui");
+    expect(body.data.prompt).toContain("COGNITIVE LOOP PLAYBOOK — Memory insight follow-up");
+    expect(body.data.prompt).toContain("Continue the next safe step in this loop.");
+    expect(body.data.prompt).toContain("If a fix is risky or needs credentials/approval");
+
+    const queuedEvent = listCognitiveLoopEvents(run.id).find(
+      (event) => event.stage === "daemon.task.queued"
+    );
+    expect(queuedEvent?.metadata).toMatchObject({
+      playbookId: "memory_insight_followup",
+      action: "continue",
+      stepIndex: 2,
+      stepId: "queue-follow-up-if-safe",
+      stepName: "Queue follow-up if safe",
+    });
   });
 
   it("returns 404 when the surface does not exist", async () => {

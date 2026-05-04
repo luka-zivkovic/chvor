@@ -324,5 +324,16 @@ export function handleCognitiveLoopDashboardAction(
     });
   }
 
+  if (eventName === "cognitive_loop.followup") {
+    return queueLoopPlaybookDaemonStep({
+      loopId,
+      action: "continue",
+      reason: "User clicked Follow up on the loop dashboard.",
+      title: "Follow up cognitive loop insight",
+      priority: 2,
+      source: "a2ui",
+    });
+  }
+
   return null;
 }

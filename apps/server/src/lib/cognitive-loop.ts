@@ -316,6 +316,16 @@ function surfaceComponents(loopId: string): A2UIComponentEntry[] {
       },
     },
     {
+      id: "follow-up",
+      component: {
+        Button: {
+          label: { literalString: "Follow up" },
+          action: loopAction("cognitive_loop.followup", loopId),
+          variant: "secondary",
+        },
+      },
+    },
+    {
       id: "open-activity",
       component: {
         Button: {
@@ -329,7 +339,7 @@ function surfaceComponents(loopId: string): A2UIComponentEntry[] {
       id: "actions",
       component: {
         Row: {
-          children: { explicitList: ["retry", "escalate", "open-activity"] },
+          children: { explicitList: ["retry", "escalate", "follow-up", "open-activity"] },
           gap: 8,
           align: "start",
         },
