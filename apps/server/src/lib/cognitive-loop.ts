@@ -68,6 +68,52 @@ function playbookSteps(events: CognitiveLoopEvent[]): string[] {
     : [];
 }
 
+function stepId(step: string): string {
+  return step
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function explicitStepIndex(event: CognitiveLoopEvent, steps: string[]): number | null {
+  const metadata = event.metadata;
+  const rawIndex = metadata?.stepIndex;
+  if (
+    typeof rawIndex === "number" &&
+    Number.isInteger(rawIndex) &&
+    rawIndex >= 0 &&
+    rawIndex < steps.length
+  ) {
+    return rawIndex;
+  }
+  if (typeof rawIndex === "string" && /^\d+$/.test(rawIndex.trim())) {
+    const index = Number(rawIndex.trim());
+    if (index < steps.length) return index;
+  }
+
+  const rawStepId = metadata?.stepId;
+  if (typeof rawStepId === "string" && rawStepId.trim()) {
+    const normalized = stepId(rawStepId);
+    const index = steps.findIndex((step) => stepId(step) === normalized);
+    if (index !== -1) return index;
+  }
+
+  return null;
+}
+
+function inferredPlaybookStepIndex(event: CognitiveLoopEvent, steps: string[]): number | null {
+  const explicit = explicitStepIndex(event, steps);
+  if (explicit !== null) return explicit;
+
+  const title = event.title.toLowerCase();
+  if (title.includes("memory consolidation")) return Math.min(1, steps.length - 1);
+  if (title.includes("validated a2ui action")) return Math.min(1, steps.length - 1);
+  if (title.includes("daemon remediation")) return Math.min(3, steps.length - 1);
+
+  return null;
+}
+
 function playbookStepRows(
   events: CognitiveLoopEvent[]
 ): Array<{ step: string; status: PlaybookStepStatus; signal: string }> {
@@ -87,9 +133,14 @@ function playbookStepRows(
     completed: 3,
   };
 
-  const mark = (index: number, status: PlaybookStepStatus, signal: string): void => {
+  const mark = (
+    index: number,
+    status: PlaybookStepStatus,
+    signal: string,
+    opts: { allowRecovery?: boolean } = {}
+  ): void => {
     const row = rows[Math.max(0, Math.min(rows.length - 1, index))];
-    if (!row || priority[status] < priority[row.status]) return;
+    if (!row || (!opts.allowRecovery && priority[status] < priority[row.status])) return;
     row.status = status;
     row.signal = signal;
   };
@@ -116,7 +167,7 @@ function playbookStepRows(
         mark(2, "completed", event.title);
         break;
       case "daemon.task.started":
-        mark(3, "running", event.title);
+        mark(3, "running", event.title, { allowRecovery: true });
         break;
       case "tool.synthesized":
       case "daemon.task.completed":
@@ -133,11 +184,17 @@ function playbookStepRows(
         mark(rows.length - 1, "failed", event.title);
         break;
       case "playbook.step.started":
-        mark(nextActionStep(), "running", event.title);
+        mark(inferredPlaybookStepIndex(event, steps) ?? nextActionStep(), "running", event.title, {
+          allowRecovery: true,
+        });
         break;
       case "playbook.step.completed": {
         const success = event.metadata?.success;
-        mark(nextActionStep(), success === false ? "failed" : "completed", event.title);
+        mark(
+          inferredPlaybookStepIndex(event, steps) ?? nextActionStep(),
+          success === false ? "failed" : "completed",
+          event.title
+        );
         break;
       }
     }

@@ -11,6 +11,7 @@ let createCognitiveLoopRun: typeof import("../../db/cognitive-loop-store.ts").cr
 let listCognitiveLoopEvents: typeof import("../../db/cognitive-loop-store.ts").listCognitiveLoopEvents;
 let getCognitiveLoopRun: typeof import("../../db/cognitive-loop-store.ts").getCognitiveLoopRun;
 let updateCognitiveLoopRun: typeof import("../../db/cognitive-loop-store.ts").updateCognitiveLoopRun;
+let appendCognitiveLoopEvent: typeof import("../../lib/cognitive-loop.ts").appendCognitiveLoopEvent;
 let listDaemonTasks: typeof import("../../db/daemon-store.ts").listDaemonTasks;
 let initA2UIDb: typeof import("../../db/a2ui-store.ts").initA2UIDb;
 let upsertSurface: typeof import("../../db/a2ui-store.ts").upsertSurface;
@@ -24,6 +25,7 @@ beforeAll(async () => {
     getCognitiveLoopRun,
     updateCognitiveLoopRun,
   } = await import("../../db/cognitive-loop-store.ts"));
+  ({ appendCognitiveLoopEvent } = await import("../../lib/cognitive-loop.ts"));
   ({ listDaemonTasks } = await import("../../db/daemon-store.ts"));
   ({ initA2UIDb, upsertSurface, getSurface } = await import("../../db/a2ui-store.ts"));
   initA2UIDb();
@@ -66,6 +68,18 @@ function upsertButtonSurface(
       },
     },
   });
+}
+
+function playbookStepStatus(loopId: string, step: string): string | undefined {
+  const rows = getSurface(`cognitive-loop-${loopId}`)?.bindings.playbookSteps;
+  if (!Array.isArray(rows)) return undefined;
+  const row = rows.find(
+    (candidate) =>
+      candidate &&
+      typeof candidate === "object" &&
+      (candidate as Record<string, unknown>).step === step
+  ) as { status?: string } | undefined;
+  return row?.status;
 }
 
 describe("POST /a2ui/actions — cognitive_loop dashboard branch", () => {
@@ -301,6 +315,57 @@ describe("POST /a2ui/actions — cognitive_loop dashboard branch", () => {
         }),
       ])
     );
+    const validationEvent = listCognitiveLoopEvents(body.data.loopId).find(
+      (event) =>
+        event.stage === "playbook.step.completed" &&
+        event.title === "Playbook step completed: validated A2UI action"
+    );
+    expect(validationEvent?.metadata).toMatchObject({ success: true, stepIndex: 1 });
+  });
+
+  it("shows daemon retry recovery as failed to running to completed", async () => {
+    upsertButtonSurface("generic-action-retry-recovery", "run", "user.recover", {
+      title: "Recover action",
+      prompt: "Recover safely.",
+    });
+
+    const res = await postAction({
+      surfaceId: "generic-action-retry-recovery",
+      sourceId: "run",
+      eventName: "user.recover",
+      payload: { title: "Recover action", prompt: "Recover safely." },
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { loopId: string } };
+
+    appendCognitiveLoopEvent(body.data.loopId, "daemon.task.started", "Daemon started");
+    expect(playbookStepStatus(body.data.loopId, "Complete safely")).toBe("running");
+
+    appendCognitiveLoopEvent(body.data.loopId, "daemon.task.failed", "Daemon failed");
+    appendCognitiveLoopEvent(
+      body.data.loopId,
+      "playbook.step.completed",
+      "Playbook step needs retry: daemon remediation",
+      "boom",
+      { success: false }
+    );
+    expect(playbookStepStatus(body.data.loopId, "Complete safely")).toBe("failed");
+    expect(playbookStepStatus(body.data.loopId, "Refresh dashboard")).toBe("pending");
+
+    appendCognitiveLoopEvent(body.data.loopId, "daemon.task.started", "Daemon retry started");
+    expect(playbookStepStatus(body.data.loopId, "Complete safely")).toBe("running");
+
+    appendCognitiveLoopEvent(body.data.loopId, "daemon.task.completed", "Daemon completed");
+    appendCognitiveLoopEvent(
+      body.data.loopId,
+      "playbook.step.completed",
+      "Playbook step completed: daemon remediation",
+      null,
+      { success: true }
+    );
+    expect(playbookStepStatus(body.data.loopId, "Complete safely")).toBe("completed");
+    expect(playbookStepStatus(body.data.loopId, "Refresh dashboard")).toBe("pending");
   });
 
   it("accepts matching form submit actions", async () => {

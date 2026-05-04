@@ -277,6 +277,7 @@ a2ui.post("/actions", async (c) => {
     });
     markLoopPlaybookStep(loop.id, "Playbook step completed: validated A2UI action", {
       metadata: {
+        stepIndex: 1,
         eventName,
         sourceSurfaceId: surfaceId,
         sourceId,
