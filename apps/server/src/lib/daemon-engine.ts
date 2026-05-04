@@ -3,11 +3,24 @@ import type { WSManager } from "../gateway/ws.ts";
 import type { DaemonPresence, DaemonTask } from "@chvor/shared";
 import { initPulse, shutdownPulse, setEscalationHandler } from "./pulse-engine.ts";
 import { getDaemonConfig } from "../db/config-store.ts";
-import { claimNextTask, updateDaemonTask, createDaemonTask, getQueueDepth, pruneDaemonTasks, listDaemonTasks, getDaemonTask } from "../db/daemon-store.ts";
+import {
+  claimNextTask,
+  updateDaemonTask,
+  createDaemonTask,
+  getQueueDepth,
+  pruneDaemonTasks,
+  listDaemonTasks,
+  getDaemonTask,
+} from "../db/daemon-store.ts";
 import { insertActivity } from "../db/activity-store.ts";
 import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
-import { appendCognitiveLoopEvent, completeCognitiveLoop, failCognitiveLoop, recoverStaleCognitiveLoops } from "./cognitive-loop.ts";
-import { markLoopPlaybookStep } from "./cognitive-loop-playbooks.ts";
+import {
+  appendCognitiveLoopEvent,
+  completeCognitiveLoop,
+  failCognitiveLoop,
+  recoverStaleCognitiveLoops,
+} from "./cognitive-loop.ts";
+import { markLoopPlaybookStep, playbookStepRefForLoop } from "./cognitive-loop-playbooks.ts";
 
 let wsRef: WSManager | null = null;
 let currentTask: DaemonTask | null = null;
@@ -79,11 +92,7 @@ export function shutdownDaemon(): void {
 export function getDaemonPresence(): DaemonPresence {
   const config = getDaemonConfig();
   return {
-    state: !config.enabled
-      ? "sleeping"
-      : currentTask
-        ? "working"
-        : "idle",
+    state: !config.enabled ? "sleeping" : currentTask ? "working" : "idle",
     currentTask: currentTask ? { id: currentTask.id, title: currentTask.title } : null,
     queueDepth: getQueueDepth(),
     lastActivity: null,
@@ -123,9 +132,15 @@ async function daemonTick(): Promise<void> {
     if (task) {
       currentTask = task;
       broadcastPresence();
-      appendCognitiveLoopEvent(task.loopId, "daemon.task.started", `Daemon started: ${task.title}`, null, {
-        taskId: task.id,
-      });
+      appendCognitiveLoopEvent(
+        task.loopId,
+        "daemon.task.started",
+        `Daemon started: ${task.title}`,
+        null,
+        {
+          taskId: task.id,
+        }
+      );
       wsRef?.broadcast({ type: "daemon.taskUpdate", data: task });
 
       try {
@@ -143,13 +158,15 @@ async function daemonTick(): Promise<void> {
         // The running guard (currentTask) prevents claiming new tasks until
         // the finally block clears it.
         const execPromise = executeConversation(
-          [{
-            id: randomUUID(),
-            role: "user" as const,
-            content: `[DAEMON TASK — This task was queued for autonomous execution. Complete it now.]\n\n${task.prompt}`,
-            channelType: "daemon",
-            timestamp: new Date().toISOString(),
-          }],
+          [
+            {
+              id: randomUUID(),
+              role: "user" as const,
+              content: `[DAEMON TASK — This task was queued for autonomous execution. Complete it now.]\n\n${task.prompt}`,
+              channelType: "daemon",
+              timestamp: new Date().toISOString(),
+            },
+          ],
           emit,
           undefined,
           undefined,
@@ -158,7 +175,7 @@ async function daemonTick(): Promise<void> {
             channelType: "daemon",
             channelId: "daemon",
             actor: { type: "daemon", id: task.id },
-          },
+          }
         );
         const timeoutPromise = new Promise<null>((resolve) => {
           taskTimeoutHandle = setTimeout(() => resolve(null), TASK_TIMEOUT_MS);
@@ -177,15 +194,28 @@ async function daemonTick(): Promise<void> {
         });
         const completedTask = getDaemonTask(task.id);
         if (completedTask) wsRef?.broadcast({ type: "daemon.taskUpdate", data: completedTask });
-        appendCognitiveLoopEvent(task.loopId, "daemon.task.completed", `Daemon completed: ${task.title}`, resultText?.slice(0, 1200) ?? null, {
-          taskId: task.id,
-        });
+        appendCognitiveLoopEvent(
+          task.loopId,
+          "daemon.task.completed",
+          `Daemon completed: ${task.title}`,
+          resultText?.slice(0, 1200) ?? null,
+          {
+            taskId: task.id,
+          }
+        );
         markLoopPlaybookStep(task.loopId, "Playbook step completed: daemon remediation", {
           body: resultText?.slice(0, 1200) ?? null,
           success: true,
-          metadata: { taskId: task.id },
+          metadata: {
+            taskId: task.id,
+            ...playbookStepRefForLoop(task.loopId, "health_anomaly", 3),
+          },
         });
-        completeCognitiveLoop(task.loopId, "Autonomous remediation completed", resultText?.slice(0, 1200) ?? null);
+        completeCognitiveLoop(
+          task.loopId,
+          "Autonomous remediation completed",
+          resultText?.slice(0, 1200) ?? null
+        );
 
         const activityEntry = insertActivity({
           source: "daemon",
@@ -208,20 +238,39 @@ async function daemonTick(): Promise<void> {
           });
           const retriedTask = getDaemonTask(task.id);
           if (retriedTask) wsRef?.broadcast({ type: "daemon.taskUpdate", data: retriedTask });
-          appendCognitiveLoopEvent(task.loopId, "daemon.task.failed", `Daemon retry ${retryCount + 1}/${MAX_RETRIES}: ${task.title}`, error, {
-            taskId: task.id,
-            retryCount: retryCount + 1,
-          });
+          appendCognitiveLoopEvent(
+            task.loopId,
+            "daemon.task.failed",
+            `Daemon retry ${retryCount + 1}/${MAX_RETRIES}: ${task.title}`,
+            error,
+            {
+              taskId: task.id,
+              retryCount: retryCount + 1,
+            }
+          );
           markLoopPlaybookStep(task.loopId, "Playbook step needs retry: daemon remediation", {
             body: error,
             success: false,
-            metadata: { taskId: task.id, retryCount: retryCount + 1 },
+            metadata: {
+              taskId: task.id,
+              retryCount: retryCount + 1,
+              ...playbookStepRefForLoop(task.loopId, "health_anomaly", 3),
+            },
           });
-          appendCognitiveLoopEvent(task.loopId, "daemon.task.queued", `Re-queued daemon task: ${task.title}`, null, {
-            taskId: task.id,
-            retryCount: retryCount + 1,
-          });
-          console.log(`[daemon] task "${task.title}" failed, re-queued (retry ${retryCount + 1}/${MAX_RETRIES})`);
+          appendCognitiveLoopEvent(
+            task.loopId,
+            "daemon.task.queued",
+            `Re-queued daemon task: ${task.title}`,
+            null,
+            {
+              taskId: task.id,
+              retryCount: retryCount + 1,
+              ...playbookStepRefForLoop(task.loopId, "health_anomaly", 2),
+            }
+          );
+          console.log(
+            `[daemon] task "${task.title}" failed, re-queued (retry ${retryCount + 1}/${MAX_RETRIES})`
+          );
         } else {
           updateDaemonTask(task.id, {
             status: "failed",
@@ -229,14 +278,24 @@ async function daemonTick(): Promise<void> {
           });
           const failedTask = getDaemonTask(task.id);
           if (failedTask) wsRef?.broadcast({ type: "daemon.taskUpdate", data: failedTask });
-          appendCognitiveLoopEvent(task.loopId, "daemon.task.failed", `Daemon failed: ${task.title}`, error, {
-            taskId: task.id,
-            retryCount,
-          });
+          appendCognitiveLoopEvent(
+            task.loopId,
+            "daemon.task.failed",
+            `Daemon failed: ${task.title}`,
+            error,
+            {
+              taskId: task.id,
+              retryCount,
+            }
+          );
           markLoopPlaybookStep(task.loopId, "Playbook step failed: daemon remediation", {
             body: error,
             success: false,
-            metadata: { taskId: task.id, retryCount },
+            metadata: {
+              taskId: task.id,
+              retryCount,
+              ...playbookStepRefForLoop(task.loopId, "health_anomaly", 3),
+            },
           });
           failCognitiveLoop(task.loopId, "Autonomous remediation failed", error);
           const failEntry = insertActivity({
@@ -303,11 +362,11 @@ function recoverStuckTasks(): void {
  *  Strips non-printable chars, collapses whitespace, and removes common injection patterns. */
 function sanitizeEscalationText(raw: string): string {
   return raw
-    .replace(/[^\x20-\x7E]/g, " ")   // strip non-printable / non-ASCII / newlines
-    .replace(/\s+/g, " ")             // collapse whitespace
-    .replace(/[[\]{}()<>]/g, "")      // strip brackets/braces that could form prompt delimiters
+    .replace(/[^\x20-\x7E]/g, " ") // strip non-printable / non-ASCII / newlines
+    .replace(/\s+/g, " ") // collapse whitespace
+    .replace(/[[\]{}()<>]/g, "") // strip brackets/braces that could form prompt delimiters
     .trim()
-    .slice(0, 300);                   // hard limit on embedded text
+    .slice(0, 300); // hard limit on embedded text
 }
 
 /** Rate-limit escalation task creation to prevent flooding. */
@@ -327,9 +386,16 @@ function queueRemediationTask(opts: {
   priority: number;
   loopId?: string;
 }): boolean {
-  appendCognitiveLoopEvent(opts.loopId, "playbook.step.started", "Playbook step started: daemon remediation", opts.title, {
-    priority: opts.priority,
-  });
+  appendCognitiveLoopEvent(
+    opts.loopId,
+    "playbook.step.started",
+    "Playbook step started: daemon remediation",
+    opts.title,
+    {
+      priority: opts.priority,
+      ...playbookStepRefForLoop(opts.loopId, "health_anomaly", 3),
+    }
+  );
   const task = createDaemonTask({
     title: opts.title,
     prompt: opts.prompt,
@@ -338,23 +404,40 @@ function queueRemediationTask(opts: {
     loopId: opts.loopId ?? null,
   });
   wsRef?.broadcast({ type: "daemon.taskUpdate", data: task });
-  appendCognitiveLoopEvent(opts.loopId, "daemon.task.queued", `Queued daemon task: ${task.title}`, null, {
-    taskId: task.id,
-    priority: task.priority,
-  });
+  appendCognitiveLoopEvent(
+    opts.loopId,
+    "daemon.task.queued",
+    `Queued daemon task: ${task.title}`,
+    null,
+    {
+      taskId: task.id,
+      priority: task.priority,
+      ...playbookStepRefForLoop(opts.loopId, "health_anomaly", 2),
+    }
+  );
   return true;
 }
 
 function handleEscalation(resultText: string, _healthContext: string, loopId?: string): boolean {
   const config = getDaemonConfig();
   if (!config.enabled || !config.autoRemediate) {
-    appendCognitiveLoopEvent(loopId, "daemon.task.failed", "Daemon remediation skipped", "Daemon or auto-remediation is disabled.");
+    appendCognitiveLoopEvent(
+      loopId,
+      "daemon.task.failed",
+      "Daemon remediation skipped",
+      "Daemon or auto-remediation is disabled."
+    );
     return false;
   }
 
   if (!canCreateEscalationTask()) {
     console.log("[daemon] escalation rate limit reached, skipping");
-    appendCognitiveLoopEvent(loopId, "daemon.task.failed", "Daemon remediation skipped", "Escalation rate limit reached.");
+    appendCognitiveLoopEvent(
+      loopId,
+      "daemon.task.failed",
+      "Daemon remediation skipped",
+      "Escalation rate limit reached."
+    );
     return false;
   }
 

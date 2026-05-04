@@ -170,8 +170,23 @@ describe("cognitive-loop store", () => {
     expect(task?.title).toBe("Retry test step");
 
     const events = listCognitiveLoopEvents(run.id);
-    expect(events.some((e) => e.stage === "playbook.started")).toBe(true);
+    const started = events.find((e) => e.stage === "playbook.started");
+    expect(started).toBeTruthy();
+    expect(started?.metadata).toMatchObject({
+      stepIds: [
+        "detect-pulse-delta",
+        "consolidate-memory",
+        "queue-daemon-investigation",
+        "repair-or-summarize",
+        "update-live-dashboard",
+      ],
+    });
     expect(events.some((e) => e.stage === "playbook.action.requested")).toBe(true);
-    expect(events.some((e) => e.stage === "daemon.task.queued")).toBe(true);
+    const queued = events.find((e) => e.stage === "daemon.task.queued");
+    expect(queued?.metadata).toMatchObject({
+      stepIndex: 2,
+      stepId: "queue-daemon-investigation",
+      stepName: "Queue daemon investigation",
+    });
   });
 });

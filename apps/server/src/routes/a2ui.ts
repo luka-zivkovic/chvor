@@ -13,6 +13,7 @@ import { appendCognitiveLoopEvent, startA2UICognitiveLoop } from "../lib/cogniti
 import {
   handleCognitiveLoopDashboardAction,
   markLoopPlaybookStep,
+  playbookStepRef,
   startLoopPlaybook,
 } from "../lib/cognitive-loop-playbooks.ts";
 
@@ -277,7 +278,7 @@ a2ui.post("/actions", async (c) => {
     });
     markLoopPlaybookStep(loop.id, "Playbook step completed: validated A2UI action", {
       metadata: {
-        stepIndex: 1,
+        ...playbookStepRef("a2ui_action", 1),
         eventName,
         sourceSurfaceId: surfaceId,
         sourceId,
@@ -304,6 +305,7 @@ a2ui.post("/actions", async (c) => {
       {
         taskId: task.id,
         priority: task.priority,
+        ...playbookStepRef("a2ui_action", 2),
       }
     );
 
