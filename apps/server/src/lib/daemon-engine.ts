@@ -139,6 +139,7 @@ async function daemonTick(): Promise<void> {
         null,
         {
           taskId: task.id,
+          ...playbookStepRefForLoop(task.loopId, "health_anomaly", 3),
         }
       );
       wsRef?.broadcast({ type: "daemon.taskUpdate", data: task });
@@ -201,6 +202,7 @@ async function daemonTick(): Promise<void> {
           resultText?.slice(0, 1200) ?? null,
           {
             taskId: task.id,
+            ...playbookStepRefForLoop(task.loopId, "health_anomaly", 3),
           }
         );
         markLoopPlaybookStep(task.loopId, "Playbook step completed: daemon remediation", {
@@ -246,6 +248,7 @@ async function daemonTick(): Promise<void> {
             {
               taskId: task.id,
               retryCount: retryCount + 1,
+              ...playbookStepRefForLoop(task.loopId, "health_anomaly", 3),
             }
           );
           markLoopPlaybookStep(task.loopId, "Playbook step needs retry: daemon remediation", {
@@ -286,6 +289,7 @@ async function daemonTick(): Promise<void> {
             {
               taskId: task.id,
               retryCount,
+              ...playbookStepRefForLoop(task.loopId, "health_anomaly", 3),
             }
           );
           markLoopPlaybookStep(task.loopId, "Playbook step failed: daemon remediation", {
@@ -425,7 +429,8 @@ function handleEscalation(resultText: string, _healthContext: string, loopId?: s
       loopId,
       "daemon.task.failed",
       "Daemon remediation skipped",
-      "Daemon or auto-remediation is disabled."
+      "Daemon or auto-remediation is disabled.",
+      playbookStepRefForLoop(loopId, "health_anomaly", 3)
     );
     return false;
   }
@@ -436,7 +441,8 @@ function handleEscalation(resultText: string, _healthContext: string, loopId?: s
       loopId,
       "daemon.task.failed",
       "Daemon remediation skipped",
-      "Escalation rate limit reached."
+      "Escalation rate limit reached.",
+      playbookStepRefForLoop(loopId, "health_anomaly", 3)
     );
     return false;
   }

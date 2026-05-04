@@ -290,7 +290,9 @@ export async function runConsolidation(options: RunConsolidationOptions = {}): P
     appendCognitiveLoopEvent(
       options.loopId,
       "memory.consolidation.skipped",
-      "Memory consolidation already running"
+      "Memory consolidation already running",
+      null,
+      playbookStepRefForLoop(options.loopId, "health_anomaly", 1)
     );
     return { merged: 0, insights: 0, narratives: 0, pruned: 0 };
   }
@@ -315,7 +317,9 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
     appendCognitiveLoopEvent(
       options.loopId,
       "memory.consolidation.skipped",
-      "Memory consolidation disabled"
+      "Memory consolidation disabled",
+      null,
+      playbookStepRefForLoop(options.loopId, "health_anomaly", 1)
     );
     return { merged: 0, insights: 0, narratives: 0, pruned: 0 };
   }
@@ -329,6 +333,7 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
     {
       reason: options.reason ?? "system",
       forced: options.force === true,
+      ...playbookStepRefForLoop(options.loopId, "health_anomaly", 1),
     }
   );
   let merged = 0;
@@ -352,6 +357,7 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
         {
           newMemories: newMemories.length,
           required: MIN_NEW_MEMORIES_FOR_CONSOLIDATION,
+          ...playbookStepRefForLoop(options.loopId, "health_anomaly", 1),
         }
       );
       return { merged: 0, insights: 0, narratives: 0, pruned: 0 };
@@ -403,6 +409,7 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
         {
           sourceCount: cluster.memories.length,
           memoryId: newMemory.id,
+          ...playbookStepRefForLoop(options.loopId, "health_anomaly", 1),
         }
       );
     } catch (err) {
@@ -453,6 +460,7 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
               {
                 sourceCount: Math.min(unusedForInsight.length, 5),
                 memoryId: newInsight.id,
+                ...playbookStepRefForLoop(options.loopId, "health_anomaly", 1),
               }
             );
           }
@@ -494,6 +502,7 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
           {
             sourceCount: cluster.memories.length,
             memoryId: newNarrative.id,
+            ...playbookStepRefForLoop(options.loopId, "health_anomaly", 1),
           }
         );
       } catch (err) {
@@ -525,6 +534,7 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
       insights,
       narratives,
       pruned,
+      ...playbookStepRefForLoop(options.loopId, "health_anomaly", 1),
     }
   );
   markLoopPlaybookStep(options.loopId, "Playbook step completed: memory consolidation", {

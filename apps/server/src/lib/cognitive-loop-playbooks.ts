@@ -19,7 +19,12 @@ interface CognitiveLoopPlaybook {
   id: CognitiveLoopPlaybookId;
   name: string;
   description: string;
-  steps: string[];
+  steps: CognitiveLoopPlaybookStep[];
+}
+
+interface CognitiveLoopPlaybookStep {
+  id: string;
+  label: string;
 }
 
 export interface CognitiveLoopPlaybookStepRef {
@@ -35,11 +40,11 @@ const PLAYBOOKS: Record<CognitiveLoopPlaybookId, CognitiveLoopPlaybook> = {
     description:
       "Pulse detected a system health delta; reflect, queue remediation, and report the outcome.",
     steps: [
-      "Detect pulse delta",
-      "Consolidate memory",
-      "Queue daemon investigation",
-      "Repair or summarize",
-      "Update live dashboard",
+      { id: "detect-pulse-delta", label: "Detect pulse delta" },
+      { id: "consolidate-memory", label: "Consolidate memory" },
+      { id: "queue-daemon-investigation", label: "Queue daemon investigation" },
+      { id: "repair-or-summarize", label: "Repair or summarize" },
+      { id: "update-live-dashboard", label: "Update live dashboard" },
     ],
   },
   a2ui_action: {
@@ -48,11 +53,11 @@ const PLAYBOOKS: Record<CognitiveLoopPlaybookId, CognitiveLoopPlaybook> = {
     description:
       "A living workspace action was clicked; validate intent, queue work, and update the surface.",
     steps: [
-      "Receive UI event",
-      "Validate payload",
-      "Queue daemon work",
-      "Complete safely",
-      "Refresh dashboard",
+      { id: "receive-ui-event", label: "Receive UI event" },
+      { id: "validate-payload", label: "Validate payload" },
+      { id: "queue-daemon-work", label: "Queue daemon work" },
+      { id: "complete-safely", label: "Complete safely" },
+      { id: "refresh-dashboard", label: "Refresh dashboard" },
     ],
   },
   tool_failure_repair: {
@@ -61,11 +66,11 @@ const PLAYBOOKS: Record<CognitiveLoopPlaybookId, CognitiveLoopPlaybook> = {
     description:
       "A tool failure needs investigation; retry, repair synthesized endpoints, or request human input.",
     steps: [
-      "Classify tool failure",
-      "Inspect last error",
-      "Repair or synthesize",
-      "Retry safely",
-      "Record result",
+      { id: "classify-tool-failure", label: "Classify tool failure" },
+      { id: "inspect-last-error", label: "Inspect last error" },
+      { id: "repair-or-synthesize", label: "Repair or synthesize" },
+      { id: "retry-safely", label: "Retry safely" },
+      { id: "record-result", label: "Record result" },
     ],
   },
   memory_insight_followup: {
@@ -74,10 +79,10 @@ const PLAYBOOKS: Record<CognitiveLoopPlaybookId, CognitiveLoopPlaybook> = {
     description:
       "Consolidation found a useful pattern; decide whether autonomous follow-up is warranted.",
     steps: [
-      "Capture insight",
-      "Assess usefulness",
-      "Queue follow-up if safe",
-      "Link outcome to memory",
+      { id: "capture-insight", label: "Capture insight" },
+      { id: "assess-usefulness", label: "Assess usefulness" },
+      { id: "queue-follow-up-if-safe", label: "Queue follow-up if safe" },
+      { id: "link-outcome-to-memory", label: "Link outcome to memory" },
     ],
   },
 };
@@ -100,25 +105,17 @@ function metadataRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-export function playbookStepId(step: string): string {
-  return step
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
 export function playbookStepRef(
   playbookId: CognitiveLoopPlaybookId,
   stepIndex: number
 ): CognitiveLoopPlaybookStepRef {
   const playbook = PLAYBOOKS[playbookId];
   const safeIndex = Math.max(0, Math.min(playbook.steps.length - 1, Math.floor(stepIndex) || 0));
-  const stepName = playbook.steps[safeIndex] ?? "Unknown step";
+  const step = playbook.steps[safeIndex];
   return {
     stepIndex: safeIndex,
-    stepId: playbookStepId(stepName),
-    stepName,
+    stepId: step?.id ?? "unknown-step",
+    stepName: step?.label ?? "Unknown step",
   };
 }
 
@@ -184,7 +181,7 @@ Goal:
 ${opts.playbook.description}
 
 Playbook steps:
-${opts.playbook.steps.map((step, i) => `${i + 1}. ${step}`).join("\n")}
+${opts.playbook.steps.map((step, i) => `${i + 1}. ${step.label}`).join("\n")}
 
 Loop:
 - id: ${opts.run.id}
@@ -222,8 +219,8 @@ export function startLoopPlaybook(
     {
       playbookId,
       name: playbook.name,
-      steps: playbook.steps,
-      stepIds: playbook.steps.map(playbookStepId),
+      steps: playbook.steps.map((step) => step.label),
+      stepIds: playbook.steps.map((step) => step.id),
       context,
     }
   );

@@ -9,6 +9,7 @@ import {
 import { createDaemonTask } from "../db/daemon-store.ts";
 import { getWSInstance } from "../gateway/ws-instance.ts";
 import { appendCognitiveLoopEvent } from "../lib/cognitive-loop.ts";
+import { playbookStepRefForLoop } from "../lib/cognitive-loop-playbooks.ts";
 
 const cognitiveLoop = new Hono();
 
@@ -181,6 +182,7 @@ cognitiveLoop.post("/:id/branch", async (c) => {
     {
       taskId: task.id,
       priority: task.priority,
+      ...playbookStepRefForLoop(branchRun.id, "memory_insight_followup", 2),
     }
   );
   getWSInstance()?.broadcast({ type: "daemon.taskUpdate", data: task });
