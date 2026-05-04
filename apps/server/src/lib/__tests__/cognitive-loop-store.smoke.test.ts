@@ -229,7 +229,7 @@ describe("cognitive-loop store", () => {
 
   it("starts paused user-approved follow-up loops for standalone memory insights", () => {
     const loopId = startMemoryInsightFollowupLoop({
-      title: "Synthesized memory insight",
+      eventTitle: "Synthesized memory insight",
       body: "Credential failures cluster around expired OAuth refresh tokens.",
       memoryId: "mem-insight-1",
       sourceCount: 5,
@@ -240,6 +240,10 @@ describe("cognitive-loop store", () => {
     expect(run?.status).toBe("paused");
     expect(run?.trigger).toBe("system");
     expect(run?.currentStage).toBe("loop.paused");
+    expect(run?.title).toContain("Memory insight:");
+    expect(run?.title).toContain(
+      "Credential failures cluster around expired OAuth refresh tokens."
+    );
     expect(run?.summary).toBe("Credential failures cluster around expired OAuth refresh tokens.");
 
     const events = listCognitiveLoopEvents(loopId);
@@ -249,6 +253,8 @@ describe("cognitive-loop store", () => {
       "playbook.step.completed",
       "loop.paused",
     ]);
+    const insightEvent = events.find((event) => event.stage === "memory.insight.created");
+    expect(insightEvent?.title).toBe("Synthesized memory insight");
     expect(events.find((event) => event.stage === "playbook.started")?.metadata).toMatchObject({
       playbookId: "memory_insight_followup",
       context: {

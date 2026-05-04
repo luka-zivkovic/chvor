@@ -288,7 +288,7 @@ export interface RunConsolidationOptions {
 }
 
 export function startMemoryInsightFollowupLoop(opts: {
-  title: string;
+  eventTitle: string;
   body: string;
   memoryId: string;
   sourceCount?: number;
@@ -310,7 +310,7 @@ export function startMemoryInsightFollowupLoop(opts: {
   appendCognitiveLoopEvent(
     run.id,
     "memory.insight.created",
-    opts.title,
+    opts.eventTitle,
     body,
     {
       memoryId: opts.memoryId,
@@ -523,7 +523,7 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
             );
             if (!options.loopId) {
               startMemoryInsightFollowupLoop({
-                title: "Synthesized memory insight",
+                eventTitle: "Synthesized memory insight",
                 body: insightOpts.abstract,
                 memoryId: newInsight.id,
                 sourceCount: Math.min(unusedForInsight.length, 5),
