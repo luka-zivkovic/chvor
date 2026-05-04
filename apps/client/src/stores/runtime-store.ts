@@ -82,11 +82,57 @@ export interface A2UIActionState {
 }
 
 export function a2uiActionKey(surfaceId: string, sourceId: string): string {
-  return `${surfaceId}:${sourceId}`;
+  return JSON.stringify([surfaceId, sourceId]);
 }
 
 function taskStatusToA2UI(status: DaemonTask["status"]): A2UIActionLifecycleStatus {
   return status;
+}
+
+const A2UI_ACTION_FINAL_CLEAR_MS = 10_000;
+const A2UI_AUTO_CLEAR_STATUSES = new Set<A2UIActionLifecycleStatus>(["completed", "cancelled"]);
+const a2uiActionClearTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearA2UIActionTimer(key: string): void {
+  const timer = a2uiActionClearTimers.get(key);
+  if (timer) clearTimeout(timer);
+  a2uiActionClearTimers.delete(key);
+}
+
+function clearA2UIActionTimersForSurface(surfaceId: string): void {
+  const actionStates = useRuntimeStore.getState().a2uiActionStates;
+  for (const [key, state] of Object.entries(actionStates)) {
+    if (state.surfaceId === surfaceId) clearA2UIActionTimer(key);
+  }
+}
+
+function clearAllA2UIActionTimers(): void {
+  for (const timer of a2uiActionClearTimers.values()) {
+    clearTimeout(timer);
+  }
+  a2uiActionClearTimers.clear();
+}
+
+function syncA2UIActionAutoClear(
+  key: string,
+  state: Pick<A2UIActionState, "taskId" | "status">
+): void {
+  clearA2UIActionTimer(key);
+
+  if (!A2UI_AUTO_CLEAR_STATUSES.has(state.status)) return;
+
+  const timer = setTimeout(() => {
+    useRuntimeStore.setState((s) => {
+      const current = s.a2uiActionStates[key];
+      if (!current || current.taskId !== state.taskId || current.status !== state.status) return s;
+
+      const { [key]: _, ...rest } = s.a2uiActionStates;
+      return { a2uiActionStates: rest };
+    });
+    a2uiActionClearTimers.delete(key);
+  }, A2UI_ACTION_FINAL_CLEAR_MS);
+
+  a2uiActionClearTimers.set(key, timer);
 }
 
 interface RuntimeState {
@@ -486,6 +532,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       const actionStates = Object.fromEntries(
         Object.entries(get().a2uiActionStates).filter(([, state]) => state.surfaceId !== id)
       );
+      clearA2UIActionTimersForSurface(id);
       set({
         surfaces: rest,
         surfaceList: newList,
@@ -614,6 +661,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       )
     );
 
+    clearA2UIActionTimersForSurface(data.surfaceId);
     set({
       surfaces: rest,
       surfaceList: newList,
@@ -624,6 +672,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   },
 
   handleDeleteAll: () => {
+    clearAllA2UIActionTimers();
     set({
       surfaces: {},
       surfaceList: [],
@@ -636,6 +685,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   handleA2UIActionQueued: ({ surfaceId, sourceId, task }) => {
     if (!sourceId) return;
     const key = a2uiActionKey(surfaceId, sourceId);
+    const status = taskStatusToA2UI(task.status);
     set((s) => ({
       a2uiActionStates: {
         ...s.a2uiActionStates,
@@ -645,36 +695,48 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
           taskId: task.id,
           title: task.title,
           loopId: task.loopId,
-          status: taskStatusToA2UI(task.status),
+          status,
           error: task.error,
           updatedAt: new Date().toISOString(),
         },
       },
     }));
+    syncA2UIActionAutoClear(key, { taskId: task.id, status });
   },
 
   handleDaemonTaskUpdate: (task) => {
+    const status = taskStatusToA2UI(task.status);
+    const matchingKeys = Object.entries(get().a2uiActionStates)
+      .filter(([, state]) => state.taskId === task.id)
+      .map(([key]) => key);
+
+    if (matchingKeys.length === 0) return;
+
     set((s) => {
+      const next = { ...s.a2uiActionStates };
       let changed = false;
-      const next = Object.fromEntries(
-        Object.entries(s.a2uiActionStates).map(([key, state]) => {
-          if (state.taskId !== task.id) return [key, state];
-          changed = true;
-          return [
-            key,
-            {
-              ...state,
-              title: task.title,
-              loopId: task.loopId,
-              status: taskStatusToA2UI(task.status),
-              error: task.error,
-              updatedAt: new Date().toISOString(),
-            },
-          ];
-        })
-      );
+      for (const key of matchingKeys) {
+        const state = next[key];
+        if (!state || state.taskId !== task.id) continue;
+        changed = true;
+        next[key] = {
+          ...state,
+          title: task.title,
+          loopId: task.loopId,
+          status,
+          error: task.error,
+          updatedAt: new Date().toISOString(),
+        };
+      }
       return changed ? { a2uiActionStates: next } : s;
     });
+
+    for (const key of matchingKeys) {
+      const current = get().a2uiActionStates[key];
+      if (current?.taskId === task.id) {
+        syncA2UIActionAutoClear(key, { taskId: task.id, status: current.status });
+      }
+    }
   },
 
   setActiveSurface: (id) => {
@@ -682,7 +744,8 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     set({ activeSurfaceId: id, activeSurface: surface });
   },
 
-  resetAll: () =>
+  resetAll: () => {
+    clearAllA2UIActionTimers();
     set({
       cognitiveLoops: [],
       activeCognitiveLoop: null,
@@ -694,5 +757,6 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       surfaceList: [],
       activeSurfaceId: null,
       activeSurface: null,
-    }),
+    });
+  },
 }));
