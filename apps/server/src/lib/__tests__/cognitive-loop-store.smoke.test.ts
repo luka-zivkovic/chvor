@@ -13,11 +13,15 @@ let updateCognitiveLoopRun: typeof import("../../db/cognitive-loop-store.ts").up
 let listRunningCognitiveLoopRuns: typeof import("../../db/cognitive-loop-store.ts").listRunningCognitiveLoopRuns;
 let getCognitiveLoopRun: typeof import("../../db/cognitive-loop-store.ts").getCognitiveLoopRun;
 let createDaemonTask: typeof import("../../db/daemon-store.ts").createDaemonTask;
+let listDaemonTasks: typeof import("../../db/daemon-store.ts").listDaemonTasks;
+let getSurface: typeof import("../../db/a2ui-store.ts").getSurface;
+let initA2UIDb: typeof import("../../db/a2ui-store.ts").initA2UIDb;
 let completeCognitiveLoop: typeof import("../cognitive-loop.ts").completeCognitiveLoop;
 let recoverStaleCognitiveLoops: typeof import("../cognitive-loop.ts").recoverStaleCognitiveLoops;
 let startLoopPlaybook: typeof import("../cognitive-loop-playbooks.ts").startLoopPlaybook;
 let queueLoopPlaybookDaemonStep: typeof import("../cognitive-loop-playbooks.ts").queueLoopPlaybookDaemonStep;
 let runConsolidation: typeof import("../memory-consolidation.ts").runConsolidation;
+let startMemoryInsightFollowupLoop: typeof import("../memory-consolidation.ts").startMemoryInsightFollowupLoop;
 let setConfig: typeof import("../../db/config-store.ts").setConfig;
 let getDb: typeof import("../../db/database.ts").getDb;
 
@@ -30,11 +34,14 @@ beforeAll(async () => {
     listRunningCognitiveLoopRuns,
     getCognitiveLoopRun,
   } = await import("../../db/cognitive-loop-store.ts"));
-  ({ createDaemonTask } = await import("../../db/daemon-store.ts"));
+  ({ createDaemonTask, listDaemonTasks } = await import("../../db/daemon-store.ts"));
+  ({ getSurface, initA2UIDb } = await import("../../db/a2ui-store.ts"));
+  initA2UIDb();
   ({ completeCognitiveLoop, recoverStaleCognitiveLoops } = await import("../cognitive-loop.ts"));
   ({ startLoopPlaybook, queueLoopPlaybookDaemonStep } =
     await import("../cognitive-loop-playbooks.ts"));
-  ({ runConsolidation } = await import("../memory-consolidation.ts"));
+  ({ runConsolidation, startMemoryInsightFollowupLoop } =
+    await import("../memory-consolidation.ts"));
   ({ setConfig } = await import("../../db/config-store.ts"));
   ({ getDb } = await import("../../db/database.ts"));
 });
@@ -218,5 +225,69 @@ describe("cognitive-loop store", () => {
       stepId: "consolidate-memory",
       stepName: "Consolidate memory",
     });
+  });
+
+  it("starts paused user-approved follow-up loops for standalone memory insights", () => {
+    const loopId = startMemoryInsightFollowupLoop({
+      title: "Synthesized memory insight",
+      body: "Credential failures cluster around expired OAuth refresh tokens.",
+      memoryId: "mem-insight-1",
+      sourceCount: 5,
+      reason: "idle",
+    });
+
+    const run = getCognitiveLoopRun(loopId);
+    expect(run?.status).toBe("paused");
+    expect(run?.trigger).toBe("system");
+    expect(run?.currentStage).toBe("loop.paused");
+    expect(run?.summary).toBe("Credential failures cluster around expired OAuth refresh tokens.");
+
+    const events = listCognitiveLoopEvents(loopId);
+    expect(events.map((event) => event.stage)).toEqual([
+      "playbook.started",
+      "memory.insight.created",
+      "playbook.step.completed",
+      "loop.paused",
+    ]);
+    expect(events.find((event) => event.stage === "playbook.started")?.metadata).toMatchObject({
+      playbookId: "memory_insight_followup",
+      context: {
+        autonomousQueued: false,
+        memoryId: "mem-insight-1",
+        reason: "idle",
+      },
+    });
+    expect(
+      events.find((event) => event.stage === "memory.insight.created")?.metadata
+    ).toMatchObject({
+      memoryId: "mem-insight-1",
+      sourceCount: 5,
+      stepIndex: 0,
+      stepId: "capture-insight",
+    });
+    expect(
+      events.find((event) => event.stage === "playbook.step.completed")?.metadata
+    ).toMatchObject({
+      autonomousQueued: false,
+      stepIndex: 1,
+      stepId: "assess-usefulness",
+    });
+    expect(events.some((event) => event.stage === "daemon.task.queued")).toBe(false);
+    expect(listDaemonTasks().some((task) => task.loopId === loopId)).toBe(false);
+
+    const dashboard = getSurface(`cognitive-loop-${loopId}`);
+    expect(dashboard?.components["follow-up"]?.component).toMatchObject({
+      Button: {
+        label: { literalString: "Follow up" },
+      },
+    });
+    expect(dashboard?.bindings.playbookLine).toContain("Memory insight follow-up");
+    expect(dashboard?.bindings.playbookSteps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ step: "Capture insight", status: "completed" }),
+        expect.objectContaining({ step: "Assess usefulness", status: "completed" }),
+        expect.objectContaining({ step: "Queue follow-up if safe", status: "pending" }),
+      ])
+    );
   });
 });

@@ -33,8 +33,17 @@ import {
 import type { Memory } from "@chvor/shared";
 
 import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
-import { appendCognitiveLoopEvent } from "./cognitive-loop.ts";
-import { markLoopPlaybookStep, playbookStepRefForLoop } from "./cognitive-loop-playbooks.ts";
+import {
+  appendCognitiveLoopEvent,
+  pauseCognitiveLoop,
+  startMemoryInsightCognitiveLoop,
+} from "./cognitive-loop.ts";
+import {
+  markLoopPlaybookStep,
+  playbookStepRef,
+  playbookStepRefForLoop,
+  startLoopPlaybook,
+} from "./cognitive-loop-playbooks.ts";
 
 let lastConsolidationAt: string | null = getConfig("memory.lastConsolidationAt") ?? null;
 let consolidationInProgress: Promise<unknown> | null = null; // concurrency lock
@@ -278,6 +287,55 @@ export interface RunConsolidationOptions {
   force?: boolean;
 }
 
+export function startMemoryInsightFollowupLoop(opts: {
+  title: string;
+  body: string;
+  memoryId: string;
+  sourceCount?: number;
+  reason?: RunConsolidationOptions["reason"];
+}): string {
+  const body = opts.body.replace(/\s+/g, " ").trim();
+  const run = startMemoryInsightCognitiveLoop({
+    title: `Memory insight: ${body}`.slice(0, 200),
+    summary: body,
+  });
+
+  startLoopPlaybook(run.id, "memory_insight_followup", {
+    source: "memory-consolidation",
+    reason: opts.reason ?? "system",
+    memoryId: opts.memoryId,
+    sourceCount: opts.sourceCount ?? null,
+    autonomousQueued: false,
+  });
+  appendCognitiveLoopEvent(
+    run.id,
+    "memory.insight.created",
+    opts.title,
+    body,
+    {
+      memoryId: opts.memoryId,
+      sourceCount: opts.sourceCount,
+      ...playbookStepRef("memory_insight_followup", 0),
+    },
+    { toast: true }
+  );
+  markLoopPlaybookStep(run.id, "Playbook step completed: follow-up requires user approval", {
+    body: "Consolidation captured this insight and paused before queueing autonomous work.",
+    metadata: {
+      memoryId: opts.memoryId,
+      autonomousQueued: false,
+      ...playbookStepRef("memory_insight_followup", 1),
+    },
+  });
+  pauseCognitiveLoop(
+    run.id,
+    "Waiting for user-approved follow-up",
+    "Click Follow up to queue the next safe daemon step for this memory insight."
+  );
+
+  return run.id;
+}
+
 export async function runConsolidation(options: RunConsolidationOptions = {}): Promise<{
   merged: number;
   insights: number;
@@ -463,6 +521,15 @@ async function doConsolidation(options: RunConsolidationOptions): Promise<{
                 ...playbookStepRefForLoop(options.loopId, "health_anomaly", 1),
               }
             );
+            if (!options.loopId) {
+              startMemoryInsightFollowupLoop({
+                title: "Synthesized memory insight",
+                body: insightOpts.abstract,
+                memoryId: newInsight.id,
+                sourceCount: Math.min(unusedForInsight.length, 5),
+                reason: options.reason,
+              });
+            }
           }
         }
       }
