@@ -12,6 +12,7 @@ import { getWSInstance } from "../gateway/ws-instance.ts";
 import { appendCognitiveLoopEvent, startA2UICognitiveLoop } from "../lib/cognitive-loop.ts";
 import {
   handleCognitiveLoopDashboardAction,
+  markLoopPlaybookStep,
   startLoopPlaybook,
 } from "../lib/cognitive-loop-playbooks.ts";
 
@@ -273,6 +274,14 @@ a2ui.post("/actions", async (c) => {
       eventName,
       sourceSurfaceId: surfaceId,
       sourceId,
+    });
+    markLoopPlaybookStep(loop.id, "Playbook step completed: validated A2UI action", {
+      metadata: {
+        stepIndex: 1,
+        eventName,
+        sourceSurfaceId: surfaceId,
+        sourceId,
+      },
     });
     const task = createDaemonTask({
       title: (explicitTitle ?? `A2UI action: ${eventName}`).slice(0, 200),
