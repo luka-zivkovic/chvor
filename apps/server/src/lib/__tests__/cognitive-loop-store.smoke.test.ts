@@ -17,6 +17,8 @@ let completeCognitiveLoop: typeof import("../cognitive-loop.ts").completeCogniti
 let recoverStaleCognitiveLoops: typeof import("../cognitive-loop.ts").recoverStaleCognitiveLoops;
 let startLoopPlaybook: typeof import("../cognitive-loop-playbooks.ts").startLoopPlaybook;
 let queueLoopPlaybookDaemonStep: typeof import("../cognitive-loop-playbooks.ts").queueLoopPlaybookDaemonStep;
+let runConsolidation: typeof import("../memory-consolidation.ts").runConsolidation;
+let setConfig: typeof import("../../db/config-store.ts").setConfig;
 let getDb: typeof import("../../db/database.ts").getDb;
 
 beforeAll(async () => {
@@ -32,6 +34,8 @@ beforeAll(async () => {
   ({ completeCognitiveLoop, recoverStaleCognitiveLoops } = await import("../cognitive-loop.ts"));
   ({ startLoopPlaybook, queueLoopPlaybookDaemonStep } =
     await import("../cognitive-loop-playbooks.ts"));
+  ({ runConsolidation } = await import("../memory-consolidation.ts"));
+  ({ setConfig } = await import("../../db/config-store.ts"));
   ({ getDb } = await import("../../db/database.ts"));
 });
 
@@ -170,8 +174,49 @@ describe("cognitive-loop store", () => {
     expect(task?.title).toBe("Retry test step");
 
     const events = listCognitiveLoopEvents(run.id);
-    expect(events.some((e) => e.stage === "playbook.started")).toBe(true);
+    const started = events.find((e) => e.stage === "playbook.started");
+    expect(started).toBeTruthy();
+    expect(started?.metadata).toMatchObject({
+      stepIds: [
+        "detect-pulse-delta",
+        "consolidate-memory",
+        "queue-daemon-investigation",
+        "repair-or-summarize",
+        "update-live-dashboard",
+      ],
+    });
     expect(events.some((e) => e.stage === "playbook.action.requested")).toBe(true);
-    expect(events.some((e) => e.stage === "daemon.task.queued")).toBe(true);
+    const queued = events.find((e) => e.stage === "daemon.task.queued");
+    expect(queued?.metadata).toMatchObject({
+      stepIndex: 2,
+      stepId: "queue-daemon-investigation",
+      stepName: "Queue daemon investigation",
+    });
+  });
+
+  it("annotates concrete memory consolidation events with playbook step refs", async () => {
+    const run = createCognitiveLoopRun({
+      title: "Memory loop",
+      severity: "info",
+      trigger: "pulse",
+      summary: "Consolidation should report its playbook step",
+    });
+    startLoopPlaybook(run.id, "health_anomaly");
+
+    setConfig("memory.consolidationEnabled", "false");
+    try {
+      await runConsolidation({ loopId: run.id, reason: "manual" });
+    } finally {
+      setConfig("memory.consolidationEnabled", "true");
+    }
+
+    const skipped = listCognitiveLoopEvents(run.id).find(
+      (event) => event.stage === "memory.consolidation.skipped"
+    );
+    expect(skipped?.metadata).toMatchObject({
+      stepIndex: 1,
+      stepId: "consolidate-memory",
+      stepName: "Consolidate memory",
+    });
   });
 });

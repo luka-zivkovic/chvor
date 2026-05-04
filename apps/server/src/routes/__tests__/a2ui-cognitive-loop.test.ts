@@ -320,7 +320,30 @@ describe("POST /a2ui/actions — cognitive_loop dashboard branch", () => {
         event.stage === "playbook.step.completed" &&
         event.title === "Playbook step completed: validated A2UI action"
     );
-    expect(validationEvent?.metadata).toMatchObject({ success: true, stepIndex: 1 });
+    expect(validationEvent?.metadata).toMatchObject({
+      success: true,
+      stepIndex: 1,
+      stepId: "validate-payload",
+      stepName: "Validate payload",
+    });
+    const queuedEvent = listCognitiveLoopEvents(body.data.loopId).find(
+      (event) => event.stage === "daemon.task.queued"
+    );
+    expect(queuedEvent?.metadata).toMatchObject({
+      stepIndex: 2,
+      stepId: "queue-daemon-work",
+      stepName: "Queue daemon work",
+    });
+
+    appendCognitiveLoopEvent(
+      body.data.loopId,
+      "daemon.task.started",
+      "Daemon started dashboard refresh",
+      null,
+      { stepId: "refresh-dashboard" }
+    );
+    expect(playbookStepStatus(body.data.loopId, "Refresh dashboard")).toBe("running");
+    expect(playbookStepStatus(body.data.loopId, "Complete safely")).toBe("pending");
   });
 
   it("shows daemon retry recovery as failed to running to completed", async () => {

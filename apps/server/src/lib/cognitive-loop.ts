@@ -68,6 +68,18 @@ function playbookSteps(events: CognitiveLoopEvent[]): string[] {
     : [];
 }
 
+function playbookStepIds(events: CognitiveLoopEvent[]): string[] {
+  const playbook = events.find((event) => event.stage === "playbook.started");
+  const stepIds = playbook?.metadata?.stepIds;
+  return Array.isArray(stepIds)
+    ? stepIds
+        .filter(
+          (stepId): stepId is string => typeof stepId === "string" && stepId.trim().length > 0
+        )
+        .map((stepId) => stepId.trim())
+    : [];
+}
+
 function stepId(step: string): string {
   return step
     .trim()
@@ -76,7 +88,11 @@ function stepId(step: string): string {
     .replace(/^-|-$/g, "");
 }
 
-function explicitStepIndex(event: CognitiveLoopEvent, steps: string[]): number | null {
+function explicitStepIndex(
+  event: CognitiveLoopEvent,
+  steps: string[],
+  stepIds: string[] = []
+): number | null {
   const metadata = event.metadata;
   const rawIndex = metadata?.stepIndex;
   if (
@@ -95,15 +111,21 @@ function explicitStepIndex(event: CognitiveLoopEvent, steps: string[]): number |
   const rawStepId = metadata?.stepId;
   if (typeof rawStepId === "string" && rawStepId.trim()) {
     const normalized = stepId(rawStepId);
-    const index = steps.findIndex((step) => stepId(step) === normalized);
-    if (index !== -1) return index;
+    const idIndex = stepIds.findIndex((id) => stepId(id) === normalized);
+    if (idIndex !== -1 && idIndex < steps.length) return idIndex;
+    const labelIndex = steps.findIndex((step) => stepId(step) === normalized);
+    if (labelIndex !== -1) return labelIndex;
   }
 
   return null;
 }
 
-function inferredPlaybookStepIndex(event: CognitiveLoopEvent, steps: string[]): number | null {
-  const explicit = explicitStepIndex(event, steps);
+function inferredPlaybookStepIndex(
+  event: CognitiveLoopEvent,
+  steps: string[],
+  stepIds: string[]
+): number | null {
+  const explicit = explicitStepIndex(event, steps, stepIds);
   if (explicit !== null) return explicit;
 
   const title = event.title.toLowerCase();
@@ -119,6 +141,7 @@ function playbookStepRows(
 ): Array<{ step: string; status: PlaybookStepStatus; signal: string }> {
   const steps = playbookSteps(events);
   if (steps.length === 0) return [];
+  const stepIds = playbookStepIds(events);
 
   const rows = steps.map((step) => ({
     step,
@@ -157,24 +180,26 @@ function playbookStepRows(
         mark(0, "completed", event.title);
         break;
       case "memory.consolidation.started":
-        mark(1, "running", event.title);
+        mark(explicitStepIndex(event, steps, stepIds) ?? 1, "running", event.title);
         break;
       case "memory.insight.created":
       case "memory.consolidation.completed":
-        mark(1, "completed", event.title);
+        mark(explicitStepIndex(event, steps, stepIds) ?? 1, "completed", event.title);
         break;
       case "daemon.task.queued":
-        mark(2, "completed", event.title);
+        mark(explicitStepIndex(event, steps, stepIds) ?? 2, "completed", event.title);
         break;
       case "daemon.task.started":
-        mark(3, "running", event.title, { allowRecovery: true });
+        mark(explicitStepIndex(event, steps, stepIds) ?? 3, "running", event.title, {
+          allowRecovery: true,
+        });
         break;
       case "tool.synthesized":
       case "daemon.task.completed":
-        mark(3, "completed", event.title);
+        mark(explicitStepIndex(event, steps, stepIds) ?? 3, "completed", event.title);
         break;
       case "daemon.task.failed":
-        mark(3, "failed", event.title);
+        mark(explicitStepIndex(event, steps, stepIds) ?? 3, "failed", event.title);
         break;
       case "a2ui.surface.pinned":
       case "loop.completed":
@@ -184,14 +209,19 @@ function playbookStepRows(
         mark(rows.length - 1, "failed", event.title);
         break;
       case "playbook.step.started":
-        mark(inferredPlaybookStepIndex(event, steps) ?? nextActionStep(), "running", event.title, {
-          allowRecovery: true,
-        });
+        mark(
+          inferredPlaybookStepIndex(event, steps, stepIds) ?? nextActionStep(),
+          "running",
+          event.title,
+          {
+            allowRecovery: true,
+          }
+        );
         break;
       case "playbook.step.completed": {
         const success = event.metadata?.success;
         mark(
-          inferredPlaybookStepIndex(event, steps) ?? nextActionStep(),
+          inferredPlaybookStepIndex(event, steps, stepIds) ?? nextActionStep(),
           success === false ? "failed" : "completed",
           event.title
         );
