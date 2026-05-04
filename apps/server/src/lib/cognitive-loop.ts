@@ -513,6 +513,23 @@ export function startA2UICognitiveLoop(
   return withSurface;
 }
 
+export function startMemoryInsightCognitiveLoop(opts: {
+  summary: string;
+  title?: string;
+}): CognitiveLoopRun {
+  const cleanSummary = opts.summary.replace(/\s+/g, " ").trim();
+  const run = createCognitiveLoopRun({
+    title: opts.title?.trim() || "Memory insight follow-up",
+    severity: "info",
+    trigger: "system",
+    summary: cleanSummary || "Consolidation found a memory insight that may be useful later.",
+  });
+  const surfaceId = `cognitive-loop-${run.id}`;
+  const withSurface = updateCognitiveLoopRun(run.id, { surfaceId }) ?? run;
+  broadcastRun(withSurface);
+  return withSurface;
+}
+
 export function appendCognitiveLoopEvent(
   loopId: string | null | undefined,
   stage: CognitiveLoopStage,
