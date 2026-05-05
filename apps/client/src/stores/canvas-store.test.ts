@@ -19,17 +19,17 @@ beforeEach(() => {
 });
 
 describe("canvas-store multi-mind", () => {
-  it("adds a synthesis output node and links completed mind agents", () => {
+  it("adds a synthesis output node and links only successful mind insights", () => {
     const store = useCanvasStore.getState();
     store.upsertMindAgent({ agentId: "r1", role: "researcher", title: "Researcher" });
     store.upsertMindAgent({ agentId: "p1", role: "planner", title: "Planner" });
     store.upsertMindAgent({ agentId: "c1", role: "critic", title: "Critic" });
+    store.failMindAgent("c1", "Critic model unavailable.");
 
     store.completeMultiMindRound(
       [
         insight({ agentId: "r1", role: "researcher", text: "Check source facts." }),
         insight({ agentId: "p1", role: "planner", text: "Sequence the safest path." }),
-        insight({ agentId: "c1", role: "critic", text: "Avoid credential mutation." }),
       ],
       1234
     );
@@ -48,10 +48,11 @@ describe("canvas-store multi-mind", () => {
     });
     expect(summary?.data.summary).toContain("[researcher] Check source facts.");
     expect(summary?.data.summary).toContain("[planner] Sequence the safest path.");
-    expect(summary?.data.summary).toContain("[critic] Avoid credential mutation.");
+    expect(summary?.data.summary).not.toContain("[critic]");
     expect(summary?.position.y).toBeGreaterThan(
       nodes.find((node) => node.id === BRAIN_NODE_ID)?.position.y ?? -Infinity
     );
+    expect(nodes.find((node) => node.id === "mind-c1")?.data.executionStatus).toBe("failed");
     expect(edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -64,13 +65,22 @@ describe("canvas-store multi-mind", () => {
           source: "mind-p1",
           target: MULTI_MIND_SUMMARY_NODE_ID,
         }),
-        expect.objectContaining({
-          id: "edge-mind-summary-mind-c1",
-          source: "mind-c1",
-          target: MULTI_MIND_SUMMARY_NODE_ID,
-        }),
       ])
     );
+    expect(edges.some((edge) => edge.id === "edge-mind-summary-mind-c1")).toBe(false);
+  });
+
+  it("preserves the synthesis node through full canvas reinitialization", () => {
+    const store = useCanvasStore.getState();
+    store.upsertMindAgent({ agentId: "r1", role: "researcher", title: "Researcher" });
+    store.completeMultiMindRound([insight({ agentId: "r1", role: "researcher" })], 10);
+
+    store.initializeFromSkills([]);
+
+    const { nodes, edges } = useCanvasStore.getState();
+    expect(nodes.some((node) => node.id === MULTI_MIND_SUMMARY_NODE_ID)).toBe(true);
+    expect(nodes.some((node) => node.id === "mind-r1")).toBe(true);
+    expect(edges.some((edge) => edge.id === "edge-mind-summary-mind-r1")).toBe(true);
   });
 
   it("clears the synthesis node with transient mind agents", () => {

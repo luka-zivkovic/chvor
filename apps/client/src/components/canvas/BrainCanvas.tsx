@@ -3,7 +3,7 @@ import { ReactFlow, Background, BackgroundVariant, MiniMap } from "@xyflow/react
 import type { ReactFlowInstance } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { useCanvasStore } from "../../stores/canvas-store";
+import { MULTI_MIND_SUMMARY_NODE_ID, useCanvasStore } from "../../stores/canvas-store";
 import type { ChvorNode, ChvorEdge } from "../../stores/canvas-store";
 import { useAppStore } from "../../stores/app-store";
 import { useRuntimeStore } from "../../stores/runtime-store";
@@ -224,7 +224,12 @@ export function BrainCanvas() {
     const viewport = rf.getViewport();
     const workspaceId = DEFAULT_WORKSPACE_ID;
     // Map to WorkspaceNode shape (strip runtime-only fields)
-    const persistentNodes = currentNodes.filter((n) => n.type !== "mind-agent" && n.type !== "canvas-input");
+    const persistentNodes = currentNodes.filter(
+      (n) =>
+        n.type !== "mind-agent" &&
+        n.type !== "canvas-input" &&
+        n.id !== MULTI_MIND_SUMMARY_NODE_ID
+    );
     const persistentEdges = currentEdges.filter((e) => !e.id.startsWith("edge-mind-") && !e.id.startsWith("edge-input-"));
     const saveNodes = persistentNodes.map((n) => ({
       id: n.id,

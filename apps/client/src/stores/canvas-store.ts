@@ -539,7 +539,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
 
     const { nodes: previousNodes, edges: previousEdges } = get();
-    const transientNodes = previousNodes.filter((n) => n.type === "mind-agent" || n.type === "canvas-input");
+    const transientNodes = previousNodes.filter(
+      (n) =>
+        n.type === "mind-agent" ||
+        n.type === "canvas-input" ||
+        n.id === MULTI_MIND_SUMMARY_NODE_ID
+    );
     const transientEdges = previousEdges.filter((e) => e.id.startsWith("edge-mind-") || e.id.startsWith("edge-input-"));
 
     set({
@@ -595,7 +600,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }));
 
     const { nodes: previousNodes, edges: previousEdges } = get();
-    const transientNodes = previousNodes.filter((n) => n.type === "mind-agent" || n.type === "canvas-input" || n.id === MULTI_MIND_SUMMARY_NODE_ID);
+    const transientNodes = previousNodes.filter(
+      (n) =>
+        n.type === "mind-agent" ||
+        n.type === "canvas-input" ||
+        n.id === MULTI_MIND_SUMMARY_NODE_ID
+    );
     const transientEdges = previousEdges.filter((e) => e.id.startsWith("edge-mind-") || e.id.startsWith("edge-input-"));
 
     set({ nodes: [brainNode, ...ghostNodes, ...transientNodes], edges: [...ghostEdges, ...transientEdges] });
@@ -785,7 +795,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const brain = nodes.find((n) => n.id === BRAIN_NODE_ID);
     const origin = brain?.position ?? { x: -90, y: -90 };
     const brainCenter = { x: origin.x + OFFSETS.brain.hw, y: origin.y + OFFSETS.brain.hh };
-    const mindNodes = nodes.filter((n) => n.type === "mind-agent");
+    const contributingNodeIds = new Set(insights.map((insight) => `mind-${insight.agentId}`));
+    const mindNodes = nodes.filter((n) => n.type === "mind-agent" && contributingNodeIds.has(n.id));
     const summary =
       insights.length > 0
         ? insights.map((insight) => `[${insight.role}] ${insight.text}`).join("\n\n")
