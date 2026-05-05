@@ -566,6 +566,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             );
         } else if (execEvent.type === "multi_mind.agent.failed") {
           useCanvasStore.getState().failMindAgent(execEvent.data.agentId, execEvent.data.error);
+        } else if (execEvent.type === "multi_mind.completed") {
+          useCanvasStore
+            .getState()
+            .completeMultiMindRound(execEvent.data.insights, execEvent.data.durationMs);
         }
         break;
       }

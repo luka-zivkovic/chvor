@@ -9,10 +9,18 @@ import type {
   NodeChange,
   EdgeChange,
 } from "@xyflow/react";
-import type { Skill, Tool, Schedule, WebhookSubscription, CredentialSummary } from "@chvor/shared";
+import type {
+  Skill,
+  Tool,
+  Schedule,
+  WebhookSubscription,
+  CredentialSummary,
+  MultiMindInsight,
+} from "@chvor/shared";
 import { computeOrbitalPositions, OFFSETS, INNER_RADIUS, HUB_SLOT_ANGLE } from "../lib/orbital-geometry";
 
 export const BRAIN_NODE_ID = "brain-0";
+export const MULTI_MIND_SUMMARY_NODE_ID = "mind-synthesis";
 
 type ExecStatus = "idle" | "pending" | "running" | "completed" | "failed" | "waiting";
 
@@ -96,6 +104,9 @@ export interface OutputNodeData {
   label: string;
   outputFormat: "text";
   executionStatus: ExecStatus;
+  summary?: string;
+  durationMs?: number;
+  source?: "multi-mind";
   [key: string]: unknown;
 }
 
@@ -213,6 +224,7 @@ interface CanvasState {
   upsertMindAgent: (agent: { agentId: string; role: MindAgentNodeData["role"]; title: string; status?: ExecStatus }) => void;
   completeMindAgent: (agentId: string, title: string, summary: string, durationMs?: number) => void;
   failMindAgent: (agentId: string, error: string) => void;
+  completeMultiMindRound: (insights: MultiMindInsight[], durationMs: number) => void;
   addCanvasInputNode: (input: { label: string; inputKind: CanvasInputNodeData["inputKind"]; preview?: string }) => void;
 }
 
@@ -583,7 +595,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }));
 
     const { nodes: previousNodes, edges: previousEdges } = get();
-    const transientNodes = previousNodes.filter((n) => n.type === "mind-agent" || n.type === "canvas-input");
+    const transientNodes = previousNodes.filter((n) => n.type === "mind-agent" || n.type === "canvas-input" || n.id === MULTI_MIND_SUMMARY_NODE_ID);
     const transientEdges = previousEdges.filter((e) => e.id.startsWith("edge-mind-") || e.id.startsWith("edge-input-"));
 
     set({ nodes: [brainNode, ...ghostNodes, ...transientNodes], edges: [...ghostEdges, ...transientEdges] });
@@ -658,7 +670,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   clearMindAgents: () => {
     const { nodes, edges } = get();
     set({
-      nodes: nodes.filter((n) => n.type !== "mind-agent"),
+      nodes: nodes.filter((n) => n.type !== "mind-agent" && n.id !== MULTI_MIND_SUMMARY_NODE_ID),
       edges: edges.filter((e) => !e.id.startsWith("edge-mind-")),
     });
   },
@@ -766,6 +778,53 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       data: { ...nodes[idx].data, summary: error, executionStatus: "failed" },
     } as ChvorNode;
     set({ nodes: updated });
+  },
+
+  completeMultiMindRound: (insights, durationMs) => {
+    const { nodes, edges } = get();
+    const brain = nodes.find((n) => n.id === BRAIN_NODE_ID);
+    const origin = brain?.position ?? { x: -90, y: -90 };
+    const brainCenter = { x: origin.x + OFFSETS.brain.hw, y: origin.y + OFFSETS.brain.hh };
+    const mindNodes = nodes.filter((n) => n.type === "mind-agent");
+    const summary =
+      insights.length > 0
+        ? insights.map((insight) => `[${insight.role}] ${insight.text}`).join("\n\n")
+        : "Parallel minds completed without producing advisory notes.";
+
+    const summaryNode: ChvorNode = {
+      id: MULTI_MIND_SUMMARY_NODE_ID,
+      type: "output",
+      position: {
+        x: brainCenter.x - 94,
+        y: brainCenter.y + 250,
+      },
+      data: {
+        type: "output",
+        label: "Mind synthesis",
+        outputFormat: "text",
+        executionStatus: insights.length > 0 ? "completed" : "failed",
+        summary: summary.slice(0, 1200),
+        durationMs,
+        source: "multi-mind",
+      },
+    };
+
+    const nextNodes = [
+      ...nodes.filter((n) => n.id !== MULTI_MIND_SUMMARY_NODE_ID),
+      summaryNode,
+    ];
+    const nextEdges = [
+      ...edges.filter((e) => !e.id.startsWith("edge-mind-summary-")),
+      ...mindNodes.map((node) => ({
+        id: `edge-mind-summary-${node.id}`,
+        source: node.id,
+        target: MULTI_MIND_SUMMARY_NODE_ID,
+        type: "animated" as const,
+        animated: true,
+        data: { active: true },
+      })),
+    ];
+    set({ nodes: nextNodes, edges: nextEdges });
   },
 
   addCanvasInputNode: ({ label, inputKind, preview }) => {
