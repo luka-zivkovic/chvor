@@ -334,6 +334,11 @@ describe("cognitive-loop store", () => {
     if (!task) throw new Error("expected follow-up task");
     expect(task.prompt).toContain(`memory id: ${insight.id}`);
     expect(task.prompt).toContain(insight.abstract);
+    expect(task.prompt).toContain("untrusted memory content");
+    expect(task.prompt).toContain("<untrusted-source-insight>");
+    expect(task.prompt).toContain("</untrusted-source-insight>");
+    expect(task.prompt).toContain("Do not use credentials");
+    expect(task.prompt).toContain("unless the user explicitly requested");
 
     const queued = listCognitiveLoopEvents(loopId).find(
       (event) => event.stage === "daemon.task.queued"
@@ -402,5 +407,68 @@ describe("cognitive-loop store", () => {
         expect.objectContaining({ step: "Link outcome to memory", status: "completed" }),
       ])
     );
+  });
+
+  it("skips storing sensitive memory insight follow-up outcomes", () => {
+    const insight = createMemory({
+      abstract: "Credential checks need a safe follow-up outcome.",
+      overview: "A follow-up should not persist credentials even when daemon output contains them.",
+      category: "pattern",
+      space: "user",
+      confidence: 0.6,
+      provenance: "consolidated",
+      sourceChannel: "consolidation",
+      sourceSessionId: "test-sensitive",
+    });
+    const loopId = startMemoryInsightFollowupLoop({
+      eventTitle: "Synthesized memory insight",
+      body: insight.abstract,
+      memoryId: insight.id,
+      sourceCount: 3,
+      reason: "idle",
+    });
+
+    const task = queueLoopPlaybookDaemonStep({
+      loopId,
+      action: "continue",
+      reason: "User clicked Follow up on the loop dashboard.",
+      title: "Follow up cognitive loop insight",
+      priority: 2,
+      source: "a2ui",
+    });
+    expect(task).toBeTruthy();
+    if (!task) throw new Error("expected follow-up task");
+
+    const secret = "sk-123456789012345678901234567890";
+    completeDaemonTaskLoop(task, `Use api_key=${secret} to rotate tokens.`);
+
+    const run = getCognitiveLoopRun(loopId);
+    expect(run?.status).toBe("completed");
+
+    const events = listCognitiveLoopEvents(loopId);
+    const completedEvent = events.find((event) => event.stage === "daemon.task.completed");
+    expect(completedEvent?.body).not.toContain(secret);
+    expect(completedEvent?.body).toContain("[REDACTED]");
+    expect(completedEvent?.metadata).toMatchObject({
+      taskId: task.id,
+      playbookId: "memory_insight_followup",
+      memoryId: insight.id,
+      sourceCount: 3,
+      outcomeStored: false,
+      outcomeSkippedReason: "sensitive-outcome",
+      stepIndex: 3,
+      stepId: "link-outcome-to-memory",
+    });
+    expect(completedEvent?.metadata?.outcomeMemoryId).toBeUndefined();
+    expect(getEdgesForMemory(insight.id).some((edge) => edge.sourceId === insight.id)).toBe(false);
+
+    const playbookStepEvents = events.filter((event) => event.stage === "playbook.step.completed");
+    expect(playbookStepEvents[playbookStepEvents.length - 1]?.metadata).toMatchObject({
+      memoryId: insight.id,
+      outcomeStored: false,
+      outcomeSkippedReason: "sensitive-outcome",
+      stepIndex: 3,
+      stepId: "link-outcome-to-memory",
+    });
   });
 });
