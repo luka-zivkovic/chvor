@@ -16,10 +16,14 @@ let createDaemonTask: typeof import("../../db/daemon-store.ts").createDaemonTask
 let listDaemonTasks: typeof import("../../db/daemon-store.ts").listDaemonTasks;
 let getSurface: typeof import("../../db/a2ui-store.ts").getSurface;
 let initA2UIDb: typeof import("../../db/a2ui-store.ts").initA2UIDb;
+let createMemory: typeof import("../../db/memory-store.ts").createMemory;
+let getMemory: typeof import("../../db/memory-store.ts").getMemory;
+let getEdgesForMemory: typeof import("../../db/memory-store.ts").getEdgesForMemory;
 let completeCognitiveLoop: typeof import("../cognitive-loop.ts").completeCognitiveLoop;
 let recoverStaleCognitiveLoops: typeof import("../cognitive-loop.ts").recoverStaleCognitiveLoops;
 let startLoopPlaybook: typeof import("../cognitive-loop-playbooks.ts").startLoopPlaybook;
 let queueLoopPlaybookDaemonStep: typeof import("../cognitive-loop-playbooks.ts").queueLoopPlaybookDaemonStep;
+let completeDaemonTaskLoop: typeof import("../daemon-engine.ts").completeDaemonTaskLoop;
 let runConsolidation: typeof import("../memory-consolidation.ts").runConsolidation;
 let startMemoryInsightFollowupLoop: typeof import("../memory-consolidation.ts").startMemoryInsightFollowupLoop;
 let setConfig: typeof import("../../db/config-store.ts").setConfig;
@@ -37,9 +41,11 @@ beforeAll(async () => {
   ({ createDaemonTask, listDaemonTasks } = await import("../../db/daemon-store.ts"));
   ({ getSurface, initA2UIDb } = await import("../../db/a2ui-store.ts"));
   initA2UIDb();
+  ({ createMemory, getMemory, getEdgesForMemory } = await import("../../db/memory-store.ts"));
   ({ completeCognitiveLoop, recoverStaleCognitiveLoops } = await import("../cognitive-loop.ts"));
   ({ startLoopPlaybook, queueLoopPlaybookDaemonStep } =
     await import("../cognitive-loop-playbooks.ts"));
+  ({ completeDaemonTaskLoop } = await import("../daemon-engine.ts"));
   ({ runConsolidation, startMemoryInsightFollowupLoop } =
     await import("../memory-consolidation.ts"));
   ({ setConfig } = await import("../../db/config-store.ts"));
@@ -295,5 +301,174 @@ describe("cognitive-loop store", () => {
         expect.objectContaining({ step: "Queue follow-up if safe", status: "pending" }),
       ])
     );
+  });
+
+  it("queues and completes memory insight follow-up by linking the outcome back to memory", () => {
+    const insight = createMemory({
+      abstract: "Credential failures cluster around expired OAuth refresh tokens.",
+      overview: "Several recent credential checks failed after refresh tokens expired.",
+      category: "pattern",
+      space: "user",
+      confidence: 0.6,
+      provenance: "consolidated",
+      sourceChannel: "consolidation",
+      sourceSessionId: "test",
+    });
+    const loopId = startMemoryInsightFollowupLoop({
+      eventTitle: "Synthesized memory insight",
+      body: insight.abstract,
+      memoryId: insight.id,
+      sourceCount: 5,
+      reason: "idle",
+    });
+
+    const task = queueLoopPlaybookDaemonStep({
+      loopId,
+      action: "continue",
+      reason: "User clicked Follow up on the loop dashboard.",
+      title: "Follow up cognitive loop insight",
+      priority: 2,
+      source: "a2ui",
+    });
+    expect(task).toBeTruthy();
+    if (!task) throw new Error("expected follow-up task");
+    expect(task.prompt).toContain(`memory id: ${insight.id}`);
+    expect(task.prompt).toContain(insight.abstract);
+    expect(task.prompt).toContain("untrusted memory content");
+    expect(task.prompt).toContain("<untrusted-source-insight>");
+    expect(task.prompt).toContain("</untrusted-source-insight>");
+    expect(task.prompt).toContain("Do not use credentials");
+    expect(task.prompt).toContain("unless the user explicitly requested");
+
+    const queued = listCognitiveLoopEvents(loopId).find(
+      (event) => event.stage === "daemon.task.queued"
+    );
+    expect(queued?.metadata).toMatchObject({
+      playbookId: "memory_insight_followup",
+      memoryId: insight.id,
+      sourceCount: 5,
+      action: "continue",
+      stepIndex: 2,
+      stepId: "queue-follow-up-if-safe",
+    });
+
+    completeDaemonTaskLoop(
+      task,
+      "Recommended using the credential manager to rotate expired OAuth refresh tokens."
+    );
+
+    const run = getCognitiveLoopRun(loopId);
+    expect(run?.status).toBe("completed");
+    expect(run?.currentStage).toBe("loop.completed");
+
+    const events = listCognitiveLoopEvents(loopId);
+    const completedEvent = events.find((event) => event.stage === "daemon.task.completed");
+    expect(completedEvent?.title).toContain("Memory insight follow-up completed");
+    expect(completedEvent?.metadata).toMatchObject({
+      taskId: task.id,
+      playbookId: "memory_insight_followup",
+      memoryId: insight.id,
+      sourceCount: 5,
+      outcomeStored: true,
+      stepIndex: 3,
+      stepId: "link-outcome-to-memory",
+    });
+    const outcomeMemoryId = completedEvent?.metadata?.outcomeMemoryId;
+    expect(typeof outcomeMemoryId).toBe("string");
+    const outcome = typeof outcomeMemoryId === "string" ? getMemory(outcomeMemoryId) : null;
+    expect(outcome?.abstract).toContain("Follow-up outcome:");
+    expect(outcome?.sourceChannel).toBe("daemon");
+    expect(outcome?.sourceSessionId).toBe(loopId);
+    expect(outcome?.sourceMessageId).toBe(task.id);
+
+    expect(getEdgesForMemory(insight.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceId: insight.id,
+          targetId: outcomeMemoryId,
+          relation: "causal",
+        }),
+      ])
+    );
+    expect(events.find((event) => event.stage === "playbook.step.completed")).toBeTruthy();
+    const playbookStepEvents = events.filter((event) => event.stage === "playbook.step.completed");
+    expect(playbookStepEvents[playbookStepEvents.length - 1]?.metadata).toMatchObject({
+      memoryId: insight.id,
+      outcomeMemoryId,
+      outcomeStored: true,
+      stepIndex: 3,
+      stepId: "link-outcome-to-memory",
+    });
+
+    const dashboard = getSurface(`cognitive-loop-${loopId}`);
+    expect(dashboard?.bindings.playbookSteps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ step: "Queue follow-up if safe", status: "completed" }),
+        expect.objectContaining({ step: "Link outcome to memory", status: "completed" }),
+      ])
+    );
+  });
+
+  it("skips storing sensitive memory insight follow-up outcomes", () => {
+    const insight = createMemory({
+      abstract: "Credential checks need a safe follow-up outcome.",
+      overview: "A follow-up should not persist credentials even when daemon output contains them.",
+      category: "pattern",
+      space: "user",
+      confidence: 0.6,
+      provenance: "consolidated",
+      sourceChannel: "consolidation",
+      sourceSessionId: "test-sensitive",
+    });
+    const loopId = startMemoryInsightFollowupLoop({
+      eventTitle: "Synthesized memory insight",
+      body: insight.abstract,
+      memoryId: insight.id,
+      sourceCount: 3,
+      reason: "idle",
+    });
+
+    const task = queueLoopPlaybookDaemonStep({
+      loopId,
+      action: "continue",
+      reason: "User clicked Follow up on the loop dashboard.",
+      title: "Follow up cognitive loop insight",
+      priority: 2,
+      source: "a2ui",
+    });
+    expect(task).toBeTruthy();
+    if (!task) throw new Error("expected follow-up task");
+
+    const secret = "sk-123456789012345678901234567890";
+    completeDaemonTaskLoop(task, `Use api_key=${secret} to rotate tokens.`);
+
+    const run = getCognitiveLoopRun(loopId);
+    expect(run?.status).toBe("completed");
+
+    const events = listCognitiveLoopEvents(loopId);
+    const completedEvent = events.find((event) => event.stage === "daemon.task.completed");
+    expect(completedEvent?.body).not.toContain(secret);
+    expect(completedEvent?.body).toContain("[REDACTED]");
+    expect(completedEvent?.metadata).toMatchObject({
+      taskId: task.id,
+      playbookId: "memory_insight_followup",
+      memoryId: insight.id,
+      sourceCount: 3,
+      outcomeStored: false,
+      outcomeSkippedReason: "sensitive-outcome",
+      stepIndex: 3,
+      stepId: "link-outcome-to-memory",
+    });
+    expect(completedEvent?.metadata?.outcomeMemoryId).toBeUndefined();
+    expect(getEdgesForMemory(insight.id).some((edge) => edge.sourceId === insight.id)).toBe(false);
+
+    const playbookStepEvents = events.filter((event) => event.stage === "playbook.step.completed");
+    expect(playbookStepEvents[playbookStepEvents.length - 1]?.metadata).toMatchObject({
+      memoryId: insight.id,
+      outcomeStored: false,
+      outcomeSkippedReason: "sensitive-outcome",
+      stepIndex: 3,
+      stepId: "link-outcome-to-memory",
+    });
   });
 });
