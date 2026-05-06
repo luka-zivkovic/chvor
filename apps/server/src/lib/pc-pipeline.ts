@@ -1,4 +1,4 @@
-import type { PcAction, PcTaskResult, PcSafetyLevel, A11yTree } from "@chvor/shared";
+import type { PcAction, PcTaskResult, PcSafetyLevel, A11yTree, PcScreenshot } from "@chvor/shared";
 import type { PcBackend } from "./pc-backend.ts";
 import type { ExecutionEvent } from "@chvor/shared";
 import { tryActionRouter } from "./action-patterns.ts";
@@ -16,7 +16,10 @@ export type EventEmitter = (event: ExecutionEvent) => void;
  * @param image  - Optional base64 image for vision calls
  * @returns The LLM's text response
  */
-export type LlmCallFn = (prompt: string, image?: { data: string; mimeType: string }) => Promise<string>;
+export type LlmCallFn = (
+  prompt: string,
+  image?: { data: string; mimeType: string }
+) => Promise<string>;
 
 export interface PipelineContext {
   emit: EventEmitter;
@@ -47,17 +50,26 @@ export async function executePcTask(
   ctx.emit({ type: "pc.pipeline.start", data: { targetId, task } });
 
   // Layer 1: Action Router (zero LLM)
-  ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "action-router", status: "trying" } });
+  ctx.emit({
+    type: "pc.pipeline.layer",
+    data: { targetId, layer: "action-router", status: "trying" },
+  });
   const routedActions = tryActionRouter(task);
 
   if (routedActions) {
-    ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "action-router", status: "success" } });
+    ctx.emit({
+      type: "pc.pipeline.layer",
+      data: { targetId, layer: "action-router", status: "success" },
+    });
 
     const errors: string[] = [];
     let executedCount = 0;
     for (const action of routedActions) {
       const result = await backend.executeAction(action);
-      if (!result.success && result.error) { errors.push(result.error); break; }
+      if (!result.success && result.error) {
+        errors.push(result.error);
+        break;
+      }
       executedCount++;
     }
 
@@ -75,7 +87,10 @@ export async function executePcTask(
     };
   }
 
-  ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "action-router", status: "fallthrough" } });
+  ctx.emit({
+    type: "pc.pipeline.layer",
+    data: { targetId, layer: "action-router", status: "fallthrough" },
+  });
 
   // Layer 2: Accessibility Tree (text-only LLM)
   ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "a11y", status: "trying" } });
@@ -107,16 +122,27 @@ export async function executePcTask(
     if (serialized) {
       const a11yPrompt = buildA11yPrompt(task, serialized);
       const response = await ctx.llmCall(a11yPrompt);
-      const actions = await parseActionsFromLlm(response, a11yTree, backend.screenSize);
+      const actions = await parseActionsFromLlm(
+        response,
+        a11yTree,
+        backend.screenSize,
+        backend.coordinateSize
+      );
 
       if (actions) {
-        ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "a11y", status: "success" } });
+        ctx.emit({
+          type: "pc.pipeline.layer",
+          data: { targetId, layer: "a11y", status: "success" },
+        });
 
         const errors: string[] = [];
         let executedCount = 0;
         for (const action of actions) {
           const result = await backend.executeAction(action);
-          if (!result.success && result.error) { errors.push(result.error); break; }
+          if (!result.success && result.error) {
+            errors.push(result.error);
+            break;
+          }
           executedCount++;
         }
 
@@ -148,15 +174,17 @@ export async function executePcTask(
   ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "vision", status: "trying" } });
 
   const screenshot = await backend.captureScreen();
-  // Vision prompt must use the TARGET resolution (1024x768) — that's the actual
-  // screenshot size. Using native screenSize would cause the LLM to output
-  // coordinates in the wrong space, making every click miss its target.
-  const visionPrompt = buildVisionPrompt(task, { width: 1024, height: 768 });
+  // Prompt with the actual screenshot dimensions. The pc-agent maps these
+  // perceived coordinates back to native display coordinates during execution.
+  const visionPrompt = buildVisionPrompt(task, {
+    width: screenshot.width,
+    height: screenshot.height,
+  });
   const visionResponse = await ctx.llmCall(visionPrompt, {
     data: screenshot.data,
     mimeType: screenshot.mimeType ?? "image/jpeg",
   });
-  const visionActions = parseVisionActions(visionResponse);
+  const visionActions = parseVisionActions(visionResponse, screenshot);
 
   if (visionActions.length > 0) {
     ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "vision", status: "success" } });
@@ -165,7 +193,10 @@ export async function executePcTask(
     let executedCount = 0;
     for (const action of visionActions) {
       const result = await backend.executeAction(action);
-      if (!result.success && result.error) { errors.push(result.error); break; }
+      if (!result.success && result.error) {
+        errors.push(result.error);
+        break;
+      }
       executedCount++;
     }
 
@@ -184,7 +215,10 @@ export async function executePcTask(
     };
   }
 
-  ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "vision", status: "fallthrough" } });
+  ctx.emit({
+    type: "pc.pipeline.layer",
+    data: { targetId, layer: "vision", status: "fallthrough" },
+  });
   ctx.emit({ type: "pc.pipeline.complete", data: { targetId, layer: "vision", success: false } });
 
   return {
@@ -246,14 +280,48 @@ Respond ONLY with the JSON array. No explanation.`;
 // ---------------------------------------------------------------------------
 
 const VALID_ACTIONS = new Set<string>([
-  "screenshot", "mouse_move", "left_click", "right_click",
-  "double_click", "middle_click", "type", "key", "scroll", "wait",
+  "screenshot",
+  "mouse_move",
+  "left_click",
+  "right_click",
+  "double_click",
+  "middle_click",
+  "type",
+  "key",
+  "scroll",
+  "wait",
 ]);
 
-function isValidCoordinate(c: unknown): c is [number, number] {
-  return Array.isArray(c) && c.length === 2
-    && typeof c[0] === "number" && typeof c[1] === "number"
-    && c[0] >= 0 && c[0] <= 10000 && c[1] >= 0 && c[1] <= 10000;
+function isValidCoordinate(
+  c: unknown,
+  bounds?: { width: number; height: number }
+): c is [number, number] {
+  return (
+    Array.isArray(c) &&
+    c.length === 2 &&
+    typeof c[0] === "number" &&
+    typeof c[1] === "number" &&
+    Number.isFinite(c[0]) &&
+    Number.isFinite(c[1]) &&
+    c[0] >= 0 &&
+    c[0] < (bounds?.width ?? 10000) &&
+    c[1] >= 0 &&
+    c[1] < (bounds?.height ?? 10000)
+  );
+}
+
+const COORDINATE_REQUIRED_ACTIONS = new Set<string>([
+  "mouse_move",
+  "left_click",
+  "right_click",
+  "double_click",
+  "middle_click",
+  "type",
+  "scroll",
+]);
+
+function coordinateRequired(action: string): boolean {
+  return COORDINATE_REQUIRED_ACTIONS.has(action);
 }
 
 // ---------------------------------------------------------------------------
@@ -267,7 +335,8 @@ function isValidCoordinate(c: unknown): c is [number, number] {
 async function parseActionsFromLlm(
   response: string,
   tree: A11yTree,
-  screenSize: { width: number; height: number }
+  screenSize: { width: number; height: number },
+  coordinateSize: { width: number; height: number }
 ): Promise<PcAction[] | null> {
   const trimmed = response.trim();
   if (trimmed === "null") return null;
@@ -290,14 +359,24 @@ async function parseActionsFromLlm(
       if (item.nodeId != null) {
         const node = findNodeById(tree, item.nodeId);
         if (node?.bbox) {
-          coordinate = bboxToCoordinate(node.bbox, screenSize.width, screenSize.height);
+          coordinate = bboxToCoordinate(
+            node.bbox,
+            screenSize.width,
+            screenSize.height,
+            coordinateSize.width,
+            coordinateSize.height
+          );
         }
       }
 
       const rawCoord = coordinate ?? item.coordinate;
+      const validCoordinate = isValidCoordinate(rawCoord, coordinateSize) ? rawCoord : undefined;
+      if (coordinateRequired(item.action) && !validCoordinate) continue;
       const action: PcAction = {
         action: item.action,
-        coordinate: isValidCoordinate(rawCoord) ? rawCoord : undefined,
+        coordinate: validCoordinate,
+        screenWidth: validCoordinate ? coordinateSize.width : undefined,
+        screenHeight: validCoordinate ? coordinateSize.height : undefined,
         text: item.text,
         keys: item.keys,
         direction: item.direction,
@@ -309,13 +388,18 @@ async function parseActionsFromLlm(
 
     return actions.length > 0 ? actions : null;
   } catch (err) {
-    console.warn("[pc-pipeline] a11y response parse failed:", (err as Error).message, "| raw:", response.slice(0, 200));
+    console.warn(
+      "[pc-pipeline] a11y response parse failed:",
+      (err as Error).message,
+      "| raw:",
+      response.slice(0, 200)
+    );
     return null;
   }
 }
 
-/** Parse LLM response from the vision layer (coordinates already in 1024x768 space) */
-function parseVisionActions(response: string): PcAction[] {
+/** Parse LLM response from the vision layer (coordinates in the screenshot space). */
+function parseVisionActions(response: string, screenshot: PcScreenshot): PcAction[] {
   const trimmed = response.trim();
 
   try {
@@ -326,9 +410,15 @@ function parseVisionActions(response: string): PcAction[] {
     const actions: PcAction[] = [];
     for (const item of parsed) {
       if (!item.action || !VALID_ACTIONS.has(item.action)) continue;
+      const coordinate = isValidCoordinate(item.coordinate, screenshot)
+        ? item.coordinate
+        : undefined;
+      if (coordinateRequired(item.action) && !coordinate) continue;
       actions.push({
         action: item.action,
-        coordinate: isValidCoordinate(item.coordinate) ? item.coordinate : undefined,
+        coordinate,
+        screenWidth: coordinate ? screenshot.width : undefined,
+        screenHeight: coordinate ? screenshot.height : undefined,
         text: item.text,
         keys: item.keys,
         direction: item.direction,
@@ -338,7 +428,12 @@ function parseVisionActions(response: string): PcAction[] {
     }
     return actions;
   } catch (err) {
-    console.warn("[pc-pipeline] vision response parse failed:", (err as Error).message, "| raw:", response.slice(0, 200));
+    console.warn(
+      "[pc-pipeline] vision response parse failed:",
+      (err as Error).message,
+      "| raw:",
+      response.slice(0, 200)
+    );
     return [];
   }
 }

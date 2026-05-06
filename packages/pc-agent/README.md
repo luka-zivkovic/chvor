@@ -22,7 +22,7 @@ User intent ("click Save")
 
 **Layer 2 — Accessibility Tree:** Queries the OS accessibility API for visible UI elements (buttons, text fields, menus) with bounding boxes. A lightweight text-only LLM maps the user's intent to specific elements. Windows is fully implemented via PowerShell/.NET `System.Windows.Automation`. macOS and Linux stubs gracefully fall through to vision.
 
-**Layer 3 — Vision:** Captures a screenshot, sends it to a vision-capable LLM, and parses coordinates from the response. Always available as a fallback.
+**Layer 3 — Vision:** Captures an aspect-preserving screenshot, sends it to a vision-capable LLM, and parses coordinates from the response. Always available as a fallback.
 
 ## Modes
 
@@ -49,10 +49,10 @@ npx @chvor/pc-agent
 
 ### CLI Options
 
-| Flag | Env var | Default | Description |
-|------|---------|---------|-------------|
-| `--server <url>` | — | `ws://localhost:3001/ws/pc-agent` | WebSocket URL of the Chvor server |
-| `--token <token>` | `CHVOR_PC_AGENT_TOKEN` or `CHVOR_TOKEN` | — | Auth token (printed by server on startup if not set) |
+| Flag              | Env var                                 | Default                           | Description                                          |
+| ----------------- | --------------------------------------- | --------------------------------- | ---------------------------------------------------- |
+| `--server <url>`  | —                                       | `ws://localhost:3001/ws/pc-agent` | WebSocket URL of the Chvor server                    |
+| `--token <token>` | `CHVOR_PC_AGENT_TOKEN` or `CHVOR_TOKEN` | —                                 | Auth token (printed by server on startup if not set) |
 
 The agent auto-reconnects with exponential backoff (3s to 60s) if the connection drops.
 
@@ -88,11 +88,11 @@ Run that command on the target PC. Once connected, it appears in the PC viewer s
 
 ## Safety Levels
 
-| Level | Behavior |
-|-------|----------|
-| **Supervised** (default) | Every action requires user approval |
-| **Semi-autonomous** | Action Router matches (keyboard shortcuts, etc.) auto-approved; everything else needs approval |
-| **Autonomous** | AI acts freely — monitor via the viewer |
+| Level                    | Behavior                                                                                       |
+| ------------------------ | ---------------------------------------------------------------------------------------------- |
+| **Supervised** (default) | Every action requires user approval                                                            |
+| **Semi-autonomous**      | Action Router matches (keyboard shortcuts, etc.) auto-approved; everything else needs approval |
+| **Autonomous**           | AI acts freely — monitor via the viewer                                                        |
 
 Shell commands (`native__pc_shell`) **always** require approval regardless of safety level.
 
@@ -100,11 +100,11 @@ Shell commands (`native__pc_shell`) **always** require approval regardless of sa
 
 The server exposes three tools to the AI:
 
-| Tool | Description |
-|------|-------------|
-| `native__pc_do` | Describe a task in natural language. The pipeline resolves it automatically. |
+| Tool                 | Description                                                                  |
+| -------------------- | ---------------------------------------------------------------------------- |
+| `native__pc_do`      | Describe a task in natural language. The pipeline resolves it automatically. |
 | `native__pc_observe` | Returns a screenshot + the UI accessibility tree (list of visible elements). |
-| `native__pc_shell` | Execute a shell command on the target PC. Always requires approval. |
+| `native__pc_shell`   | Execute a shell command on the target PC. Always requires approval.          |
 
 ### Typical workflow
 
@@ -128,11 +128,16 @@ import {
   bboxToCoordinate,
 } from "@chvor/pc-agent";
 
-// Screenshot
+// Screenshot. The returned width/height are the AI coordinate space; sourceWidth/sourceHeight are native.
 const screenshot = await captureScreen({ format: "jpeg", quality: 80 });
 
 // Input simulation
-await executeAction({ action: "left_click", coordinate: [500, 300] });
+await executeAction({
+  action: "left_click",
+  coordinate: [500, 300],
+  screenWidth: screenshot.width,
+  screenHeight: screenshot.height,
+});
 await executeAction({ action: "key", keys: "ctrl+s" });
 await executeAction({ action: "type", text: "hello" });
 
@@ -142,7 +147,13 @@ if (tree) {
   const text = serializeA11yTree(tree, { maxDepth: 6, maxNodes: 200 });
   const node = findNodeById(tree, 42);
   if (node?.bbox) {
-    const [x, y] = bboxToCoordinate(node.bbox, 1920, 1080);
+    const [x, y] = bboxToCoordinate(
+      node.bbox,
+      screenshot.sourceWidth,
+      screenshot.sourceHeight,
+      screenshot.width,
+      screenshot.height
+    );
   }
 }
 
@@ -152,12 +163,12 @@ const { stdout, stderr, exitCode } = await executeShellCommand("ls -la");
 
 ## Platform Support
 
-| Feature | Windows | macOS | Linux |
-|---------|---------|-------|-------|
-| Screen capture | Yes | Yes | Yes |
-| Input simulation | Yes | Yes | Yes |
+| Feature            | Windows               | macOS                       | Linux                       |
+| ------------------ | --------------------- | --------------------------- | --------------------------- |
+| Screen capture     | Yes                   | Yes                         | Yes                         |
+| Input simulation   | Yes                   | Yes                         | Yes                         |
 | Accessibility tree | Yes (PowerShell/.NET) | Stub (falls back to vision) | Stub (falls back to vision) |
-| Shell execution | Yes | Yes | Yes |
+| Shell execution    | Yes                   | Yes                         | Yes                         |
 
 ## Dependencies
 

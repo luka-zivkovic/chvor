@@ -1,10 +1,41 @@
 import { randomUUID } from "node:crypto";
 import { hostname as osHostname, platform as osPlatform, type as osType } from "node:os";
-import type { PcAgentInfo, PcScreenshot, PcAction, PcActionResult, PcAgentMessage, PcServerMessage, A11yTree } from "@chvor/shared";
+import type {
+  PcAgentInfo,
+  PcScreenshot,
+  PcAction,
+  PcActionResult,
+  PcAgentMessage,
+  PcServerMessage,
+  A11yTree,
+} from "@chvor/shared";
 import type { PcSafetyLevel } from "@chvor/shared";
 import type { WSContext } from "hono/ws";
 import { getConfig } from "../db/config-store.ts";
 import type { PcBackend } from "./pc-backend.ts";
+
+const CURRENT_PC_AGENT_PROTOCOL_VERSION = 2;
+const LEGACY_COORDINATE_SIZE = { width: 1024, height: 768 } as const;
+const MAX_SCREENSHOT_BASE64_CHARS = 2_800_000;
+
+function computeCoordinateSize(screenSize: { width: number; height: number }): {
+  width: number;
+  height: number;
+} {
+  const sourceWidth =
+    Number.isFinite(screenSize.width) && screenSize.width > 0 ? screenSize.width : 1920;
+  const sourceHeight =
+    Number.isFinite(screenSize.height) && screenSize.height > 0 ? screenSize.height : 1080;
+  const scale = Math.min(
+    1,
+    LEGACY_COORDINATE_SIZE.width / sourceWidth,
+    LEGACY_COORDINATE_SIZE.height / sourceHeight
+  );
+  return {
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale)),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Connected agents registry
@@ -21,10 +52,13 @@ interface ConnectedAgent {
   /** Timestamp of last pong received */
   lastPong: number;
   /** Pending request callbacks keyed by request ID */
-  pending: Map<string, {
-    resolve: (value: unknown) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>;
+  pending: Map<
+    string,
+    {
+      resolve: (value: unknown) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >;
 }
 
 const agents = new Map<string, ConnectedAgent>();
@@ -60,7 +94,11 @@ function startPing(agentId: string): void {
     // Check for dead connection (no pong in PONG_TIMEOUT)
     if (Date.now() - agent.lastPong > PONG_TIMEOUT) {
       console.warn(`[pc-control] agent ${agentId} not responding, disconnecting`);
-      try { agent.ws.close(); } catch { /* already closed */ }
+      try {
+        agent.ws.close();
+      } catch {
+        /* already closed */
+      }
       handlePcAgentClose(agentId);
       return;
     }
@@ -82,7 +120,11 @@ function startHelloTimeout(agentId: string): void {
     const agent = agents.get(agentId);
     if (agent && !agent.identified) {
       console.warn(`[pc-control] agent ${agentId} did not send hello, disconnecting`);
-      try { agent.ws.close(); } catch { /* already closed */ }
+      try {
+        agent.ws.close();
+      } catch {
+        /* already closed */
+      }
       handlePcAgentClose(agentId);
     }
     helloTimers.delete(agentId);
@@ -119,6 +161,7 @@ export function handlePcAgentConnection(ws: WSContext): string {
       id: agentId,
       hostname: "unknown",
       os: "unknown",
+      protocolVersion: 1,
       screenWidth: 1920,
       screenHeight: 1080,
       connectedAt: new Date().toISOString(),
@@ -155,10 +198,15 @@ export function handlePcAgentMessage(agentId: string, data: string): void {
       const os = String(msg.os ?? "").slice(0, 100);
       const screenWidth = Math.max(1, Math.min(10000, Number(msg.screenWidth) || 1920));
       const screenHeight = Math.max(1, Math.min(10000, Number(msg.screenHeight) || 1080));
+      const protocolVersion = Math.max(1, Math.min(100, Number(msg.protocolVersion) || 1));
 
       if (!hostname || !/^[\w.\-() ]{1,255}$/.test(hostname)) {
         console.warn(`[pc-control] agent ${agentId} sent invalid hostname, disconnecting`);
-        try { agent.ws.close(4003, "Invalid hostname"); } catch { /* */ }
+        try {
+          agent.ws.close(4003, "Invalid hostname");
+        } catch {
+          /* */
+        }
         handlePcAgentClose(agentId);
         return;
       }
@@ -167,35 +215,46 @@ export function handlePcAgentMessage(agentId: string, data: string): void {
       stopHelloTimeout(agentId);
       agent.info.hostname = hostname;
       agent.info.os = os;
+      agent.info.protocolVersion = protocolVersion;
       agent.info.screenWidth = screenWidth;
       agent.info.screenHeight = screenHeight;
-      console.log(`[pc-control] agent identified: ${hostname} (${os}, ${screenWidth}x${screenHeight})`);
+      console.log(
+        `[pc-control] agent identified: ${hostname} (${os}, ${screenWidth}x${screenHeight})`
+      );
       onAgentEvent?.("connected", agent.info);
       break;
     }
 
     case "screenshot": {
-      // Reject oversized screenshots (max ~2MB base64)
-      if (msg.data.length > 2_800_000) {
-        console.warn(`[pc-control] screenshot from ${agentId} too large (${msg.data.length} chars), dropping`);
-        resolvePending(agent, msg.id, { success: false, error: "Screenshot too large" });
-        break;
-      }
-      // Reject invalid dimensions
-      if (msg.width > 10000 || msg.height > 10000 || msg.width <= 0 || msg.height <= 0) {
-        console.warn(`[pc-control] screenshot from ${agentId} has invalid dimensions: ${msg.width}x${msg.height}`);
-        resolvePending(agent, msg.id, { success: false, error: "Invalid screenshot dimensions" });
+      const parsed = parseRemoteScreenshot(msg);
+      if (!parsed.ok) {
+        console.warn(`[pc-control] invalid screenshot from ${agentId}: ${parsed.error}`);
+        if (parsed.id) resolvePending(agent, parsed.id, { success: false, error: parsed.error });
         break;
       }
       const screenshot: PcScreenshot = {
-        data: msg.data,
-        width: msg.width,
-        height: msg.height,
+        data: parsed.data,
+        width: parsed.width,
+        height: parsed.height,
+        sourceWidth: parsed.sourceWidth,
+        sourceHeight: parsed.sourceHeight,
         timestamp: new Date().toISOString(),
+        mimeType: parsed.mimeType,
       };
       agent.lastScreenshot = screenshot;
       onFrame?.(agentId, screenshot);
-      resolvePending(agent, msg.id, screenshot);
+      resolvePending(agent, parsed.id, screenshot);
+      break;
+    }
+
+    case "screenshot.error": {
+      const id = typeof msg.id === "string" ? msg.id : "";
+      if (id) {
+        resolvePending(agent, id, {
+          success: false,
+          error: String(msg.error ?? "Screenshot failed").slice(0, 1000),
+        });
+      }
       break;
     }
 
@@ -250,6 +309,89 @@ export function handlePcAgentClose(agentId: string): void {
 
 const REQUEST_TIMEOUT = 30_000;
 
+function isValidDimension(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 10000;
+}
+
+function isValidOptionalDimension(value: unknown): value is number | undefined {
+  return value === undefined || isValidDimension(value);
+}
+
+function isValidMimeType(value: unknown): value is PcScreenshot["mimeType"] {
+  return value === undefined || value === "image/jpeg" || value === "image/png";
+}
+
+type ParsedRemoteScreenshot =
+  | {
+      ok: true;
+      id: string;
+      data: string;
+      width: number;
+      height: number;
+      sourceWidth?: number;
+      sourceHeight?: number;
+      mimeType: "image/jpeg" | "image/png";
+    }
+  | { ok: false; id?: string; error: string };
+
+function parseRemoteScreenshot(raw: unknown): ParsedRemoteScreenshot {
+  if (typeof raw !== "object" || raw === null) {
+    return { ok: false, error: "Screenshot payload is not an object" };
+  }
+
+  const msg = raw as Record<string, unknown>;
+  const id = typeof msg.id === "string" ? msg.id : undefined;
+  if (!id) return { ok: false, error: "Missing screenshot request id" };
+
+  if (typeof msg.data !== "string" || msg.data.length === 0) {
+    return { ok: false, id, error: "Screenshot data must be a non-empty base64 string" };
+  }
+  if (msg.data.length > MAX_SCREENSHOT_BASE64_CHARS) {
+    return { ok: false, id, error: "Screenshot too large" };
+  }
+  if (!isValidDimension(msg.width) || !isValidDimension(msg.height)) {
+    return { ok: false, id, error: "Invalid screenshot dimensions" };
+  }
+  if (!isValidOptionalDimension(msg.sourceWidth) || !isValidOptionalDimension(msg.sourceHeight)) {
+    return { ok: false, id, error: "Invalid screenshot source dimensions" };
+  }
+  if (!isValidMimeType(msg.mimeType)) {
+    return { ok: false, id, error: "Invalid screenshot MIME type" };
+  }
+
+  return {
+    ok: true,
+    id,
+    data: msg.data,
+    width: msg.width,
+    height: msg.height,
+    sourceWidth: msg.sourceWidth,
+    sourceHeight: msg.sourceHeight,
+    mimeType: msg.mimeType ?? "image/jpeg",
+  };
+}
+
+function isPcScreenshot(value: unknown): value is PcScreenshot {
+  if (typeof value !== "object" || value === null) return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.data === "string" &&
+    item.data.length > 0 &&
+    isValidDimension(item.width) &&
+    isValidDimension(item.height) &&
+    typeof item.timestamp === "string" &&
+    isValidOptionalDimension(item.sourceWidth) &&
+    isValidOptionalDimension(item.sourceHeight) &&
+    isValidMimeType(item.mimeType)
+  );
+}
+
+function errorFromPendingResult(value: unknown, fallback: string): string {
+  if (typeof value !== "object" || value === null) return fallback;
+  const err = (value as Record<string, unknown>).error;
+  return typeof err === "string" && err ? err : fallback;
+}
+
 function resolvePending(agent: ConnectedAgent, id: string, value: unknown): void {
   const pending = agent.pending.get(id);
   if (pending) {
@@ -261,7 +403,10 @@ function resolvePending(agent: ConnectedAgent, id: string, value: unknown): void
 
 const MAX_PENDING_PER_AGENT = 100;
 
-function sendRequest(agent: ConnectedAgent, msg: PcServerMessage & { id: string }): Promise<unknown> {
+function sendRequest(
+  agent: ConnectedAgent,
+  msg: PcServerMessage & { id: string }
+): Promise<unknown> {
   if (agent.pending.size >= MAX_PENDING_PER_AGENT) {
     return Promise.resolve({ success: false, error: "Too many pending requests" });
   }
@@ -295,7 +440,10 @@ export async function takeScreenshot(agentId: string): Promise<PcScreenshot> {
 
   const requestId = randomUUID();
   const result = await sendRequest(agent, { type: "screenshot", id: requestId });
-  return result as PcScreenshot;
+  if (!isPcScreenshot(result)) {
+    throw new Error(errorFromPendingResult(result, "Invalid screenshot response from agent"));
+  }
+  return result;
 }
 
 export async function executeAction(agentId: string, action: PcAction): Promise<PcActionResult> {
@@ -311,7 +459,11 @@ export async function executeAction(agentId: string, action: PcAction): Promise<
   return result as PcActionResult;
 }
 
-export async function executeShell(agentId: string, command: string, cwd?: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+export async function executeShell(
+  agentId: string,
+  command: string,
+  cwd?: string
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const agent = agents.get(agentId);
   if (!agent) throw new Error(`No agent with ID: ${agentId}`);
 
@@ -346,7 +498,10 @@ export function hasConnectedAgents(): boolean {
 }
 
 /** Query accessibility tree from a remote agent */
-export async function queryRemoteA11yTree(agentId: string, opts?: { maxDepth?: number }): Promise<A11yTree | null> {
+export async function queryRemoteA11yTree(
+  agentId: string,
+  opts?: { maxDepth?: number }
+): Promise<A11yTree | null> {
   const agent = agents.get(agentId);
   if (!agent) throw new Error(`No agent with ID: ${agentId}`);
 
@@ -383,6 +538,7 @@ export class RemoteBackend implements PcBackend {
   readonly hostname: string;
   readonly os: string;
   readonly screenSize: { width: number; height: number };
+  readonly coordinateSize: { width: number; height: number };
 
   constructor(agentId: string) {
     const agent = agents.get(agentId);
@@ -391,6 +547,10 @@ export class RemoteBackend implements PcBackend {
     this.hostname = agent.info.hostname;
     this.os = agent.info.os;
     this.screenSize = { width: agent.info.screenWidth, height: agent.info.screenHeight };
+    this.coordinateSize =
+      (agent.info.protocolVersion ?? 1) >= CURRENT_PC_AGENT_PROTOCOL_VERSION
+        ? computeCoordinateSize(this.screenSize)
+        : LEGACY_COORDINATE_SIZE;
   }
 
   async captureScreen(): Promise<PcScreenshot> {
@@ -423,14 +583,19 @@ class LocalBackend implements PcBackend {
   readonly hostname: string;
   readonly os: string;
   readonly screenSize: { width: number; height: number };
+  readonly coordinateSize: { width: number; height: number };
 
   private lib: typeof import("@chvor/pc-agent");
 
-  constructor(lib: typeof import("@chvor/pc-agent"), screenSize: { width: number; height: number }) {
+  constructor(
+    lib: typeof import("@chvor/pc-agent"),
+    screenSize: { width: number; height: number }
+  ) {
     this.lib = lib;
     this.hostname = osHostname();
     this.os = `${osType()} ${osPlatform()}`;
     this.screenSize = screenSize;
+    this.coordinateSize = computeCoordinateSize(screenSize);
   }
 
   async captureScreen(): Promise<PcScreenshot> {
@@ -439,6 +604,8 @@ class LocalBackend implements PcBackend {
       data: result.data,
       width: result.width,
       height: result.height,
+      sourceWidth: result.sourceWidth,
+      sourceHeight: result.sourceHeight,
       timestamp: new Date().toISOString(),
       mimeType: result.mimeType,
     };
@@ -471,7 +638,9 @@ export async function initLocalBackend(): Promise<boolean> {
     const lib = await import("@chvor/pc-agent");
     const screenSize = await lib.getScreenSize();
     _localBackend = new LocalBackend(lib, screenSize);
-    console.log(`[pc-control] local backend available: ${_localBackend.hostname} (${_localBackend.os}, ${screenSize.width}x${screenSize.height})`);
+    console.log(
+      `[pc-control] local backend available: ${_localBackend.hostname} (${_localBackend.os}, ${screenSize.width}x${screenSize.height})`
+    );
     return true;
   } catch (err) {
     console.log(`[pc-control] local backend not available: ${(err as Error).message}`);

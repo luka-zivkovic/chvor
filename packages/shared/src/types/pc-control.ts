@@ -22,7 +22,17 @@ export type PcActionType =
 
 export interface PcAction {
   action: PcActionType;
+  /**
+   * Coordinate in the screenshot coordinate space perceived by the agent.
+   * When provided, screenWidth/screenHeight should also be provided so the
+   * PC agent can map it back to native display coordinates without assuming
+   * a fixed 1024x768 image.
+   */
   coordinate?: [number, number];
+  /** Width of the screenshot/coordinate space used to choose coordinate. */
+  screenWidth?: number;
+  /** Height of the screenshot/coordinate space used to choose coordinate. */
+  screenHeight?: number;
   text?: string;
   /** Key combo e.g. "ctrl+c", "alt+tab" */
   keys?: string;
@@ -49,6 +59,8 @@ export interface PcAgentInfo {
   id: string;
   hostname: string;
   os: string;
+  /** Remote pc-agent protocol version. Missing/1 means legacy coordinate mode. */
+  protocolVersion?: number;
   /** Native screen resolution */
   screenWidth: number;
   screenHeight: number;
@@ -59,8 +71,12 @@ export interface PcAgentInfo {
 export interface PcScreenshot {
   /** Base64-encoded image data */
   data: string;
+  /** Width/height of the image returned to the AI/UI. */
   width: number;
   height: number;
+  /** Native captured desktop size before resizing, when known. */
+  sourceWidth?: number;
+  sourceHeight?: number;
   timestamp: string;
   mimeType?: "image/jpeg" | "image/png";
 }
@@ -136,8 +152,25 @@ export type PcServerMessage =
 
 /** Messages sent from PC agent to the server */
 export type PcAgentMessage =
-  | { type: "hello"; hostname: string; os: string; screenWidth: number; screenHeight: number }
-  | { type: "screenshot"; id: string; data: string; width: number; height: number; mimeType?: string }
+  | {
+      type: "hello";
+      hostname: string;
+      os: string;
+      screenWidth: number;
+      screenHeight: number;
+      protocolVersion?: number;
+    }
+  | {
+      type: "screenshot";
+      id: string;
+      data: string;
+      width: number;
+      height: number;
+      sourceWidth?: number;
+      sourceHeight?: number;
+      mimeType?: string;
+    }
+  | { type: "screenshot.error"; id: string; error: string }
   | { type: "action.result"; id: string; success: boolean; error?: string }
   | { type: "shell.result"; id: string; stdout: string; stderr: string; exitCode: number }
   | { type: "a11y_tree"; id: string; tree: A11yTree | null }
