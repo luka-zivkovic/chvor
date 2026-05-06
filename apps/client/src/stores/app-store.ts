@@ -391,13 +391,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ streamingContent: null, streamingTools: [], pendingModelInfo: null });
         const messageId = event.data.messageId ?? crypto.randomUUID();
         const trace = get().memoryTrace;
+        const media = event.data.media?.filter((m) => !m.internal);
         get().addMessage({
           id: messageId,
           role: event.data.role,
           content: event.data.content,
           channelType: "web",
           timestamp: event.data.timestamp,
-          ...(event.data.media?.length ? { media: event.data.media } : {}),
+          ...(media?.length ? { media } : {}),
           ...(modelInfo ? { modelUsed: modelInfo } : {}),
         });
         // Persist memory retrieval trace and tool trace for this message
@@ -486,7 +487,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         } else if (execEvent.type === "skill.completed" || execEvent.type === "tool.completed") {
           const prefix = execEvent.type === "skill.completed" ? "skill-" : "tool-";
           const id = execEvent.data.nodeId.replace(prefix, "");
-          const media = execEvent.data.media;
+          const media = execEvent.data.media?.filter((m) => !m.internal);
           const outputStr =
             typeof execEvent.data.output === "string"
               ? execEvent.data.output

@@ -130,11 +130,13 @@ The AI gets three tools when PC control is enabled:
 | `native__pc_observe` | See the screen + list of UI elements (accessibility tree).     |
 | `native__pc_shell`   | Run a shell command on the target PC.                          |
 
+`native__pc_do` returns a post-action screenshot after a short settle delay when it resolved at least one action and screen capture is available, so the AI can often verify what changed without doing a separate observe first. If the task failed or no action could be resolved, any screenshot is diagnostic rather than proof of change.
+
 ### Typical workflow
 
 1. AI calls `native__pc_observe` — gets a screenshot and the accessibility tree
 2. AI calls `native__pc_do` with `"click the Save button"` — resolved via a11y tree (Layer 2)
-3. AI calls `native__pc_observe` again — verifies the result
+3. AI checks the post-action screenshot returned by `native__pc_do`; call `native__pc_observe` again only if the screenshot is missing, ambiguous, or still transitioning
 4. For file operations, AI uses `native__pc_shell` with `"ls -la"` — always prompts for approval
 
 ### Multiple PCs

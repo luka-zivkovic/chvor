@@ -106,11 +106,13 @@ The server exposes three tools to the AI:
 | `native__pc_observe` | Returns a screenshot + the UI accessibility tree (list of visible elements). |
 | `native__pc_shell`   | Execute a shell command on the target PC. Always requires approval.          |
 
+`native__pc_do` returns a post-action screenshot after a short settle delay when at least one action was resolved and capture is available, giving the agent immediate visual feedback after each task. If the task failed or no action could be resolved, any screenshot is diagnostic rather than proof of change.
+
 ### Typical workflow
 
 1. AI calls `native__pc_observe` to see what's on screen
 2. AI calls `native__pc_do` with "click the Submit button" — pipeline resolves via a11y or vision
-3. AI calls `native__pc_observe` again to verify the result
+3. AI checks the post-action screenshot returned by `native__pc_do`; observe again only when the screenshot is missing, ambiguous, or still transitioning
 
 ## Library API
 

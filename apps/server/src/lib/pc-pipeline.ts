@@ -27,6 +27,12 @@ export interface PipelineContext {
   safetyLevel: PcSafetyLevel;
 }
 
+const POST_ACTION_SETTLE_MS = 300;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ---------------------------------------------------------------------------
 // Pipeline execution
 // ---------------------------------------------------------------------------
@@ -62,28 +68,19 @@ export async function executePcTask(
       data: { targetId, layer: "action-router", status: "success" },
     });
 
-    const errors: string[] = [];
-    let executedCount = 0;
-    for (const action of routedActions) {
-      const result = await backend.executeAction(action);
-      if (!result.success && result.error) {
-        errors.push(result.error);
-        break;
-      }
-      executedCount++;
-    }
-
-    const success = errors.length === 0;
+    const execution = await executeActionSequence(routedActions, backend);
+    const success = execution.success;
     ctx.emit({ type: "pc.pipeline.complete", data: { targetId, layer: "action-router", success } });
 
     return {
       success,
       layerUsed: "action-router",
       summary: success
-        ? `Executed ${executedCount} action(s) via pattern matching.`
-        : `Action router matched but execution failed after ${executedCount}/${routedActions.length} action(s): ${errors.join(", ")}`,
+        ? `Executed ${execution.executedCount} action(s) via pattern matching.`
+        : `Action router matched but execution failed after ${execution.executedCount}/${routedActions.length} action(s): ${execution.error}`,
       actions: routedActions,
-      error: success ? undefined : errors.join(", "),
+      screenshot: execution.screenshot,
+      error: success ? undefined : execution.error,
     };
   }
 
@@ -135,28 +132,19 @@ export async function executePcTask(
           data: { targetId, layer: "a11y", status: "success" },
         });
 
-        const errors: string[] = [];
-        let executedCount = 0;
-        for (const action of actions) {
-          const result = await backend.executeAction(action);
-          if (!result.success && result.error) {
-            errors.push(result.error);
-            break;
-          }
-          executedCount++;
-        }
-
-        const success = errors.length === 0;
+        const execution = await executeActionSequence(actions, backend);
+        const success = execution.success;
         ctx.emit({ type: "pc.pipeline.complete", data: { targetId, layer: "a11y", success } });
 
         return {
           success,
           layerUsed: "a11y",
           summary: success
-            ? `Executed ${executedCount} action(s) via accessibility tree.`
-            : `A11y layer resolved actions but execution failed after ${executedCount}/${actions.length} action(s): ${errors.join(", ")}`,
+            ? `Executed ${execution.executedCount} action(s) via accessibility tree.`
+            : `A11y layer resolved actions but execution failed after ${execution.executedCount}/${actions.length} action(s): ${execution.error}`,
           actions,
-          error: success ? undefined : errors.join(", "),
+          screenshot: execution.screenshot,
+          error: success ? undefined : execution.error,
         };
       }
     }
@@ -189,29 +177,19 @@ export async function executePcTask(
   if (visionActions.length > 0) {
     ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "vision", status: "success" } });
 
-    const errors: string[] = [];
-    let executedCount = 0;
-    for (const action of visionActions) {
-      const result = await backend.executeAction(action);
-      if (!result.success && result.error) {
-        errors.push(result.error);
-        break;
-      }
-      executedCount++;
-    }
-
-    const success = errors.length === 0;
+    const execution = await executeActionSequence(visionActions, backend);
+    const success = execution.success;
     ctx.emit({ type: "pc.pipeline.complete", data: { targetId, layer: "vision", success } });
 
     return {
       success,
       layerUsed: "vision",
       summary: success
-        ? `Executed ${executedCount} action(s) via vision analysis.`
-        : `Vision layer resolved actions but execution failed after ${executedCount}/${visionActions.length} action(s): ${errors.join(", ")}`,
+        ? `Executed ${execution.executedCount} action(s) via vision analysis.`
+        : `Vision layer resolved actions but execution failed after ${execution.executedCount}/${visionActions.length} action(s): ${execution.error}`,
       actions: visionActions,
-      screenshot,
-      error: success ? undefined : errors.join(", "),
+      screenshot: execution.screenshot,
+      error: success ? undefined : execution.error,
     };
   }
 
@@ -228,6 +206,55 @@ export async function executePcTask(
     actions: [],
     screenshot,
     error: "No layer could resolve the task into actions.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Action execution + post-action observation
+// ---------------------------------------------------------------------------
+
+interface ActionSequenceExecution {
+  success: boolean;
+  executedCount: number;
+  error?: string;
+  screenshot?: PcScreenshot;
+}
+
+async function executeActionSequence(
+  actions: PcAction[],
+  backend: PcBackend
+): Promise<ActionSequenceExecution> {
+  const errors: string[] = [];
+  let executedCount = 0;
+
+  for (const action of actions) {
+    try {
+      const result = await backend.executeAction(action);
+      if (!result.success) {
+        errors.push(result.error ?? "Unknown action execution error");
+        break;
+      }
+      executedCount++;
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+      break;
+    }
+  }
+
+  if (actions.length > 0) {
+    await delay(POST_ACTION_SETTLE_MS);
+  }
+
+  const screenshot = await backend.captureScreen().catch((err) => {
+    console.warn("[pc-pipeline] post-action screenshot failed:", (err as Error).message);
+    return undefined;
+  });
+
+  return {
+    success: errors.length === 0,
+    executedCount,
+    error: errors.length > 0 ? errors.join(", ") : undefined,
+    screenshot,
   };
 }
 

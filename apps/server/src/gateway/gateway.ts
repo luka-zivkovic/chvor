@@ -18,6 +18,10 @@ import { redactSensitiveData, stripToolAnnotations } from "../lib/sensitive-filt
 import { getSessionLifecycleConfig, resolveResetPolicy, getChannelPolicy } from "../db/config-store.ts";
 import { resetSession } from "../lib/session-reset.ts";
 
+function publicMedia(media?: MediaArtifact[]): MediaArtifact[] {
+  return media?.filter((m) => !m.internal) ?? [];
+}
+
 export class Gateway extends EventEmitter {
   private channels = new Map<string, ChannelAdapter>();
   private sessions = new SessionManager();
@@ -216,7 +220,7 @@ export class Gateway extends EventEmitter {
       });
       responseText = redactSensitiveData(stripToolAnnotations(result.text));
       actions = result.actions;
-      allMedia = result.media ?? [];
+      allMedia = publicMedia(result.media);
       totalMessages = result.totalMessages;
       fittedMessages = result.fittedMessages;
       modelUsed = result.modelUsed;

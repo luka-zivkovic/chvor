@@ -7,6 +7,10 @@ import { storeMediaFromBase64 } from "../media-store.ts";
 /** PC control tools whose media (screenshots) should not be shown in the chat UI */
 export const PC_INTERNAL_MEDIA_TOOLS = new Set(["native__pc_do", "native__pc_observe"]);
 
+type ToolResultContentPart =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType?: string };
+
 /** Match an http_fetch URL to a saved non-LLM credential by domain/type scoring. */
 export function findCredentialForUrl(url: string): { id: string; name: string } | null {
   try {
@@ -59,31 +63,82 @@ export function extractMedia(rawResult: unknown, opts?: { internal?: boolean }):
 
   const media: MediaArtifact[] = [];
   for (const item of obj.content) {
-    if (item && typeof item === "object" && item.type === "image" && typeof item.data === "string" && typeof item.mimeType === "string") {
+    if (
+      item &&
+      typeof item === "object" &&
+      item.type === "image" &&
+      typeof item.data === "string" &&
+      typeof item.mimeType === "string"
+    ) {
       try {
         const artifact = storeMediaFromBase64(item.data, item.mimeType);
         if (opts?.internal) artifact.internal = true;
         media.push(artifact);
       } catch (err) {
-        console.error("[media] failed to store artifact:", err instanceof Error ? err.message : err);
+        console.error(
+          "[media] failed to store artifact:",
+          err instanceof Error ? err.message : err
+        );
       }
     }
   }
   return media;
 }
 
-/** Strip base64 image data from tool results before sending back to LLM context */
-export function sanitizeResultForLLM(result: unknown, media?: MediaArtifact[]): unknown {
-  if (!media?.length || result == null || typeof result !== "object") return result;
+/** Media safe to expose in chat/channel payloads. Internal screenshots stay LLM-only. */
+export function publicMedia(media?: MediaArtifact[]): MediaArtifact[] {
+  return media?.filter((m) => !m.internal) ?? [];
+}
+
+/**
+ * Convert MCP/native .content arrays to AI SDK multipart tool-result content.
+ * AI SDK v4 only forwards images to providers when they are in experimental_content.
+ */
+export function toolResultContentForLLM(
+  rawResult: unknown,
+  opts?: { includeImages?: boolean }
+): ToolResultContentPart[] | undefined {
+  if (rawResult == null || typeof rawResult !== "object") return undefined;
+  const obj = rawResult as Record<string, unknown>;
+  if (!Array.isArray(obj.content)) return undefined;
+
+  const content: ToolResultContentPart[] = [];
+  for (const item of obj.content) {
+    if (!item || typeof item !== "object") continue;
+    const part = item as Record<string, unknown>;
+    if (part.type === "text" && typeof part.text === "string") {
+      content.push({ type: "text", text: part.text });
+    } else if (
+      opts?.includeImages &&
+      part.type === "image" &&
+      typeof part.data === "string"
+    ) {
+      content.push({
+        type: "image",
+        data: part.data,
+        ...(typeof part.mimeType === "string" ? { mimeType: part.mimeType } : {}),
+      });
+    }
+  }
+
+  return content.length > 0 ? content : undefined;
+}
+
+/** Strip base64 image data from tool results before sending back to LLM context. */
+export function sanitizeResultForLLM(result: unknown, _media?: MediaArtifact[]): unknown {
+  if (result == null || typeof result !== "object") return result;
   const obj = result as Record<string, unknown>;
   if (!Array.isArray(obj.content)) return result;
   return {
     ...obj,
-    content: (obj.content as Array<Record<string, unknown>>).map((item) =>
-      item?.type === "image"
-        ? { type: "text", text: `[image: ${media.find((m) => m.mimeType === item.mimeType)?.filename ?? item.mimeType}]` }
-        : item
-    ),
+    content: (obj.content as Array<Record<string, unknown>>).map((item) => {
+      if (item?.type !== "image") return item;
+      const mimeLabel = typeof item.mimeType === "string" ? item.mimeType : "image";
+      return {
+        type: "text",
+        text: `[image: ${mimeLabel}]`,
+      };
+    }),
   };
 }
 
