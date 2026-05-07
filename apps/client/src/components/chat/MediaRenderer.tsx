@@ -5,11 +5,12 @@ interface Props {
 }
 
 export function MediaRenderer({ media }: Props) {
-  if (!media.length) return null;
+  const visibleMedia = media.filter((m) => !m.internal);
+  if (!visibleMedia.length) return null;
 
   return (
     <div className="flex flex-wrap gap-2 mt-2">
-      {media.map((m) => {
+      {visibleMedia.map((m) => {
         switch (m.mediaType) {
           case "image":
             return (

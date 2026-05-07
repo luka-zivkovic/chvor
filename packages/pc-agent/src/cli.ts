@@ -2,22 +2,32 @@
 
 import WebSocket from "ws";
 import { hostname, platform, type } from "node:os";
-import { captureScreen, getScreenSize, executeAction, executeShellCommand, queryA11yTree } from "./lib/index.ts";
+import {
+  captureScreen,
+  getScreenSize,
+  executeAction,
+  executeShellCommand,
+  queryA11yTree,
+} from "./lib/index.ts";
+
+const PC_AGENT_PROTOCOL_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // CLI args
 // ---------------------------------------------------------------------------
 
 const args = process.argv.slice(2);
-const serverUrlArg = args.find((a) => a.startsWith("--server="))?.split("=")[1]
-  ?? args[args.indexOf("--server") + 1]
-  ?? "ws://localhost:3001/ws/pc-agent";
+const serverUrlArg =
+  args.find((a) => a.startsWith("--server="))?.split("=")[1] ??
+  args[args.indexOf("--server") + 1] ??
+  "ws://localhost:3001/ws/pc-agent";
 
-const tokenArg = args.find((a) => a.startsWith("--token="))?.split("=")[1]
-  ?? args[args.indexOf("--token") + 1]
-  ?? process.env.CHVOR_PC_AGENT_TOKEN
-  ?? process.env.CHVOR_TOKEN
-  ?? undefined;
+const tokenArg =
+  args.find((a) => a.startsWith("--token="))?.split("=")[1] ??
+  args[args.indexOf("--token") + 1] ??
+  process.env.CHVOR_PC_AGENT_TOKEN ??
+  process.env.CHVOR_TOKEN ??
+  undefined;
 
 const serverUrl = tokenArg
   ? `${serverUrlArg}${serverUrlArg.includes("?") ? "&" : "?"}token=${tokenArg}`
@@ -29,13 +39,46 @@ console.log(`[pc-agent] connecting to ${serverUrlArg}...`);
 // Types (mirroring @chvor/shared PcServerMessage / PcAgentMessage)
 // ---------------------------------------------------------------------------
 
-interface ServerActionMsg { type: "action"; id: string; action: { action: string; coordinate?: [number, number]; text?: string; keys?: string; direction?: string; amount?: number; duration?: number } }
-interface ServerScreenshotMsg { type: "screenshot"; id: string }
-interface ServerShellMsg { type: "shell"; id: string; command: string; cwd?: string }
-interface ServerA11yTreeMsg { type: "a11y_tree"; id: string; maxDepth?: number }
-interface ServerPingMsg { type: "ping" }
+interface ServerActionMsg {
+  type: "action";
+  id: string;
+  action: {
+    action: string;
+    coordinate?: [number, number];
+    screenWidth?: number;
+    screenHeight?: number;
+    text?: string;
+    keys?: string;
+    direction?: string;
+    amount?: number;
+    duration?: number;
+  };
+}
+interface ServerScreenshotMsg {
+  type: "screenshot";
+  id: string;
+}
+interface ServerShellMsg {
+  type: "shell";
+  id: string;
+  command: string;
+  cwd?: string;
+}
+interface ServerA11yTreeMsg {
+  type: "a11y_tree";
+  id: string;
+  maxDepth?: number;
+}
+interface ServerPingMsg {
+  type: "ping";
+}
 
-type ServerMessage = ServerActionMsg | ServerScreenshotMsg | ServerShellMsg | ServerA11yTreeMsg | ServerPingMsg;
+type ServerMessage =
+  | ServerActionMsg
+  | ServerScreenshotMsg
+  | ServerShellMsg
+  | ServerA11yTreeMsg
+  | ServerPingMsg;
 
 // ---------------------------------------------------------------------------
 // WebSocket connection with auto-reconnect
@@ -64,6 +107,7 @@ function connect(): void {
       type: "hello",
       hostname: hostname(),
       os: `${type()} ${platform()}`,
+      protocolVersion: PC_AGENT_PROTOCOL_VERSION,
       screenWidth: width,
       screenHeight: height,
     });
@@ -92,14 +136,15 @@ function connect(): void {
             data: screenshot.data,
             width: screenshot.width,
             height: screenshot.height,
+            sourceWidth: screenshot.sourceWidth,
+            sourceHeight: screenshot.sourceHeight,
             mimeType: screenshot.mimeType,
           });
         } catch (err) {
           console.error("[pc-agent] screenshot failed:", err);
           send({
-            type: "action.result",
+            type: "screenshot.error",
             id: msg.id,
-            success: false,
             error: (err as Error).message,
           });
         }
@@ -166,7 +211,9 @@ function scheduleReconnect(): void {
   if (reconnectTimer) return;
   const delay = Math.min(RECONNECT_BASE_DELAY * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY);
   reconnectAttempts++;
-  console.log(`[pc-agent] reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${reconnectAttempts})...`);
+  console.log(
+    `[pc-agent] reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${reconnectAttempts})...`
+  );
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connect();

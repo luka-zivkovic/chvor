@@ -10,6 +10,8 @@ export interface PcBackend {
   readonly hostname: string;
   readonly os: string;
   readonly screenSize: { width: number; height: number };
+  /** Coordinate space remote/local input actions expect for screenshot/a11y coordinates. */
+  readonly coordinateSize: { width: number; height: number };
 
   /** Capture the screen as a compressed image */
   captureScreen(): Promise<PcScreenshot>;
@@ -18,7 +20,10 @@ export interface PcBackend {
   executeAction(action: PcAction): Promise<PcActionResult>;
 
   /** Execute a shell command */
-  executeShell(command: string, cwd?: string): Promise<{ stdout: string; stderr: string; exitCode: number }>;
+  executeShell(
+    command: string,
+    cwd?: string
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
   /** Query the OS accessibility tree. Returns null if not available. */
   queryA11yTree(opts?: { maxDepth?: number }): Promise<A11yTree | null>;

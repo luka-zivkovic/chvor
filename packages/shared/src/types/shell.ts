@@ -7,6 +7,8 @@ export interface CommandApprovalRequest {
   tier: CommandTier;
   classifiedCommands: Array<{ command: string; tier: CommandTier }>;
   timestamp: string;
+  /** When false, approval UI must not offer a persistent trusted-rule shortcut. */
+  allowAlwaysAllow?: boolean;
 }
 
 export interface CommandApprovalResponse {

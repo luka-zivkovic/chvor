@@ -30,7 +30,7 @@ import { computeTopicHash, updateAccessLogTopics, predictNextMemories } from "./
 import { getCognitiveMemoryConfig } from "../db/config-store.ts";
 import { getPersona, isCapabilityEnabled, getExtendedThinking, getBrainConfig } from "../db/config-store.ts";
 import { buildSystemPrompt } from "./orchestrator/system-prompt.ts";
-import { PC_INTERNAL_MEDIA_TOOLS, findCredentialForUrl, extractMedia, sanitizeResultForLLM, summarizeToolResult } from "./orchestrator/tool-result.ts";
+import { PC_INTERNAL_MEDIA_TOOLS, findCredentialForUrl, extractMedia, publicMedia, sanitizeResultForLLM, summarizeToolResult, toolResultContentForLLM } from "./orchestrator/tool-result.ts";
 import { beginAction, finishAction, failAction } from "./event-bus.ts";
 import type { ActorType } from "@chvor/shared";
 import { resolveSkillBag, summarizeScope, filterTools as filterToolsByScope } from "./tool-groups.ts";
@@ -1190,25 +1190,28 @@ export async function executeConversation(
             preferredUsageContext,
           });
           const nativeMedia = extractMedia(nativeResult, PC_INTERNAL_MEDIA_TOOLS.has(tc.toolName) ? { internal: true } : undefined);
-          // Persist observation with secret-safe payload for credential tools
+          const sanitizedNativeResult = sanitizeResultForLLM(nativeResult, nativeMedia);
+          const publicNativeMedia = publicMedia(nativeMedia);
+          // Persist observation with secret-safe payload for credential tools and without
+          // raw internal screenshots for PC-control tools.
           finishAction(
             nativeActionHandle,
             tc.toolName === "native__use_credential"
               ? { content: [{ type: "text", text: "Credential retrieved." }] }
-              : nativeResult
+              : sanitizedNativeResult
           );
           if (matchedIntegration) {
             emit({ type: "skill.completed", data: { nodeId: `api-${matchedIntegration.id}`, output: "" } });
           } else if (target) {
             const nodePrefix = target.kind === "tool" ? "tool" : "skill";
-            // Never broadcast raw secrets from credential tools to WS clients
+            // Never broadcast raw secrets or raw internal screenshots to WS clients.
             const SECRET_TOOLS = new Set(["native__use_credential"]);
             const safeOutput = SECRET_TOOLS.has(tc.toolName)
               ? { content: [{ type: "text", text: "Credential retrieved." }] }
-              : nativeResult;
+              : sanitizedNativeResult;
             emit({
               type: target.kind === "tool" ? "tool.completed" : "skill.completed",
-              data: { nodeId: `${nodePrefix}-${target.id}`, output: safeOutput, ...(nativeMedia.length > 0 ? { media: nativeMedia } : {}) },
+              data: { nodeId: `${nodePrefix}-${target.id}`, output: safeOutput, ...(publicNativeMedia.length > 0 ? { media: publicNativeMedia } : {}) },
             } as ExecutionEvent);
           }
           if (tc.toolName === "native__create_skill" || tc.toolName === "native__create_workflow") {
@@ -1381,11 +1384,13 @@ export async function executeConversation(
       try {
         const mcpResult = await mcpManager.callTool(toolId, toolName, tc.args);
         const mcpMedia = extractMedia(mcpResult);
+        const sanitizedMcpResult = sanitizeResultForLLM(mcpResult, mcpMedia);
+        const publicMcpMedia = publicMedia(mcpMedia);
 
-        finishAction(mcpActionHandle, mcpResult);
+        finishAction(mcpActionHandle, sanitizedMcpResult);
         emit({
           type: "tool.completed",
-          data: { nodeId: `tool-${toolId}`, output: mcpResult, ...(mcpMedia.length > 0 ? { media: mcpMedia } : {}) },
+          data: { nodeId: `tool-${toolId}`, output: sanitizedMcpResult, ...(publicMcpMedia.length > 0 ? { media: publicMcpMedia } : {}) },
         });
 
         toolResults.push({
@@ -1420,11 +1425,13 @@ export async function executeConversation(
 
     // Accumulate tool action summaries
     for (const tr of toolResults) {
+      const actionResult = sanitizeResultForLLM(tr.result, tr.media);
+      const actionMedia = publicMedia(tr.media);
       allActions.push({
         tool: tr.toolName,
-        summary: summarizeToolResult(tr.result, tr.media),
+        summary: summarizeToolResult(actionResult, actionMedia),
         timestamp: new Date().toISOString(),
-        ...(tr.media?.length ? { media: tr.media } : {}),
+        ...(actionMedia.length ? { media: actionMedia } : {}),
       });
     }
 
@@ -1526,12 +1533,18 @@ export async function executeConversation(
       },
       {
         role: "tool" as const,
-        content: toolResults.map((tr) => ({
-          type: "tool-result" as const,
-          toolCallId: tr.toolCallId,
-          toolName: tr.toolName,
-          result: sanitizeResultForLLM(tr.result, tr.media),
-        })),
+        content: toolResults.map((tr) => {
+          const experimentalContent = toolResultContentForLLM(tr.result, {
+            includeImages: true,
+          });
+          return {
+            type: "tool-result" as const,
+            toolCallId: tr.toolCallId,
+            toolName: tr.toolName,
+            result: sanitizeResultForLLM(tr.result, tr.media),
+            ...(experimentalContent ? { experimental_content: experimentalContent } : {}),
+          };
+        }),
       },
     ];
 

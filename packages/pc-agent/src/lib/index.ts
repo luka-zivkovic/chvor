@@ -1,6 +1,12 @@
 // Screen capture
-export { captureScreen, getScreenSize, TARGET_WIDTH, TARGET_HEIGHT } from "./screen.ts";
-export type { CapturedScreenshot } from "./screen.ts";
+export {
+  captureScreen,
+  computeCoordinateSpace,
+  getScreenSize,
+  TARGET_WIDTH,
+  TARGET_HEIGHT,
+} from "./screen.ts";
+export type { CapturedScreenshot, CoordinateSpace } from "./screen.ts";
 
 // Input simulation
 export { executeAction, bboxToCoordinate } from "./input.ts";

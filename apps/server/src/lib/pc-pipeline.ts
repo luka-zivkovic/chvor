@@ -1,4 +1,11 @@
-import type { PcAction, PcTaskResult, PcSafetyLevel, A11yTree } from "@chvor/shared";
+import type {
+  PcAction,
+  PcTaskResult,
+  PcSafetyLevel,
+  A11yTree,
+  PcScreenshot,
+  PipelineLayer,
+} from "@chvor/shared";
 import type { PcBackend } from "./pc-backend.ts";
 import type { ExecutionEvent } from "@chvor/shared";
 import { tryActionRouter } from "./action-patterns.ts";
@@ -16,12 +23,33 @@ export type EventEmitter = (event: ExecutionEvent) => void;
  * @param image  - Optional base64 image for vision calls
  * @returns The LLM's text response
  */
-export type LlmCallFn = (prompt: string, image?: { data: string; mimeType: string }) => Promise<string>;
+export type LlmCallFn = (
+  prompt: string,
+  image?: { data: string; mimeType: string }
+) => Promise<string>;
 
 export interface PipelineContext {
   emit: EventEmitter;
   llmCall: LlmCallFn;
   safetyLevel: PcSafetyLevel;
+  authorizeActions?: (
+    actions: PcAction[],
+    layer: PipelineLayer
+  ) => Promise<{ allowed: boolean; error?: string }>;
+}
+
+const POST_ACTION_SETTLE_MS = 300;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function authorizeActions(
+  actions: PcAction[],
+  layer: PipelineLayer,
+  ctx: PipelineContext
+): Promise<{ allowed: boolean; error?: string }> {
+  return ctx.authorizeActions ? ctx.authorizeActions(actions, layer) : { allowed: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -47,35 +75,53 @@ export async function executePcTask(
   ctx.emit({ type: "pc.pipeline.start", data: { targetId, task } });
 
   // Layer 1: Action Router (zero LLM)
-  ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "action-router", status: "trying" } });
+  ctx.emit({
+    type: "pc.pipeline.layer",
+    data: { targetId, layer: "action-router", status: "trying" },
+  });
   const routedActions = tryActionRouter(task);
 
   if (routedActions) {
-    ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "action-router", status: "success" } });
+    ctx.emit({
+      type: "pc.pipeline.layer",
+      data: { targetId, layer: "action-router", status: "success" },
+    });
 
-    const errors: string[] = [];
-    let executedCount = 0;
-    for (const action of routedActions) {
-      const result = await backend.executeAction(action);
-      if (!result.success && result.error) { errors.push(result.error); break; }
-      executedCount++;
+    const authorization = await authorizeActions(routedActions, "action-router", ctx);
+    if (!authorization.allowed) {
+      ctx.emit({
+        type: "pc.pipeline.complete",
+        data: { targetId, layer: "action-router", success: false },
+      });
+      return {
+        success: false,
+        layerUsed: "action-router",
+        summary: "Action router resolved actions, but safety policy denied execution.",
+        actions: routedActions,
+        error: authorization.error ?? "Denied by PC safety policy.",
+      };
     }
 
-    const success = errors.length === 0;
+    const execution = await executeActionSequence(routedActions, backend);
+    const success = execution.success;
     ctx.emit({ type: "pc.pipeline.complete", data: { targetId, layer: "action-router", success } });
 
     return {
       success,
       layerUsed: "action-router",
       summary: success
-        ? `Executed ${executedCount} action(s) via pattern matching.`
-        : `Action router matched but execution failed after ${executedCount}/${routedActions.length} action(s): ${errors.join(", ")}`,
+        ? `Executed ${execution.executedCount} action(s) via pattern matching.`
+        : `Action router matched but execution failed after ${execution.executedCount}/${routedActions.length} action(s): ${execution.error}`,
       actions: routedActions,
-      error: success ? undefined : errors.join(", "),
+      screenshot: execution.screenshot,
+      error: success ? undefined : execution.error,
     };
   }
 
-  ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "action-router", status: "fallthrough" } });
+  ctx.emit({
+    type: "pc.pipeline.layer",
+    data: { targetId, layer: "action-router", status: "fallthrough" },
+  });
 
   // Layer 2: Accessibility Tree (text-only LLM)
   ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "a11y", status: "trying" } });
@@ -107,30 +153,47 @@ export async function executePcTask(
     if (serialized) {
       const a11yPrompt = buildA11yPrompt(task, serialized);
       const response = await ctx.llmCall(a11yPrompt);
-      const actions = await parseActionsFromLlm(response, a11yTree, backend.screenSize);
+      const actions = await parseActionsFromLlm(
+        response,
+        a11yTree,
+        backend.screenSize,
+        backend.coordinateSize
+      );
 
       if (actions) {
-        ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "a11y", status: "success" } });
+        ctx.emit({
+          type: "pc.pipeline.layer",
+          data: { targetId, layer: "a11y", status: "success" },
+        });
 
-        const errors: string[] = [];
-        let executedCount = 0;
-        for (const action of actions) {
-          const result = await backend.executeAction(action);
-          if (!result.success && result.error) { errors.push(result.error); break; }
-          executedCount++;
+        const authorization = await authorizeActions(actions, "a11y", ctx);
+        if (!authorization.allowed) {
+          ctx.emit({
+            type: "pc.pipeline.complete",
+            data: { targetId, layer: "a11y", success: false },
+          });
+          return {
+            success: false,
+            layerUsed: "a11y",
+            summary: "A11y layer resolved actions, but safety policy denied execution.",
+            actions,
+            error: authorization.error ?? "Denied by PC safety policy.",
+          };
         }
 
-        const success = errors.length === 0;
+        const execution = await executeActionSequence(actions, backend);
+        const success = execution.success;
         ctx.emit({ type: "pc.pipeline.complete", data: { targetId, layer: "a11y", success } });
 
         return {
           success,
           layerUsed: "a11y",
           summary: success
-            ? `Executed ${executedCount} action(s) via accessibility tree.`
-            : `A11y layer resolved actions but execution failed after ${executedCount}/${actions.length} action(s): ${errors.join(", ")}`,
+            ? `Executed ${execution.executedCount} action(s) via accessibility tree.`
+            : `A11y layer resolved actions but execution failed after ${execution.executedCount}/${actions.length} action(s): ${execution.error}`,
           actions,
-          error: success ? undefined : errors.join(", "),
+          screenshot: execution.screenshot,
+          error: success ? undefined : execution.error,
         };
       }
     }
@@ -148,43 +211,56 @@ export async function executePcTask(
   ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "vision", status: "trying" } });
 
   const screenshot = await backend.captureScreen();
-  // Vision prompt must use the TARGET resolution (1024x768) — that's the actual
-  // screenshot size. Using native screenSize would cause the LLM to output
-  // coordinates in the wrong space, making every click miss its target.
-  const visionPrompt = buildVisionPrompt(task, { width: 1024, height: 768 });
+  // Prompt with the actual screenshot dimensions. The pc-agent maps these
+  // perceived coordinates back to native display coordinates during execution.
+  const visionPrompt = buildVisionPrompt(task, {
+    width: screenshot.width,
+    height: screenshot.height,
+  });
   const visionResponse = await ctx.llmCall(visionPrompt, {
     data: screenshot.data,
     mimeType: screenshot.mimeType ?? "image/jpeg",
   });
-  const visionActions = parseVisionActions(visionResponse);
+  const visionActions = parseVisionActions(visionResponse, screenshot);
 
   if (visionActions.length > 0) {
     ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "vision", status: "success" } });
 
-    const errors: string[] = [];
-    let executedCount = 0;
-    for (const action of visionActions) {
-      const result = await backend.executeAction(action);
-      if (!result.success && result.error) { errors.push(result.error); break; }
-      executedCount++;
+    const authorization = await authorizeActions(visionActions, "vision", ctx);
+    if (!authorization.allowed) {
+      ctx.emit({
+        type: "pc.pipeline.complete",
+        data: { targetId, layer: "vision", success: false },
+      });
+      return {
+        success: false,
+        layerUsed: "vision",
+        summary: "Vision layer resolved actions, but safety policy denied execution.",
+        actions: visionActions,
+        error: authorization.error ?? "Denied by PC safety policy.",
+      };
     }
 
-    const success = errors.length === 0;
+    const execution = await executeActionSequence(visionActions, backend);
+    const success = execution.success;
     ctx.emit({ type: "pc.pipeline.complete", data: { targetId, layer: "vision", success } });
 
     return {
       success,
       layerUsed: "vision",
       summary: success
-        ? `Executed ${executedCount} action(s) via vision analysis.`
-        : `Vision layer resolved actions but execution failed after ${executedCount}/${visionActions.length} action(s): ${errors.join(", ")}`,
+        ? `Executed ${execution.executedCount} action(s) via vision analysis.`
+        : `Vision layer resolved actions but execution failed after ${execution.executedCount}/${visionActions.length} action(s): ${execution.error}`,
       actions: visionActions,
-      screenshot,
-      error: success ? undefined : errors.join(", "),
+      screenshot: execution.screenshot,
+      error: success ? undefined : execution.error,
     };
   }
 
-  ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "vision", status: "fallthrough" } });
+  ctx.emit({
+    type: "pc.pipeline.layer",
+    data: { targetId, layer: "vision", status: "fallthrough" },
+  });
   ctx.emit({ type: "pc.pipeline.complete", data: { targetId, layer: "vision", success: false } });
 
   return {
@@ -194,6 +270,55 @@ export async function executePcTask(
     actions: [],
     screenshot,
     error: "No layer could resolve the task into actions.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Action execution + post-action observation
+// ---------------------------------------------------------------------------
+
+interface ActionSequenceExecution {
+  success: boolean;
+  executedCount: number;
+  error?: string;
+  screenshot?: PcScreenshot;
+}
+
+async function executeActionSequence(
+  actions: PcAction[],
+  backend: PcBackend
+): Promise<ActionSequenceExecution> {
+  const errors: string[] = [];
+  let executedCount = 0;
+
+  for (const action of actions) {
+    try {
+      const result = await backend.executeAction(action);
+      if (!result.success) {
+        errors.push(result.error ?? "Unknown action execution error");
+        break;
+      }
+      executedCount++;
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+      break;
+    }
+  }
+
+  if (actions.length > 0) {
+    await delay(POST_ACTION_SETTLE_MS);
+  }
+
+  const screenshot = await backend.captureScreen().catch((err) => {
+    console.warn("[pc-pipeline] post-action screenshot failed:", (err as Error).message);
+    return undefined;
+  });
+
+  return {
+    success: errors.length === 0,
+    executedCount,
+    error: errors.length > 0 ? errors.join(", ") : undefined,
+    screenshot,
   };
 }
 
@@ -246,14 +371,50 @@ Respond ONLY with the JSON array. No explanation.`;
 // ---------------------------------------------------------------------------
 
 const VALID_ACTIONS = new Set<string>([
-  "screenshot", "mouse_move", "left_click", "right_click",
-  "double_click", "middle_click", "type", "key", "scroll", "wait",
+  "screenshot",
+  "mouse_move",
+  "left_click",
+  "right_click",
+  "double_click",
+  "middle_click",
+  "type",
+  "key",
+  "scroll",
+  "wait",
 ]);
 
-function isValidCoordinate(c: unknown): c is [number, number] {
-  return Array.isArray(c) && c.length === 2
-    && typeof c[0] === "number" && typeof c[1] === "number"
-    && c[0] >= 0 && c[0] <= 10000 && c[1] >= 0 && c[1] <= 10000;
+function isValidCoordinate(
+  c: unknown,
+  bounds?: { width: number; height: number }
+): c is [number, number] {
+  return (
+    Array.isArray(c) &&
+    c.length === 2 &&
+    typeof c[0] === "number" &&
+    typeof c[1] === "number" &&
+    Number.isFinite(c[0]) &&
+    Number.isFinite(c[1]) &&
+    c[0] >= 0 &&
+    c[0] < (bounds?.width ?? 10000) &&
+    c[1] >= 0 &&
+    c[1] < (bounds?.height ?? 10000)
+  );
+}
+
+const COORDINATE_REQUIRED_ACTIONS = new Set<string>([
+  "mouse_move",
+  "left_click",
+  "right_click",
+  "double_click",
+  "middle_click",
+  "type",
+]);
+
+function coordinateRequired(action: string, layer: "a11y" | "vision"): boolean {
+  // A11y prompts intentionally allow {"action":"scroll","direction":"down"}
+  // without coordinates, matching pc-agent/action-router behavior. Vision
+  // prompts ask for scroll coordinates so require them there.
+  return COORDINATE_REQUIRED_ACTIONS.has(action) || (layer === "vision" && action === "scroll");
 }
 
 // ---------------------------------------------------------------------------
@@ -267,7 +428,8 @@ function isValidCoordinate(c: unknown): c is [number, number] {
 async function parseActionsFromLlm(
   response: string,
   tree: A11yTree,
-  screenSize: { width: number; height: number }
+  screenSize: { width: number; height: number },
+  coordinateSize: { width: number; height: number }
 ): Promise<PcAction[] | null> {
   const trimmed = response.trim();
   if (trimmed === "null") return null;
@@ -278,8 +440,6 @@ async function parseActionsFromLlm(
     const parsed = JSON.parse(jsonStr);
     if (!Array.isArray(parsed)) return null;
 
-    const { findNodeById, bboxToCoordinate } = await import("@chvor/pc-agent");
-
     const actions: PcAction[] = [];
     for (const item of parsed) {
       if (!item.action || !VALID_ACTIONS.has(item.action)) continue;
@@ -288,16 +448,27 @@ async function parseActionsFromLlm(
 
       // Resolve nodeId -> coordinate
       if (item.nodeId != null) {
+        const { findNodeById, bboxToCoordinate } = await import("@chvor/pc-agent");
         const node = findNodeById(tree, item.nodeId);
         if (node?.bbox) {
-          coordinate = bboxToCoordinate(node.bbox, screenSize.width, screenSize.height);
+          coordinate = bboxToCoordinate(
+            node.bbox,
+            screenSize.width,
+            screenSize.height,
+            coordinateSize.width,
+            coordinateSize.height
+          );
         }
       }
 
       const rawCoord = coordinate ?? item.coordinate;
+      const validCoordinate = isValidCoordinate(rawCoord, coordinateSize) ? rawCoord : undefined;
+      if (coordinateRequired(item.action, "a11y") && !validCoordinate) continue;
       const action: PcAction = {
         action: item.action,
-        coordinate: isValidCoordinate(rawCoord) ? rawCoord : undefined,
+        coordinate: validCoordinate,
+        screenWidth: validCoordinate ? coordinateSize.width : undefined,
+        screenHeight: validCoordinate ? coordinateSize.height : undefined,
         text: item.text,
         keys: item.keys,
         direction: item.direction,
@@ -309,13 +480,18 @@ async function parseActionsFromLlm(
 
     return actions.length > 0 ? actions : null;
   } catch (err) {
-    console.warn("[pc-pipeline] a11y response parse failed:", (err as Error).message, "| raw:", response.slice(0, 200));
+    console.warn(
+      "[pc-pipeline] a11y response parse failed:",
+      (err as Error).message,
+      "| raw:",
+      response.slice(0, 200)
+    );
     return null;
   }
 }
 
-/** Parse LLM response from the vision layer (coordinates already in 1024x768 space) */
-function parseVisionActions(response: string): PcAction[] {
+/** Parse LLM response from the vision layer (coordinates in the screenshot space). */
+function parseVisionActions(response: string, screenshot: PcScreenshot): PcAction[] {
   const trimmed = response.trim();
 
   try {
@@ -326,9 +502,15 @@ function parseVisionActions(response: string): PcAction[] {
     const actions: PcAction[] = [];
     for (const item of parsed) {
       if (!item.action || !VALID_ACTIONS.has(item.action)) continue;
+      const coordinate = isValidCoordinate(item.coordinate, screenshot)
+        ? item.coordinate
+        : undefined;
+      if (coordinateRequired(item.action, "vision") && !coordinate) continue;
       actions.push({
         action: item.action,
-        coordinate: isValidCoordinate(item.coordinate) ? item.coordinate : undefined,
+        coordinate,
+        screenWidth: coordinate ? screenshot.width : undefined,
+        screenHeight: coordinate ? screenshot.height : undefined,
         text: item.text,
         keys: item.keys,
         direction: item.direction,
@@ -338,7 +520,18 @@ function parseVisionActions(response: string): PcAction[] {
     }
     return actions;
   } catch (err) {
-    console.warn("[pc-pipeline] vision response parse failed:", (err as Error).message, "| raw:", response.slice(0, 200));
+    console.warn(
+      "[pc-pipeline] vision response parse failed:",
+      (err as Error).message,
+      "| raw:",
+      response.slice(0, 200)
+    );
     return [];
   }
 }
+
+/** Internal parser hooks for focused unit tests; production callers should use executePcTask. */
+export const __pcPipelineInternals = {
+  parseActionsFromLlm,
+  parseVisionActions,
+};

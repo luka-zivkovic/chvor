@@ -12,7 +12,15 @@ import type {
 } from "@chvor/shared";
 
 /* ─── Reusable toggle switch ─── */
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
+function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+}) {
   return (
     <button
       role="switch"
@@ -34,14 +42,19 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: () =
 
 const SAFETY_DESCRIPTIONS: Record<PcSafetyLevel, string> = {
   supervised: "Every action requires your approval before execution. Safest option.",
-  "semi-autonomous": "Known-safe actions (keyboard shortcuts, simple clicks) auto-execute. Complex or LLM-planned actions require approval.",
-  autonomous: "All actions execute without approval. Use only in trusted environments.",
+  "semi-autonomous":
+    "Only low-impact routed actions (scroll, wait, navigation/search keys) auto-execute. Typing, clicks, save/close, LLM-planned, and external side-effect intents require approval.",
+  autonomous:
+    "Actions execute without approval except blocked destructive PC intents. Use only in trusted environments.",
 };
 
 const SHELL_DESCRIPTIONS: Record<ShellApprovalMode, string> = {
-  always_approve: "All commands run immediately without asking. Only use if you trust the AI fully.",
-  dangerous_only: "Safe and moderate commands run freely. Dangerous commands (rm, sudo, etc.) require approval.",
-  moderate_plus: "Only safe read-only commands run freely. Anything that writes or modifies requires approval.",
+  always_approve:
+    "All commands run immediately without asking. Only use if you trust the AI fully.",
+  dangerous_only:
+    "Safe and moderate commands run freely. Dangerous commands (rm, sudo, etc.) require approval.",
+  moderate_plus:
+    "Only safe read-only commands run freely. Anything that writes or modifies requires approval.",
   block_all: "No shell commands can run. The AI cannot execute anything on your system.",
 };
 
@@ -206,7 +219,10 @@ export function PermissionsContent() {
       setSandboxConfig(result);
       // Refresh Docker status when toggling enabled
       if (updates.enabled !== undefined) {
-        api.sandboxConfig.status().then(setSandboxStatus).catch(() => {});
+        api.sandboxConfig
+          .status()
+          .then(setSandboxStatus)
+          .catch(() => {});
       }
     } catch {
       setSandboxConfig(prev);
@@ -315,7 +331,11 @@ export function PermissionsContent() {
                   Allow the AI to access localhost and private network addresses
                 </p>
               </div>
-              <Toggle checked={allowLocalhost} onChange={handleLocalhostToggle} label="Toggle localhost access" />
+              <Toggle
+                checked={allowLocalhost}
+                onChange={handleLocalhostToggle}
+                label="Toggle localhost access"
+              />
             </div>
           </div>
         </div>
@@ -373,7 +393,9 @@ export function PermissionsContent() {
                           key={path}
                           className="flex items-center justify-between rounded-md border border-border/40 px-2.5 py-1.5"
                         >
-                          <span className="font-mono text-[10px] text-foreground/80 truncate mr-2">{path}</span>
+                          <span className="font-mono text-[10px] text-foreground/80 truncate mr-2">
+                            {path}
+                          </span>
                           <button
                             onClick={() => handleRemovePath(path)}
                             className="shrink-0 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
@@ -384,7 +406,9 @@ export function PermissionsContent() {
                         </div>
                       ))}
                       {fsConfig.allowedPaths.length === 0 && (
-                        <p className="text-[10px] text-muted-foreground/50">No allowed directories. AI cannot access any files.</p>
+                        <p className="text-[10px] text-muted-foreground/50">
+                          No allowed directories. AI cannot access any files.
+                        </p>
                       )}
                     </div>
                     <div className="flex gap-1.5">
@@ -395,7 +419,10 @@ export function PermissionsContent() {
                         value={newPath}
                         onChange={(e) => setNewPath(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") { e.preventDefault(); handleAddPath(); }
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAddPath();
+                          }
                         }}
                       />
                       <button
@@ -421,8 +448,9 @@ export function PermissionsContent() {
           Trusted Commands
         </h3>
         <p className="text-[10px] text-muted-foreground/70 mb-3">
-          Commands you've marked as "Always Allow" will auto-approve without prompting.
-          Remove them here to require approval again.
+          Commands you've marked as "Always Allow" will auto-approve where trusted approvals are
+          available; PC shell and dangerous PC prompts are never auto-approved. Remove entries here
+          to require approval again.
         </p>
         {trusted ? (
           <div className="flex flex-col gap-3">
@@ -563,7 +591,9 @@ export function PermissionsContent() {
                         className={`inline-block h-2 w-2 rounded-full ${
                           sandboxStatus.dockerAvailable ? "bg-green-500" : "bg-red-500"
                         }`}
-                        aria-label={sandboxStatus.dockerAvailable ? "Docker running" : "Docker offline"}
+                        aria-label={
+                          sandboxStatus.dockerAvailable ? "Docker running" : "Docker offline"
+                        }
                       />
                     )}
                   </div>
@@ -627,12 +657,13 @@ export function PermissionsContent() {
                     </div>
                     <Toggle
                       checked={!sandboxConfig.networkDisabled}
-                      onChange={() => handleSandboxUpdate({ networkDisabled: !sandboxConfig.networkDisabled })}
+                      onChange={() =>
+                        handleSandboxUpdate({ networkDisabled: !sandboxConfig.networkDisabled })
+                      }
                       label="Toggle sandbox network access"
                     />
                   </div>
                 </div>
-
               </>
             )}
           </div>

@@ -8,31 +8,40 @@ const SAFETY_LABELS: Record<PcSafetyLevel, { label: string; description: string 
   },
   "semi-autonomous": {
     label: "Semi-autonomous",
-    description: "Common actions auto-approved, destructive ones need OK",
+    description: "Only low-impact routed actions auto-approved",
   },
   autonomous: {
     label: "Autonomous",
-    description: "AI acts freely — watch via the viewer",
+    description: "Acts freely except blocked destructive intents",
   },
 };
 
 const LAYER_ICONS: Record<string, { icon: string; label: string }> = {
   "action-router": { icon: "\u26A1", label: "Action Router" },
-  "a11y": { icon: "\uD83C\uDF33", label: "Accessibility Tree" },
-  "vision": { icon: "\uD83D\uDC41", label: "Vision" },
+  a11y: { icon: "\uD83C\uDF33", label: "Accessibility Tree" },
+  vision: { icon: "\uD83D\uDC41", label: "Vision" },
 };
 
 export function PcConnectionPanel() {
-  const { enabled, setEnabled, localAvailable, agents, activeAgentId, setActiveAgent, safetyLevel, setSafetyLevel, disconnectAgent, pipelineActivity } = useSessionStore();
+  const {
+    enabled,
+    setEnabled,
+    localAvailable,
+    agents,
+    activeAgentId,
+    setActiveAgent,
+    safetyLevel,
+    setSafetyLevel,
+    disconnectAgent,
+    pipelineActivity,
+  } = useSessionStore();
 
   return (
     <div className="flex flex-col gap-4">
       {/* Enable/disable toggle */}
       <div>
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-medium text-white/50 uppercase tracking-wider">
-            PC Control
-          </h3>
+          <h3 className="text-xs font-medium text-white/50 uppercase tracking-wider">PC Control</h3>
           <button
             onClick={() => setEnabled(!enabled)}
             className={`relative w-8 h-4 rounded-full transition-colors ${
@@ -52,7 +61,9 @@ export function PcConnectionPanel() {
       </div>
 
       {!enabled ? (
-        <p className="text-xs text-white/30">Enable PC Control to allow AI to interact with this PC or connected remote PCs.</p>
+        <p className="text-xs text-white/30">
+          Enable PC Control to allow AI to interact with this PC or connected remote PCs.
+        </p>
       ) : (
         <>
           {/* Pipeline activity indicator */}
@@ -91,12 +102,16 @@ export function PcConnectionPanel() {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className={`h-1.5 w-1.5 rounded-full ${
-                          agent.status === "connected" ? "bg-emerald-400" : "bg-red-400"
-                        }`} />
+                        <div
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            agent.status === "connected" ? "bg-emerald-400" : "bg-red-400"
+                          }`}
+                        />
                         <span className="font-medium">{agent.hostname}</span>
                         {agent.id === "local" && (
-                          <span className="text-[9px] bg-emerald-500/20 text-emerald-400/80 px-1 rounded">local</span>
+                          <span className="text-[9px] bg-emerald-500/20 text-emerald-400/80 px-1 rounded">
+                            local
+                          </span>
                         )}
                       </div>
                       {agent.id !== "local" && (
@@ -152,7 +167,7 @@ export function PcConnectionPanel() {
             <div className="text-[11px] text-white/40 space-y-1.5">
               <p>Run on the target PC:</p>
               <code className="block bg-white/5 px-2 py-1.5 rounded text-emerald-400/80 font-mono text-[10px] break-all">
-                {`npx @chvor/pc-agent --server ${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/pc-agent`}
+                {`npx @chvor/pc-agent --server ${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/pc-agent`}
               </code>
             </div>
           </div>

@@ -20,9 +20,9 @@ Let the AI see your screen, click buttons, type text, and run commands on your P
 
 1. **Action Router** — 30+ regex patterns handle copy, paste, scroll, keyboard shortcuts, window management. Instant execution, zero LLM calls, zero cost.
 2. **Accessibility Tree** — Queries the OS for visible UI elements (buttons, text fields, menus) with bounding boxes. A lightweight text-only LLM maps intent to elements. No screenshot needed.
-3. **Vision** — Captures a screenshot, sends it to a vision-capable LLM, and parses coordinates. Always available as a fallback.
+3. **Vision** — Captures an aspect-preserving screenshot, sends it to a vision-capable LLM, and parses coordinates in that screenshot’s coordinate space. Always available as a fallback.
 
-Each layer falls through to the next if it can't handle the task. The AI never sees raw coordinates — it describes intent, the pipeline resolves the rest.
+Each layer falls through to the next if it can't handle the task. The AI never needs native screen coordinates — it describes intent, and the pipeline resolves screenshot-space/a11y coordinates safely.
 
 ---
 
@@ -93,22 +93,22 @@ The agent auto-reconnects with exponential backoff if the connection drops.
 
 #### CLI Options
 
-| Flag | Env var | Default | Description |
-|------|---------|---------|-------------|
-| `--server <url>` | — | `ws://localhost:3001/ws/pc-agent` | WebSocket URL of the Chvor server |
-| `--token <token>` | `CHVOR_PC_AGENT_TOKEN` or `CHVOR_TOKEN` | — | Auth token |
+| Flag              | Env var                                 | Default                           | Description                       |
+| ----------------- | --------------------------------------- | --------------------------------- | --------------------------------- |
+| `--server <url>`  | —                                       | `ws://localhost:3001/ws/pc-agent` | WebSocket URL of the Chvor server |
+| `--token <token>` | `CHVOR_PC_AGENT_TOKEN` or `CHVOR_TOKEN` | —                                 | Auth token                        |
 
 ---
 
 ## Safety Levels
 
-| Level | Behavior |
-|-------|----------|
-| **Supervised** (default) | Every action requires your approval before executing |
-| **Semi-autonomous** | Known-safe actions (keyboard shortcuts, scroll) auto-approved; everything else needs approval |
-| **Autonomous** | AI acts freely — watch what it does via the PC viewer |
+| Level                    | Behavior                                                                                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Supervised** (default) | Every action requires your approval before executing                                                                                                                          |
+| **Semi-autonomous**      | Only low-impact routed actions (scroll, wait, navigation/search keys) auto-approved; typing, clicks, save/close, LLM-planned actions, and external side effects need approval |
+| **Autonomous**           | AI acts freely except blocked destructive PC intents — watch what it does via the PC viewer                                                                                   |
 
-Shell commands **always** require approval regardless of safety level.
+Non-blocked shell commands **always** require approval regardless of safety level; blocked shell patterns are rejected before approval. Broad destructive GUI intents (for example wiping disks or deleting all user files) are blocked before execution.
 
 Change the safety level in the PC viewer sidebar or via API:
 
@@ -124,17 +124,19 @@ curl -X PUT http://localhost:3001/api/pc/config \
 
 The AI gets three tools when PC control is enabled:
 
-| Tool | Description |
-|------|-------------|
-| `native__pc_do` | Describe a task in natural language. The pipeline resolves it. |
-| `native__pc_observe` | See the screen + list of UI elements (accessibility tree). |
-| `native__pc_shell` | Run a shell command on the target PC. |
+| Tool                 | Description                                                    |
+| -------------------- | -------------------------------------------------------------- |
+| `native__pc_do`      | Describe a task in natural language. The pipeline resolves it. |
+| `native__pc_observe` | See the screen + list of UI elements (accessibility tree).     |
+| `native__pc_shell`   | Run a shell command on the target PC.                          |
+
+`native__pc_do` returns a post-action screenshot after a short settle delay when it resolved at least one action and screen capture is available, so the AI can often verify what changed without doing a separate observe first. If the task failed or no action could be resolved, any screenshot is diagnostic rather than proof of change.
 
 ### Typical workflow
 
 1. AI calls `native__pc_observe` — gets a screenshot and the accessibility tree
 2. AI calls `native__pc_do` with `"click the Save button"` — resolved via a11y tree (Layer 2)
-3. AI calls `native__pc_observe` again — verifies the result
+3. AI checks the post-action screenshot returned by `native__pc_do`; call `native__pc_observe` again only if the screenshot is missing, ambiguous, or still transitioning
 4. For file operations, AI uses `native__pc_shell` with `"ls -la"` — always prompts for approval
 
 ### Multiple PCs
@@ -163,12 +165,12 @@ The PC viewer is an overlay accessible from the sidebar monitor icon. It shows:
 
 ## Platform Support
 
-| Feature | Windows | macOS | Linux |
-|---------|---------|-------|-------|
-| Screen capture | Yes | Yes | Yes |
-| Input simulation | Yes | Yes | Yes |
-| Accessibility tree | Yes (PowerShell/.NET) | Planned | Planned |
-| Shell execution | Yes | Yes | Yes |
+| Feature            | Windows                           | macOS                             | Linux                             |
+| ------------------ | --------------------------------- | --------------------------------- | --------------------------------- |
+| Screen capture     | Yes — aspect-preserving downscale | Yes — aspect-preserving downscale | Yes — aspect-preserving downscale |
+| Input simulation   | Yes                               | Yes                               | Yes                               |
+| Accessibility tree | Yes (PowerShell/.NET)             | Planned                           | Planned                           |
+| Shell execution    | Yes                               | Yes                               | Yes                               |
 
 On macOS and Linux, the accessibility tree is not yet implemented. The pipeline gracefully falls through to vision (Layer 3) for any tasks that would use it.
 
@@ -176,14 +178,14 @@ On macOS and Linux, the accessibility tree is not yet implemented. The pipeline 
 
 ## API Reference
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/pc/config` | Get config (enabled, safetyLevel, localAvailable) |
-| `PUT` | `/api/pc/config` | Update config (enabled, safetyLevel) |
-| `GET` | `/api/pc/connections` | List connected PCs (including local) |
-| `GET` | `/api/pc/connections/:id` | Get specific PC info |
-| `DELETE` | `/api/pc/connections/:id` | Disconnect a remote PC |
-| `POST` | `/api/pc/screenshot/:id` | Take a screenshot |
+| Method   | Endpoint                  | Description                                       |
+| -------- | ------------------------- | ------------------------------------------------- |
+| `GET`    | `/api/pc/config`          | Get config (enabled, safetyLevel, localAvailable) |
+| `PUT`    | `/api/pc/config`          | Update config (enabled, safetyLevel)              |
+| `GET`    | `/api/pc/connections`     | List connected PCs (including local)              |
+| `GET`    | `/api/pc/connections/:id` | Get specific PC info                              |
+| `DELETE` | `/api/pc/connections/:id` | Disconnect a remote PC                            |
+| `POST`   | `/api/pc/screenshot/:id`  | Take a screenshot                                 |
 
 WebSocket endpoint for remote agents: `ws://host:port/ws/pc-agent?token=<token>`
 
