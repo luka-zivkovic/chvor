@@ -13,6 +13,7 @@ import type { PcSafetyLevel } from "@chvor/shared";
 import type { WSContext } from "hono/ws";
 import { getConfig } from "../db/config-store.ts";
 import type { PcBackend } from "./pc-backend.ts";
+import { parseRemoteActionResult, parseRemoteShellResult } from "./pc-protocol-validation.ts";
 
 const CURRENT_PC_AGENT_PROTOCOL_VERSION = 2;
 const LEGACY_COORDINATE_SIZE = { width: 1024, height: 768 } as const;
@@ -456,7 +457,7 @@ export async function executeAction(agentId: string, action: PcAction): Promise<
     id: requestId,
     action,
   });
-  return result as PcActionResult;
+  return parseRemoteActionResult(result);
 }
 
 export async function executeShell(
@@ -474,7 +475,7 @@ export async function executeShell(
     command,
     cwd,
   });
-  return result as { stdout: string; stderr: string; exitCode: number };
+  return parseRemoteShellResult(result);
 }
 
 export function getLastScreenshot(agentId: string): PcScreenshot | null {

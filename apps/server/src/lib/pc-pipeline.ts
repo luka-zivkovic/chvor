@@ -408,11 +408,13 @@ const COORDINATE_REQUIRED_ACTIONS = new Set<string>([
   "double_click",
   "middle_click",
   "type",
-  "scroll",
 ]);
 
-function coordinateRequired(action: string): boolean {
-  return COORDINATE_REQUIRED_ACTIONS.has(action);
+function coordinateRequired(action: string, layer: "a11y" | "vision"): boolean {
+  // A11y prompts intentionally allow {"action":"scroll","direction":"down"}
+  // without coordinates, matching pc-agent/action-router behavior. Vision
+  // prompts ask for scroll coordinates so require them there.
+  return COORDINATE_REQUIRED_ACTIONS.has(action) || (layer === "vision" && action === "scroll");
 }
 
 // ---------------------------------------------------------------------------
@@ -438,8 +440,6 @@ async function parseActionsFromLlm(
     const parsed = JSON.parse(jsonStr);
     if (!Array.isArray(parsed)) return null;
 
-    const { findNodeById, bboxToCoordinate } = await import("@chvor/pc-agent");
-
     const actions: PcAction[] = [];
     for (const item of parsed) {
       if (!item.action || !VALID_ACTIONS.has(item.action)) continue;
@@ -448,6 +448,7 @@ async function parseActionsFromLlm(
 
       // Resolve nodeId -> coordinate
       if (item.nodeId != null) {
+        const { findNodeById, bboxToCoordinate } = await import("@chvor/pc-agent");
         const node = findNodeById(tree, item.nodeId);
         if (node?.bbox) {
           coordinate = bboxToCoordinate(
@@ -462,7 +463,7 @@ async function parseActionsFromLlm(
 
       const rawCoord = coordinate ?? item.coordinate;
       const validCoordinate = isValidCoordinate(rawCoord, coordinateSize) ? rawCoord : undefined;
-      if (coordinateRequired(item.action) && !validCoordinate) continue;
+      if (coordinateRequired(item.action, "a11y") && !validCoordinate) continue;
       const action: PcAction = {
         action: item.action,
         coordinate: validCoordinate,
@@ -504,7 +505,7 @@ function parseVisionActions(response: string, screenshot: PcScreenshot): PcActio
       const coordinate = isValidCoordinate(item.coordinate, screenshot)
         ? item.coordinate
         : undefined;
-      if (coordinateRequired(item.action) && !coordinate) continue;
+      if (coordinateRequired(item.action, "vision") && !coordinate) continue;
       actions.push({
         action: item.action,
         coordinate,
@@ -528,3 +529,9 @@ function parseVisionActions(response: string, screenshot: PcScreenshot): PcActio
     return [];
   }
 }
+
+/** Internal parser hooks for focused unit tests; production callers should use executePcTask. */
+export const __pcPipelineInternals = {
+  parseActionsFromLlm,
+  parseVisionActions,
+};
