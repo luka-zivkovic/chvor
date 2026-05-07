@@ -13,7 +13,12 @@ import {
   isTrustedCommand,
   addTrustedCommand,
 } from "../../db/config-store.ts";
-import type { NativeToolContext, NativeToolHandler, NativeToolModule, NativeToolResult } from "./types.ts";
+import type {
+  NativeToolContext,
+  NativeToolHandler,
+  NativeToolModule,
+  NativeToolResult,
+} from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Shell Execute tool
@@ -37,14 +42,8 @@ const shellExecuteToolDef = tool({
     "If a command is denied, suggest a safer alternative.",
   parameters: z.object({
     command: z.string().describe("The shell command to execute"),
-    workingDir: z
-      .string()
-      .optional()
-      .describe("Working directory (defaults to user home)"),
-    timeoutMs: z
-      .number()
-      .optional()
-      .describe("Timeout in ms (default: 30000, max: 300000)"),
+    workingDir: z.string().optional().describe("Working directory (defaults to user home)"),
+    timeoutMs: z.number().optional().describe("Timeout in ms (default: 30000, max: 300000)"),
   }),
 });
 
@@ -54,18 +53,24 @@ const MAX_PENDING_APPROVALS = 50;
 
 const pendingApprovals = new Map<
   string,
-  { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout>; command: string }
+  {
+    resolve: (approved: boolean) => void;
+    timer: ReturnType<typeof setTimeout>;
+    command: string;
+    allowAlwaysAllow: boolean;
+  }
 >();
 
 export async function requestApproval(
   command: string,
   workingDir: string,
   classification: ClassificationResult,
-  context?: NativeToolContext
+  context?: NativeToolContext,
+  opts?: { allowTrusted?: boolean; allowAlwaysAllow?: boolean }
 ): Promise<{ approved: boolean; requestId: string }> {
   // Check trusted commands — auto-approve if matched
   const isPc = /^PC (Task|shell):/i.test(command);
-  if (isTrustedCommand(command, isPc)) {
+  if (opts?.allowTrusted !== false && isTrustedCommand(command, isPc)) {
     return { approved: true, requestId: "trusted-auto" };
   }
 
@@ -89,6 +94,7 @@ export async function requestApproval(
       tier: classification.tier,
       classifiedCommands: classification.subCommands,
       timestamp: new Date().toISOString(),
+      allowAlwaysAllow: opts?.allowAlwaysAllow !== false,
     },
   };
 
@@ -125,14 +131,23 @@ export async function requestApproval(
       resolve(false);
     }, APPROVAL_TIMEOUT_MS);
 
-    pendingApprovals.set(requestId, { resolve, timer, command });
+    pendingApprovals.set(requestId, {
+      resolve,
+      timer,
+      command,
+      allowAlwaysAllow: opts?.allowAlwaysAllow !== false,
+    });
   });
 
   return { approved, requestId };
 }
 
 /** Called when user responds to a command.confirm event. */
-export function resolveApproval(requestId: string, approved: boolean, alwaysAllow?: boolean): boolean {
+export function resolveApproval(
+  requestId: string,
+  approved: boolean,
+  alwaysAllow?: boolean
+): boolean {
   const pending = pendingApprovals.get(requestId);
   if (!pending) return false;
 
@@ -140,7 +155,7 @@ export function resolveApproval(requestId: string, approved: boolean, alwaysAllo
   pendingApprovals.delete(requestId);
 
   // If approved with alwaysAllow, store the trusted pattern
-  if (approved && alwaysAllow && pending.command) {
+  if (approved && alwaysAllow && pending.allowAlwaysAllow && pending.command) {
     const isPc = /^PC (Task|shell):/i.test(pending.command);
     if (isPc) {
       const cleaned = pending.command.replace(/^PC (Task|shell):\s*/i, "");
@@ -173,12 +188,34 @@ function getShellConfig(): { shell: string; shellFlag: string } {
 
 // Whitelist safe env vars — never leak API keys, tokens, or secrets to child processes
 const SAFE_ENV_KEYS = [
-  "PATH", "HOME", "USERPROFILE", "USER", "USERNAME", "LOGNAME",
-  "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SHELL", "COMSPEC",
-  "TMPDIR", "TMP", "TEMP", "SYSTEMROOT", "WINDIR",
-  "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
-  "PROGRAMFILES", "PROGRAMFILES(X86)", "COMMONPROGRAMFILES",
-  "NODE_ENV", "EDITOR", "VISUAL", "PAGER",
+  "PATH",
+  "HOME",
+  "USERPROFILE",
+  "USER",
+  "USERNAME",
+  "LOGNAME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TERM",
+  "SHELL",
+  "COMSPEC",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "SYSTEMROOT",
+  "WINDIR",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMFILES",
+  "PROGRAMFILES(X86)",
+  "COMMONPROGRAMFILES",
+  "NODE_ENV",
+  "EDITOR",
+  "VISUAL",
+  "PAGER",
 ];
 
 export function buildSafeEnv(): Record<string, string> {
@@ -226,9 +263,10 @@ function executeCommand(
     proc.on("close", (code, signal) => {
       resolve({
         stdout: stdout.trimEnd(),
-        stderr: signal === "SIGKILL"
-          ? (stderr.trimEnd() + "\n[process killed after timeout]").trimStart()
-          : stderr.trimEnd(),
+        stderr:
+          signal === "SIGKILL"
+            ? (stderr.trimEnd() + "\n[process killed after timeout]").trimStart()
+            : stderr.trimEnd(),
         exitCode: code ?? 1,
         durationMs: Date.now() - start,
       });
@@ -238,7 +276,11 @@ function executeCommand(
       // Node fires 'error' with code ETIMEDOUT when spawn timeout triggers —
       // escalate to SIGKILL in case the process ignored SIGTERM
       if (!proc.killed) {
-        try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          /* already dead */
+        }
       }
       resolve({
         stdout: stdout.trimEnd(),
@@ -301,7 +343,12 @@ const handleShellExecute: NativeToolHandler = async (
       sessionId: context?.sessionId,
     });
     return {
-      content: [{ type: "text", text: "Command blocked: this command pattern is never allowed for safety reasons." }],
+      content: [
+        {
+          type: "text",
+          text: "Command blocked: this command pattern is never allowed for safety reasons.",
+        },
+      ],
     };
   }
 
@@ -319,7 +366,12 @@ const handleShellExecute: NativeToolHandler = async (
       sessionId: context?.sessionId,
     });
     return {
-      content: [{ type: "text", text: `Command blocked: shell approval mode is set to "block all non-safe commands".` }],
+      content: [
+        {
+          type: "text",
+          text: `Command blocked: shell approval mode is set to "block all non-safe commands".`,
+        },
+      ],
     };
   }
 
@@ -327,7 +379,7 @@ const handleShellExecute: NativeToolHandler = async (
     classification.tier !== "safe" &&
     approvalMode !== "always_approve" &&
     (approvalMode === "moderate_plus" ||
-     (approvalMode === "dangerous_only" && classification.tier === "dangerous"));
+      (approvalMode === "dangerous_only" && classification.tier === "dangerous"));
 
   if (needsApproval) {
     const { approved } = await requestApproval(command, workingDir, classification, context);

@@ -102,13 +102,13 @@ The agent auto-reconnects with exponential backoff if the connection drops.
 
 ## Safety Levels
 
-| Level                    | Behavior                                                                                      |
-| ------------------------ | --------------------------------------------------------------------------------------------- |
-| **Supervised** (default) | Every action requires your approval before executing                                          |
-| **Semi-autonomous**      | Known-safe actions (keyboard shortcuts, scroll) auto-approved; everything else needs approval |
-| **Autonomous**           | AI acts freely — watch what it does via the PC viewer                                         |
+| Level                    | Behavior                                                                                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Supervised** (default) | Every action requires your approval before executing                                                                                                                          |
+| **Semi-autonomous**      | Only low-impact routed actions (scroll, wait, navigation/search keys) auto-approved; typing, clicks, save/close, LLM-planned actions, and external side effects need approval |
+| **Autonomous**           | AI acts freely except blocked destructive PC intents — watch what it does via the PC viewer                                                                                   |
 
-Shell commands **always** require approval regardless of safety level.
+Non-blocked shell commands **always** require approval regardless of safety level; blocked shell patterns are rejected before approval. Broad destructive GUI intents (for example wiping disks or deleting all user files) are blocked before execution.
 
 Change the safety level in the PC viewer sidebar or via API:
 

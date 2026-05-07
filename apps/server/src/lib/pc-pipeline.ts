@@ -1,4 +1,11 @@
-import type { PcAction, PcTaskResult, PcSafetyLevel, A11yTree, PcScreenshot } from "@chvor/shared";
+import type {
+  PcAction,
+  PcTaskResult,
+  PcSafetyLevel,
+  A11yTree,
+  PcScreenshot,
+  PipelineLayer,
+} from "@chvor/shared";
 import type { PcBackend } from "./pc-backend.ts";
 import type { ExecutionEvent } from "@chvor/shared";
 import { tryActionRouter } from "./action-patterns.ts";
@@ -25,12 +32,24 @@ export interface PipelineContext {
   emit: EventEmitter;
   llmCall: LlmCallFn;
   safetyLevel: PcSafetyLevel;
+  authorizeActions?: (
+    actions: PcAction[],
+    layer: PipelineLayer
+  ) => Promise<{ allowed: boolean; error?: string }>;
 }
 
 const POST_ACTION_SETTLE_MS = 300;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function authorizeActions(
+  actions: PcAction[],
+  layer: PipelineLayer,
+  ctx: PipelineContext
+): Promise<{ allowed: boolean; error?: string }> {
+  return ctx.authorizeActions ? ctx.authorizeActions(actions, layer) : { allowed: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +86,21 @@ export async function executePcTask(
       type: "pc.pipeline.layer",
       data: { targetId, layer: "action-router", status: "success" },
     });
+
+    const authorization = await authorizeActions(routedActions, "action-router", ctx);
+    if (!authorization.allowed) {
+      ctx.emit({
+        type: "pc.pipeline.complete",
+        data: { targetId, layer: "action-router", success: false },
+      });
+      return {
+        success: false,
+        layerUsed: "action-router",
+        summary: "Action router resolved actions, but safety policy denied execution.",
+        actions: routedActions,
+        error: authorization.error ?? "Denied by PC safety policy.",
+      };
+    }
 
     const execution = await executeActionSequence(routedActions, backend);
     const success = execution.success;
@@ -132,6 +166,21 @@ export async function executePcTask(
           data: { targetId, layer: "a11y", status: "success" },
         });
 
+        const authorization = await authorizeActions(actions, "a11y", ctx);
+        if (!authorization.allowed) {
+          ctx.emit({
+            type: "pc.pipeline.complete",
+            data: { targetId, layer: "a11y", success: false },
+          });
+          return {
+            success: false,
+            layerUsed: "a11y",
+            summary: "A11y layer resolved actions, but safety policy denied execution.",
+            actions,
+            error: authorization.error ?? "Denied by PC safety policy.",
+          };
+        }
+
         const execution = await executeActionSequence(actions, backend);
         const success = execution.success;
         ctx.emit({ type: "pc.pipeline.complete", data: { targetId, layer: "a11y", success } });
@@ -176,6 +225,21 @@ export async function executePcTask(
 
   if (visionActions.length > 0) {
     ctx.emit({ type: "pc.pipeline.layer", data: { targetId, layer: "vision", status: "success" } });
+
+    const authorization = await authorizeActions(visionActions, "vision", ctx);
+    if (!authorization.allowed) {
+      ctx.emit({
+        type: "pc.pipeline.complete",
+        data: { targetId, layer: "vision", success: false },
+      });
+      return {
+        success: false,
+        layerUsed: "vision",
+        summary: "Vision layer resolved actions, but safety policy denied execution.",
+        actions: visionActions,
+        error: authorization.error ?? "Denied by PC safety policy.",
+      };
+    }
 
     const execution = await executeActionSequence(visionActions, backend);
     const success = execution.success;

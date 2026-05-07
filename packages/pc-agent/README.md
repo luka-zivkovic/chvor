@@ -88,13 +88,13 @@ Run that command on the target PC. Once connected, it appears in the PC viewer s
 
 ## Safety Levels
 
-| Level                    | Behavior                                                                                       |
-| ------------------------ | ---------------------------------------------------------------------------------------------- |
-| **Supervised** (default) | Every action requires user approval                                                            |
-| **Semi-autonomous**      | Action Router matches (keyboard shortcuts, etc.) auto-approved; everything else needs approval |
-| **Autonomous**           | AI acts freely — monitor via the viewer                                                        |
+| Level                    | Behavior                                                                                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Supervised** (default) | Every action requires user approval                                                                                                                                           |
+| **Semi-autonomous**      | Only low-impact routed actions (scroll, wait, navigation/search keys) auto-approved; typing, clicks, save/close, LLM-planned actions, and external side effects need approval |
+| **Autonomous**           | AI acts freely except blocked destructive PC intents — monitor via the viewer                                                                                                 |
 
-Shell commands (`native__pc_shell`) **always** require approval regardless of safety level.
+Non-blocked shell commands (`native__pc_shell`) **always** require approval regardless of safety level; blocked shell patterns are rejected before approval. Broad destructive GUI intents are blocked before execution.
 
 ## AI Tools
 

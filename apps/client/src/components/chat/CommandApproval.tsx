@@ -57,23 +57,28 @@ export function CommandApproval({ approval, onSend }: Props) {
   // Derive the trusted pattern that "Always Allow" would store
   const isPcCommand = /^PC (Task|shell):/i.test(approval.command);
   const alwaysAllowPattern = isPcCommand
-    ? approval.command.replace(/^PC (Task|shell):\s*/i, "").split(/\s+/)[0]?.toLowerCase() ?? ""
-    : approval.command.trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
+    ? (approval.command
+        .replace(/^PC (Task|shell):\s*/i, "")
+        .trim()
+        .split(/\s+/)
+        .slice(0, 3)
+        .join(" ")
+        .toLowerCase() ?? "")
+    : approval.command.trim().split(/\s+/).slice(0, 3).join(" ").toLowerCase();
+  const allowAlwaysAllow = approval.allowAlwaysAllow !== false;
 
   const isDangerous = approval.tier === "dangerous";
   const tierColor = isDangerous ? "text-destructive" : "text-status-warning";
-  const borderColor = isDangerous
-    ? "border-destructive/40"
-    : "border-status-warning/40";
+  const borderColor = isDangerous ? "border-destructive/40" : "border-status-warning/40";
   const bgColor = isDangerous ? "bg-destructive/5" : "bg-status-warning/5";
 
   return (
-    <div
-      className={`rounded-lg border ${borderColor} ${bgColor} p-3 mx-2 mb-2`}
-    >
+    <div className={`rounded-lg border ${borderColor} ${bgColor} p-3 mx-2 mb-2`}>
       <div className="flex items-center gap-2 mb-2">
         <span className={`flex items-center gap-1.5 text-sm font-medium ${tierColor}`}>
-          <svg width="8" height="8" viewBox="0 0 8 8" className="shrink-0"><circle cx="4" cy="4" r="4" fill="currentColor" /></svg>
+          <svg width="8" height="8" viewBox="0 0 8 8" className="shrink-0">
+            <circle cx="4" cy="4" r="4" fill="currentColor" />
+          </svg>
           Command requires approval
         </span>
         <span className="text-xs text-muted-foreground ml-auto">{timeStr}</span>
@@ -93,6 +98,17 @@ export function CommandApproval({ approval, onSend }: Props) {
         </span>
       </div>
 
+      {approval.classifiedCommands.length > 0 && (
+        <ul className="mb-3 space-y-1 text-[10px] text-muted-foreground/70">
+          {approval.classifiedCommands.slice(0, 4).map((item, index) => (
+            <li key={`${item.command}-${index}`} className="flex gap-1.5">
+              <span className={tierColor}>•</span>
+              <span>{item.command}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <div className="flex gap-2">
         <button
           onClick={() => respond(true)}
@@ -100,13 +116,15 @@ export function CommandApproval({ approval, onSend }: Props) {
         >
           Approve
         </button>
-        <button
-          onClick={() => respond(true, true)}
-          className="px-3 py-1 rounded text-xs font-medium bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 transition-colors"
-          title={`Auto-approve future "${alwaysAllowPattern}" commands`}
-        >
-          Always Allow
-        </button>
+        {allowAlwaysAllow && (
+          <button
+            onClick={() => respond(true, true)}
+            className="px-3 py-1 rounded text-xs font-medium bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 transition-colors"
+            title={`Auto-approve future "${alwaysAllowPattern}" commands`}
+          >
+            Always Allow
+          </button>
+        )}
         <button
           onClick={() => respond(false)}
           className="px-3 py-1 rounded text-xs font-medium bg-secondary hover:bg-secondary/80 text-foreground transition-colors"

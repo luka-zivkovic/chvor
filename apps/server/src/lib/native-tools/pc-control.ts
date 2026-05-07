@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import type { CommandTier, PcAction, PipelineLayer } from "@chvor/shared";
 import {
   getPcSafetyLevel,
   hasConnectedAgents,
@@ -8,10 +9,20 @@ import {
 } from "../pc-control.ts";
 import { executePcTask } from "../pc-pipeline.ts";
 import type { LlmCallFn } from "../pc-pipeline.ts";
+import { assessPcTaskSafety } from "../pc-safety.ts";
+import type { PcSafetyAssessment } from "../pc-safety.ts";
+import { tryActionRouter } from "../action-patterns.ts";
+import { classifyCommand } from "../command-classifier.ts";
 import { getPcControlEnabled } from "../../db/config-store.ts";
 import { insertActivity } from "../../db/activity-store.ts";
 import { requestApproval } from "./shell.ts";
-import type { NativeToolContentItem, NativeToolContext, NativeToolHandler, NativeToolModule, NativeToolResult } from "./types.ts";
+import type {
+  NativeToolContentItem,
+  NativeToolContext,
+  NativeToolHandler,
+  NativeToolModule,
+  NativeToolResult,
+} from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // PC Control tools (v2: intent-based with 3-layer pipeline)
@@ -26,7 +37,10 @@ const pcDoToolDef = tool({
     "[PC Control] Execute a task on a PC. Describe WHAT you want to do in natural language — the system automatically chooses the best method (direct action, accessibility tree, or vision). Examples: 'open Firefox', 'click the Submit button', 'type hello@example.com in the email field', 'scroll down', 'alt+tab to switch windows', 'copy the selected text'. Use for all GUI interactions.",
   parameters: z.object({
     task: z.string().describe("Natural language description of what to do on the PC"),
-    targetId: z.string().optional().describe("PC target ID. Omit for local PC or if only one PC is connected."),
+    targetId: z
+      .string()
+      .optional()
+      .describe("PC target ID. Omit for local PC or if only one PC is connected."),
   }),
 });
 
@@ -34,7 +48,10 @@ const pcObserveToolDef = tool({
   description:
     "[PC Control] Observe the current state of a PC. Returns a screenshot and the UI accessibility tree (list of visible elements). Use this to see what's on screen before acting, or to verify the result of a previous action.",
   parameters: z.object({
-    targetId: z.string().optional().describe("PC target ID. Omit for local PC or if only one PC is connected."),
+    targetId: z
+      .string()
+      .optional()
+      .describe("PC target ID. Omit for local PC or if only one PC is connected."),
   }),
 });
 
@@ -42,7 +59,10 @@ const pcShellToolDef = tool({
   description:
     "[PC Control] Execute a shell command on a PC. Returns stdout, stderr, and exit code. Use for file operations, system inspection, or automation that doesn't require the GUI.",
   parameters: z.object({
-    targetId: z.string().optional().describe("PC target ID. Omit for local PC or if only one PC is connected."),
+    targetId: z
+      .string()
+      .optional()
+      .describe("PC target ID. Omit for local PC or if only one PC is connected."),
     command: z.string().describe("The shell command to execute"),
     cwd: z.string().optional().describe("Working directory for the command"),
   }),
@@ -73,7 +93,54 @@ function getPcObserveTracker(sessionId: string) {
 
 function resetPcObserveCount(sessionId: string) {
   const entry = pcObserveTracker.get(sessionId);
-  if (entry) { entry.count = 0; entry.lastResetAt = Date.now(); }
+  if (entry) {
+    entry.count = 0;
+    entry.lastResetAt = Date.now();
+  }
+}
+
+function formatPcApprovalReason(reasons: string[]): string {
+  return reasons
+    .slice(0, 4)
+    .map((reason) => `- ${reason}`)
+    .join("\n");
+}
+
+function pcApprovalOptions(assessment: PcSafetyAssessment): {
+  allowTrusted: boolean;
+  allowAlwaysAllow: boolean;
+} {
+  const dangerous = assessment.tier === "dangerous" || assessment.tier === "blocked";
+  return { allowTrusted: !dangerous, allowAlwaysAllow: !dangerous };
+}
+
+function pcApprovalClassification(assessment: PcSafetyAssessment): {
+  tier: CommandTier;
+  subCommands: Array<{ command: string; tier: CommandTier }>;
+} {
+  return {
+    tier: assessment.tier,
+    subCommands: assessment.reasonDetails.map((detail) => ({
+      command: detail.reason,
+      tier: detail.tier,
+    })),
+  };
+}
+
+async function requestPcTaskApproval(
+  task: string,
+  backendHostname: string,
+  assessment: PcSafetyAssessment,
+  context?: NativeToolContext
+): Promise<boolean> {
+  const { approved } = await requestApproval(
+    `PC Task: ${task}`,
+    backendHostname,
+    pcApprovalClassification(assessment),
+    context,
+    pcApprovalOptions(assessment)
+  );
+  return approved;
 }
 
 const handlePcDo: NativeToolHandler = async (
@@ -81,7 +148,11 @@ const handlePcDo: NativeToolHandler = async (
   context?: NativeToolContext
 ): Promise<NativeToolResult> => {
   if (!getPcControlEnabled()) {
-    return { content: [{ type: "text", text: "PC Control is disabled. Enable it in settings to use this tool." }] };
+    return {
+      content: [
+        { type: "text", text: "PC Control is disabled. Enable it in settings to use this tool." },
+      ],
+    };
   }
 
   const task = args.task as string;
@@ -98,36 +169,34 @@ const handlePcDo: NativeToolHandler = async (
     return { content: [{ type: "text", text: (err as Error).message }] };
   }
 
-  // Safety approval — use the action router to decide if this is a simple,
-  // known-safe action. Only action-router matches (Layer 1) are auto-approved
-  // in semi-autonomous mode. Everything else requires approval in supervised/semi-auto.
+  // Safety approval — classify exact routed actions when available. In
+  // semi-autonomous mode, only low-impact action-router tasks auto-execute;
+  // typed text, clicks, save/close, unknown LLM-planned tasks, and external
+  // side-effect intents still require approval.
   const safetyLevel = getPcSafetyLevel();
+  const routedActions = tryActionRouter(task);
+  const safetyAssessment = assessPcTaskSafety(task, routedActions);
 
-  if (safetyLevel === "supervised") {
-    const { approved } = await requestApproval(
-      `PC Task: ${task}`,
-      backend.hostname,
-      { tier: "moderate" as const, subCommands: [] },
-      context
-    );
+  if (safetyAssessment.tier === "blocked") {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `PC task blocked for safety:\n${formatPcApprovalReason(safetyAssessment.reasons)}`,
+        },
+      ],
+    };
+  }
+
+  const shouldPreApproveRouted =
+    routedActions &&
+    (safetyLevel === "supervised" ||
+      (safetyLevel === "semi-autonomous" && !safetyAssessment.autoApprovableInSemiAutonomous));
+
+  if (shouldPreApproveRouted) {
+    const approved = await requestPcTaskApproval(task, backend.hostname, safetyAssessment, context);
     if (!approved) {
       return { content: [{ type: "text", text: "Task denied by user." }] };
-    }
-  } else if (safetyLevel === "semi-autonomous") {
-    // Only auto-approve tasks that match the action router (known keyboard shortcuts, etc.)
-    // Everything else (LLM-resolved tasks) requires approval
-    const { tryActionRouter } = await import("../action-patterns.ts");
-    const isKnownAction = tryActionRouter(task) !== null;
-    if (!isKnownAction) {
-      const { approved } = await requestApproval(
-        `PC Task: ${task}`,
-        backend.hostname,
-        { tier: "moderate" as const, subCommands: [] },
-        context
-      );
-      if (!approved) {
-        return { content: [{ type: "text", text: "Task denied by user." }] };
-      }
     }
   }
   // autonomous mode: no approval needed
@@ -166,6 +235,29 @@ const handlePcDo: NativeToolHandler = async (
     emit: context?.emitEvent ?? (() => {}),
     llmCall,
     safetyLevel,
+    authorizeActions: async (actions: PcAction[], layer: PipelineLayer) => {
+      if (layer === "action-router") return { allowed: true };
+
+      const plannedAssessment = assessPcTaskSafety(task, actions, { routedActions: false });
+      if (plannedAssessment.tier === "blocked") {
+        return {
+          allowed: false,
+          error: `PC task blocked for safety:\n${formatPcApprovalReason(plannedAssessment.reasons)}`,
+        };
+      }
+
+      if (safetyLevel === "autonomous") return { allowed: true };
+
+      const approved = await requestPcTaskApproval(
+        task,
+        backend.hostname,
+        plannedAssessment,
+        context
+      );
+      return approved
+        ? { allowed: true }
+        : { allowed: false, error: "Planned PC actions denied by user." };
+    },
   });
 
   // Audit log
@@ -177,7 +269,9 @@ const handlePcDo: NativeToolHandler = async (
     });
     const { getWSInstance } = await import("../../gateway/ws-instance.ts");
     getWSInstance()?.broadcast({ type: "activity.new", data: activityEntry });
-  } catch { /* non-critical */ }
+  } catch {
+    /* non-critical */
+  }
 
   const content: NativeToolContentItem[] = [];
   content.push({
@@ -201,7 +295,11 @@ const handlePcObserve: NativeToolHandler = async (
   context?: NativeToolContext
 ): Promise<NativeToolResult> => {
   if (!getPcControlEnabled()) {
-    return { content: [{ type: "text", text: "PC Control is disabled. Enable it in settings to use this tool." }] };
+    return {
+      content: [
+        { type: "text", text: "PC Control is disabled. Enable it in settings to use this tool." },
+      ],
+    };
   }
 
   const targetId = args.targetId as string | undefined;
@@ -278,7 +376,11 @@ const handlePcShell: NativeToolHandler = async (
   context?: NativeToolContext
 ): Promise<NativeToolResult> => {
   if (!getPcControlEnabled()) {
-    return { content: [{ type: "text", text: "PC Control is disabled. Enable it in settings to use this tool." }] };
+    return {
+      content: [
+        { type: "text", text: "PC Control is disabled. Enable it in settings to use this tool." },
+      ],
+    };
   }
 
   const targetId = args.targetId as string | undefined;
@@ -292,12 +394,26 @@ const handlePcShell: NativeToolHandler = async (
     return { content: [{ type: "text", text: (err as Error).message }] };
   }
 
-  // Shell commands always require approval (regardless of safety level)
+  const classification = classifyCommand(command);
+  if (classification.tier === "blocked") {
+    return {
+      content: [
+        {
+          type: "text",
+          text: "PC shell command blocked: this command pattern is never allowed for safety reasons.",
+        },
+      ],
+    };
+  }
+
+  // Shell commands always require approval (regardless of safety level), and
+  // PC shell approvals cannot be persisted as trusted shortcuts.
   const { approved } = await requestApproval(
     `PC shell: ${command}`,
     cwd ?? backend.hostname,
-    { tier: "dangerous" as const, subCommands: [] },
-    context
+    classification,
+    context,
+    { allowTrusted: false, allowAlwaysAllow: false }
   );
   if (!approved) {
     return { content: [{ type: "text", text: "Shell command denied by user." }] };
@@ -314,7 +430,9 @@ const handlePcShell: NativeToolHandler = async (
     });
     const { getWSInstance } = await import("../../gateway/ws-instance.ts");
     getWSInstance()?.broadcast({ type: "activity.new", data: activityEntry });
-  } catch { /* non-critical */ }
+  } catch {
+    /* non-critical */
+  }
 
   let output = "";
   if (result.stdout) output += `stdout:\n${result.stdout}\n`;
