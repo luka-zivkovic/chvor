@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
+import { migrateTrajectoryPersistenceV31 } from "./migrations/trajectory-v31.ts";
 
 interface MigrationMessage {
   id: string;
@@ -961,5 +962,10 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
     db.exec("CREATE INDEX IF NOT EXISTS idx_cognitive_loop_runs_parent ON cognitive_loop_runs(parent_loop_id, created_at DESC)");
     db.pragma("user_version = 30");
     console.log("[db] migration v30 applied: cognitive loop run lineage");
+  }
+
+  if (currentVersion < 31) {
+    migrateTrajectoryPersistenceV31(db);
+    console.log("[db] migration v31 applied: canonical trajectories, steps, and artifacts");
   }
 }

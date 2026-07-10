@@ -4,6 +4,7 @@ import { extractAndStoreMemories } from "./memory-extractor.ts";
 import { resetSession } from "./session-reset.ts";
 import { clearSecrets } from "./sensitive-filter.ts";
 import { pruneOldSnapshots } from "../db/emotion-store.ts";
+import { pruneTerminalTrajectories } from "../db/trajectory-store.ts";
 import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
 import { getConfig, setConfig } from "../db/config-store.ts";
 import type { ChatMessage } from "@chvor/shared";
@@ -11,16 +12,35 @@ import type { ChatMessage } from "@chvor/shared";
 const ARCHIVE_WINDOW = 20; // messages per extraction call
 const MAX_WINDOWS = 5; // max extraction calls per session
 
-export async function runRetentionCleanup(): Promise<{ archived: number; deleted: number }> {
+export interface RetentionCleanupResult {
+  archived: number;
+  deleted: number;
+  trajectoriesDeleted: number;
+}
+
+export async function runRetentionCleanup(): Promise<RetentionCleanupResult> {
   const config = getRetentionConfig();
+  let trajectoriesDeleted = 0;
+
+  if (config.trajectoryMaxAgeDays === 0) {
+    console.log("[retention] trajectory retention disabled (set to forever)");
+  } else {
+    const result = pruneTerminalTrajectories(config.trajectoryMaxAgeDays * 24 * 60 * 60 * 1000);
+    trajectoriesDeleted = result.trajectories;
+    if (trajectoriesDeleted > 0) {
+      console.log(
+        `[retention] pruned ${trajectoriesDeleted} trajectories, ${result.steps} steps, and ${result.artifacts} artifact references`
+      );
+    }
+  }
 
   if (config.sessionMaxAgeDays === 0) {
     console.log("[retention] session retention disabled (set to forever)");
-    return { archived: 0, deleted: 0 };
+    return { archived: 0, deleted: 0, trajectoriesDeleted };
   }
 
   const stale = getStaleSessions(config.sessionMaxAgeDays);
-  if (stale.length === 0) return { archived: 0, deleted: 0 };
+  if (stale.length === 0) return { archived: 0, deleted: 0, trajectoriesDeleted };
 
   let archived = 0;
   let deleted = 0;
@@ -69,7 +89,7 @@ export async function runRetentionCleanup(): Promise<{ archived: number; deleted
     console.warn(`[retention] skipped ${failedSessionIds.size} session(s) due to archival failure`);
   }
 
-  return { archived, deleted };
+  return { archived, deleted, trajectoriesDeleted };
 }
 
 const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours

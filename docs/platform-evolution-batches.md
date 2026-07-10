@@ -71,7 +71,8 @@ Every batch must preserve these properties:
 
 ### A01 — Canonical trajectory contract
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#106](https://github.com/luka-zivkovic/chvor/pull/106)
 - **Dependencies:** B01
 - **Outcome:** Define the engine-neutral, versioned representation of an agent run and its steps.
 - **Scope:** Shared types and Zod schemas for trajectory, step, actor, model usage, tool call, approval reference, error, timing, and redacted artifact references.
@@ -84,7 +85,7 @@ Every batch must preserve these properties:
 
 ### A02 — Trajectory persistence
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** A01
 - **Outcome:** Persist append-only trajectories and steps in SQLite.
 - **Scope:** Migration, store, retention configuration, indexes, and store tests.

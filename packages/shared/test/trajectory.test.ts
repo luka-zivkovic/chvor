@@ -232,6 +232,7 @@ describe("canonical trajectory v1", () => {
         },
       ],
       summary: "api_key=top-secret",
+      labels: ["password=hunter2", "safe-label"],
     });
 
     expect(parsed.output).toEqual({
@@ -240,6 +241,7 @@ describe("canonical trajectory v1", () => {
     });
     expect(parsed.artifacts[0].locator).toContain(TRAJECTORY_REDACTED_VALUE);
     expect(parsed.summary).toBe(`api_key=${TRAJECTORY_REDACTED_VALUE}`);
+    expect(parsed.labels).toEqual([`password=${TRAJECTORY_REDACTED_VALUE}`, "safe-label"]);
 
     expect(
       trajectoryErrorSchema.parse({
