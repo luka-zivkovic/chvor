@@ -463,7 +463,7 @@ export const canonicalTrajectoryV1Schema = z
     steps: z.array(canonicalTrajectoryStepV1Schema),
     artifacts: z.array(trajectoryArtifactRefSchema).default([]),
     error: trajectoryErrorSchema.optional(),
-    labels: z.array(z.string().min(1).max(128)).default([]),
+    labels: z.array(redactedTextSchema(128).pipe(z.string().min(1))).default([]),
     attributes: trajectoryValueSchema.default({}),
   })
   .catchall(trajectoryValueSchema)

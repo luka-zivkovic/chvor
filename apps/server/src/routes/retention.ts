@@ -4,6 +4,17 @@ import { getRetentionConfig, updateRetentionConfig } from "../db/config-store.ts
 
 const retention = new Hono();
 
+function validateMaxAgeDays(
+  body: UpdateRetentionRequest,
+  field: "sessionMaxAgeDays" | "trajectoryMaxAgeDays"
+): string | undefined {
+  const value = body[field];
+  if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+    return `${field} must be a non-negative number`;
+  }
+  return undefined;
+}
+
 retention.get("/", (c) => {
   try {
     return c.json({ data: getRetentionConfig() });
@@ -14,11 +25,22 @@ retention.get("/", (c) => {
 
 retention.patch("/", async (c) => {
   try {
-    const body = (await c.req.json()) as UpdateRetentionRequest;
-    if (body.sessionMaxAgeDays !== undefined) {
-      if (typeof body.sessionMaxAgeDays !== "number" || body.sessionMaxAgeDays < 0) {
-        return c.json({ error: "sessionMaxAgeDays must be a non-negative number" }, 400);
-      }
+    let parsedBody: unknown;
+    try {
+      parsedBody = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    if (typeof parsedBody !== "object" || parsedBody === null || Array.isArray(parsedBody)) {
+      return c.json({ error: "JSON body must be an object" }, 400);
+    }
+    const body = parsedBody as UpdateRetentionRequest;
+    for (const field of ["sessionMaxAgeDays", "trajectoryMaxAgeDays"] as const) {
+      const validationError = validateMaxAgeDays(body, field);
+      if (validationError) return c.json({ error: validationError }, 400);
+    }
+    if (body.archiveBeforeDelete !== undefined && typeof body.archiveBeforeDelete !== "boolean") {
+      return c.json({ error: "archiveBeforeDelete must be a boolean" }, 400);
     }
     const updated = updateRetentionConfig(body);
     return c.json({ data: updated });
