@@ -15,9 +15,13 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "dev": "tsc --watch"
   },
   "dependencies": {
     "zod": "^3.24"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.0"
   }
 }
