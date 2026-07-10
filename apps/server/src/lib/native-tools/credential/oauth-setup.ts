@@ -8,6 +8,7 @@ import {
   findResumableForCredential,
 } from "../../pending-intent.ts";
 import type { NativeToolContext, NativeToolHandler, NativeToolResult } from "../types.ts";
+import { HITL_OAUTH_TIMEOUT_MS } from "../../hitl-timeouts.ts";
 
 // ---------------------------------------------------------------------------
 // Request OAuth setup (Track 0.6 — synthesized OAuth wizard)
@@ -154,13 +155,12 @@ export const handleRequestOAuthSetup: NativeToolHandler = async (
     ws.broadcast(wizardEvent);
   }
 
-  // 15-min timeout — OAuth flows can involve account creation, paid plans, etc.
-  const TIMEOUT_MS = 15 * 60_000;
+  // OAuth flows can involve account creation, paid plans, etc. → longer window.
   const response = await new Promise<import("@chvor/shared").OAuthSynthesizedWizardResponse>((resolve) => {
     const timer = setTimeout(() => {
       pendingOAuthWizards.delete(requestId);
       resolve({ requestId, cancelled: true });
-    }, TIMEOUT_MS);
+    }, HITL_OAUTH_TIMEOUT_MS);
     pendingOAuthWizards.set(requestId, {
       resolve: (r) => { clearTimeout(timer); resolve(r); },
     });

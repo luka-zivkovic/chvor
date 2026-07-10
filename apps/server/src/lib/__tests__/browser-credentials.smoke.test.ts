@@ -26,6 +26,7 @@ let listCredentials: typeof import("../../db/credential-store.ts").listCredentia
 let listPendingCredentialChoices: typeof import("../credential-choice.ts").listPendingCredentialChoices;
 let resolveCredentialChoice: typeof import("../credential-choice.ts").resolveCredentialChoice;
 let setWSInstance: typeof import("../../gateway/ws-instance.ts").setWSInstance;
+let setSessionPin: typeof import("../../db/session-pin-store.ts").setSessionPin;
 
 beforeAll(async () => {
   ({ browserModule, expandBrowserCredentials, expandBrowserCredentialsInteractive } =
@@ -35,6 +36,7 @@ beforeAll(async () => {
   ({ listPendingCredentialChoices, resolveCredentialChoice } =
     await import("../credential-choice.ts"));
   ({ setWSInstance } = await import("../../gateway/ws-instance.ts"));
+  ({ setSessionPin } = await import("../../db/session-pin-store.ts"));
   setWSInstance({
     sendTo: () => true,
     getClientsBySessionId: () => ["ws-1"],
@@ -111,17 +113,19 @@ describe("expandBrowserCredentials — ambiguous credentials", () => {
     ).toThrow(/multiple "github" credentials/);
   });
 
-  it("still resolves without prompting when usage context picks a clear winner", () => {
-    createCredential("Work GitHub", "github", { apiKey: "ghp_work" }, "work enterprise");
+  it("still resolves without prompting when a session pin picks a clear winner", () => {
+    const work = createCredential("Work GitHub", "github", { apiKey: "ghp_work" }, "work enterprise");
     createCredential("Personal GitHub", "github", { apiKey: "ghp_personal" }, "personal");
+    // Unique session id — reset() does not clear pins, so avoid colliding with
+    // other tests that reuse "sess-1" and expect ambiguity.
+    setSessionPin("sess-pin-browser", "github", work.id);
 
-    const out = expandBrowserCredentials("{{credentials.github}}", "sess-1", {
+    const out = expandBrowserCredentials("{{credentials.github}}", "sess-pin-browser", {
       allowedCredentialTypes: ["github"],
-      preferredUsageContext: ["enterprise"],
     });
 
     expect(out.expanded).toBe("ghp_work");
-    expect(out.picks[0]).toMatchObject({ reason: "context-match", pickedBy: "context-match" });
+    expect(out.picks[0]).toMatchObject({ reason: "session-pin", pickedBy: "session-pin" });
     expect(JSON.stringify(out.picks)).not.toContain("ghp_work");
   });
 

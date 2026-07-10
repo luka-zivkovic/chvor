@@ -27,6 +27,7 @@ import {
   loadToolCounter,
   clearRepairAttemptsFor,
 } from "../db/synthesized-store.ts";
+import { HITL_TIMEOUT_MS } from "./hitl-timeouts.ts";
 
 // ── Session state ──────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ function key(toolId: string, endpointName: string): string {
 
 // ── Approval gate ──────────────────────────────────────────────
 
-const MAX_PENDING = 5 * 60_000;
+const MAX_PENDING = HITL_TIMEOUT_MS;
 
 interface PendingApproval {
   resolve: (r: SynthesizedResponseData) => void;

@@ -14,14 +14,18 @@ import { getSessionPin } from "../db/session-pin-store.ts";
  *      LLM choice so pins are not silently overridden.
  *   3. **LLM-picked** — a synthesized tool call may pass a safe metadata-only
  *      `credentialId` enum chosen from the exposed options.
- *   4. **Skill `preferredUsageContext` match** — score each candidate by
- *      token-overlap between the credential's `usage_context` and the
- *      union of `preferredUsageContext` from active skills. Wins only when
- *      one candidate strictly beats the rest.
- *   5. **First-match fallback** — alphabetical-by-name to keep the choice
- *      deterministic across runs (replaces the old DB-order heuristic).
+ *   4. **First-match fallback** — alphabetical-by-name to keep the choice
+ *      deterministic across runs. When there is more than one candidate the
+ *      caller treats this as "ambiguous" and prompts the user instead of
+ *      silently using the fallback.
  *
  * Returns `null` when no credential of the requested type exists at all.
+ *
+ * Note: a usage-context token-overlap scoring tier was removed. For a
+ * single-user deployment (0–1 credentials per type) it almost never fired, and
+ * silently guessing by free-text overlap is worse UX than asking. The
+ * `preferredUsageContext` field is retained on PickContext (callers still pass
+ * it) but no longer influences the pick.
  */
 
 export type PickReason =
@@ -29,7 +33,6 @@ export type PickReason =
   | "llm-picked"
   | "tool-pinned"
   | "session-pin"
-  | "context-match"
   | "single-match"
   | "first-match-fallback";
 
@@ -44,7 +47,10 @@ export interface PickContext {
   sessionId?: string | null;
   /** Optional pinning by tool frontmatter (synth tools). */
   toolPinnedId?: string;
-  /** Optional context tokens from active skills' `preferredUsageContext`. */
+  /**
+   * Retained for caller compatibility. No longer used for scoring — kept so
+   * the orchestrator/synthesized-caller don't need signature changes.
+   */
   preferredUsageContext?: string[];
 }
 
@@ -55,26 +61,6 @@ export interface PickResult {
   candidateCount: number;
   /** Detail string suitable for canvas event / debug log. */
   detail?: string;
-}
-
-/**
- * Tokenize a free-text usage_context into lowercase word tokens.
- * Splits on non-alphanumerics so "work, enterprise" → ["work","enterprise"].
- */
-function tokenize(s: string | null | undefined): Set<string> {
-  if (!s) return new Set();
-  return new Set(
-    s
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((t) => t.length > 1)
-  );
-}
-
-function overlap(a: Set<string>, b: Set<string>): number {
-  let n = 0;
-  for (const x of a) if (b.has(x)) n++;
-  return n;
 }
 
 /**
@@ -167,27 +153,7 @@ export function pickCredential(credentialType: string, ctx: PickContext = {}): P
     };
   }
 
-  // Tier 4 — context-match: score by usage_context token overlap
-  const wanted = new Set<string>();
-  for (const t of ctx.preferredUsageContext ?? []) {
-    for (const tok of tokenize(t)) wanted.add(tok);
-  }
-  if (wanted.size > 0) {
-    const scored = candidates
-      .map((c) => ({ cred: c, score: overlap(tokenize(c.usageContext), wanted) }))
-      .sort((a, b) => b.score - a.score);
-    const top = scored[0];
-    if (top.score > 0 && (scored.length === 1 || scored[1].score < top.score)) {
-      return {
-        credentialId: top.cred.id,
-        reason: "context-match",
-        candidateCount: candidates.length,
-        detail: `usage_context overlap (${top.score}) → "${top.cred.name}"`,
-      };
-    }
-  }
-
-  // Tier 5 — first-match fallback (alphabetical by name → deterministic).
+  // Tier 4 — first-match fallback (alphabetical by name → deterministic).
   // Byte-wise compare (not localeCompare) so the same data dir picks the
   // same credential regardless of which machine's locale runs the server.
   const sorted = [...candidates].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));

@@ -469,6 +469,17 @@ function escapeHtml(s: string): string {
 
 function callbackHtml(success: boolean, message: string): string {
   const safeMessage = escapeHtml(message);
+  // The postMessage payload carries no token (only a success flag), but an
+  // operator can lock the target origin down via CHVOR_APP_ORIGIN. We default
+  // to "*" because the opener's origin legitimately varies (web dev port vs
+  // desktop tauri/file://) and a mismatched targetOrigin would silently drop
+  // the message and break the flow.
+  // Validate the origin shape before inlining so an operator typo (or a value
+  // containing `</script>`) can't break out of the inline <script>. Falls back
+  // to "*" (the payload is non-sensitive) if the value isn't a clean origin.
+  const appOrigin = process.env.CHVOR_APP_ORIGIN?.trim();
+  const validOrigin = appOrigin && /^https?:\/\/[\w.-]+(:\d+)?$/.test(appOrigin) ? appOrigin : null;
+  const targetOrigin = validOrigin ? JSON.stringify(validOrigin) : '"*"';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -498,12 +509,11 @@ function callbackHtml(success: boolean, message: string): string {
     <p>${success ? "You can close this tab and return to Chvor." : "Please try again in Chvor."}</p>
   </div>
   <script>
-    // Notify the opener window that OAuth is complete.
-    // Use "*" because this callback page may be served from a different origin
-    // than the opener (e.g. provider redirect, or file:// in desktop app).
-    // The client-side handler in OAuthConnectButton validates the inbound origin.
+    // Notify the opener window that OAuth is complete. Target origin defaults
+    // to "*" (payload is non-sensitive) but can be locked via CHVOR_APP_ORIGIN.
+    // The client-side handler in OAuthConnectButton also validates inbound origin.
     if (window.opener) {
-      window.opener.postMessage({ type: "chvor-oauth-callback", success: ${success} }, "*");
+      window.opener.postMessage({ type: "chvor-oauth-callback", success: ${success} }, ${targetOrigin});
     }
   </script>
 </body>

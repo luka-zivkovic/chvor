@@ -6,8 +6,9 @@ import type {
 } from "@chvor/shared";
 import { listCredentials } from "../db/credential-store.ts";
 import { setSessionPin } from "../db/session-pin-store.ts";
+import { HITL_TIMEOUT_MS } from "./hitl-timeouts.ts";
 
-const DEFAULT_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_TIMEOUT_MS = HITL_TIMEOUT_MS;
 
 interface PendingCredentialChoice {
   requestId: string;

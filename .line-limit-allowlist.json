@@ -1,0 +1,22 @@
+[
+  {
+    "path": "pnpm-lock.yaml",
+    "reason": "Generated pnpm lockfile; manual decomposition would break reproducible installs."
+  },
+  {
+    "path": "apps/desktop/src-tauri/Cargo.lock",
+    "reason": "Generated Cargo lockfile; manual decomposition would break reproducible Rust builds."
+  },
+  {
+    "path": "apps/desktop/src-tauri/gen/schemas/desktop-schema.json",
+    "reason": "Generated Tauri capability schema; source of truth is upstream Tauri generation."
+  },
+  {
+    "path": "apps/desktop/src-tauri/gen/schemas/windows-schema.json",
+    "reason": "Generated Tauri capability schema; source of truth is upstream Tauri generation."
+  },
+  {
+    "path": "apps/client/public/chvor_logo.svg",
+    "reason": "Static logo asset with embedded image data; user explicitly chose to keep it rather than replace/decompose it."
+  }
+]
