@@ -56,7 +56,8 @@ Every batch must preserve these properties:
 
 ### B01 — Strategy and delivery ledger
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#105](https://github.com/luka-zivkovic/chvor/pull/105)
 - **Dependencies:** B00
 - **Outcome:** Put the inspiration research, capability-gap audit, and this ordered PR ledger under version control.
 - **Acceptance criteria:**
@@ -70,7 +71,7 @@ Every batch must preserve these properties:
 
 ### A01 — Canonical trajectory contract
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** B01
 - **Outcome:** Define the engine-neutral, versioned representation of an agent run and its steps.
 - **Scope:** Shared types and Zod schemas for trajectory, step, actor, model usage, tool call, approval reference, error, timing, and redacted artifact references.
