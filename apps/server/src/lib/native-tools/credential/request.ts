@@ -8,6 +8,7 @@ import {
   findResumableForCredential,
 } from "../../pending-intent.ts";
 import type { NativeToolContext, NativeToolHandler, NativeToolResult } from "../types.ts";
+import { HITL_TIMEOUT_MS } from "../../hitl-timeouts.ts";
 
 export const REQUEST_CREDENTIAL_NAME = "native__request_credential";
 
@@ -221,13 +222,12 @@ export const handleRequestCredential: NativeToolHandler = async (
     ws.broadcast(credentialRequestEvent);
   }
 
-  // Wait for user response with 10-minute timeout
-  const CREDENTIAL_REQUEST_TIMEOUT_MS = 10 * 60_000;
+  // Wait for user response (shared HITL timeout).
   const response = await new Promise<import("@chvor/shared").CredentialResponseData>((resolve) => {
     const timer = setTimeout(() => {
       pendingCredentialRequests.delete(requestId);
       resolve({ requestId, cancelled: true });
-    }, CREDENTIAL_REQUEST_TIMEOUT_MS);
+    }, HITL_TIMEOUT_MS);
     pendingCredentialRequests.set(requestId, {
       resolve: (r) => { clearTimeout(timer); resolve(r); },
     });

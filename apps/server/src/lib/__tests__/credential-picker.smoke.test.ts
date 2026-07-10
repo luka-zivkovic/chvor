@@ -80,7 +80,7 @@ describe("credential-picker — tool-pinned", () => {
       sessionId: "sess-1",
       toolPinnedId: "this-id-does-not-exist",
     });
-    // Falls through to context-match (none) → first-match-fallback
+    // Falls through to first-match-fallback (ambiguous → caller asks)
     expect(pick!.reason).toBe("first-match-fallback");
   });
 });
@@ -115,36 +115,21 @@ describe("credential-picker — session pin", () => {
   });
 });
 
-describe("credential-picker — context-match", () => {
+describe("credential-picker — ambiguous fallback (no silent guessing)", () => {
   beforeEach(reset);
 
-  it("breaks ties using usage_context overlap", () => {
-    const work = createCredential(
-      "Work GitHub",
-      "github",
-      { apiKey: "ghp_a" },
-      "work, enterprise repos"
-    );
-    const personal = createCredential(
-      "Personal GitHub",
-      "github",
-      { apiKey: "ghp_b" },
-      "side projects, open source"
-    );
+  it("ignores usage_context overlap and falls through to first-match so the caller can ask", () => {
+    createCredential("Work GitHub", "github", { apiKey: "ghp_a" }, "work, enterprise repos");
+    createCredential("Personal GitHub", "github", { apiKey: "ghp_b" }, "side projects");
+    // Previously a usage_context overlap would auto-pick "Work GitHub". That
+    // tier was removed: with >1 candidate and no pin/llm choice, the picker
+    // must return first-match-fallback so synthesized-caller prompts the user.
     const pick = pickCredential("github", {
       sessionId: "sess-1",
       preferredUsageContext: ["work", "enterprise"],
     });
-    expect(pick!.credentialId).toBe(work.id);
-    expect(pick!.reason).toBe("context-match");
-    void personal;
-  });
-
-  it("does NOT pick by context when scores tie — falls through to first-match", () => {
-    createCredential("A GitHub", "github", { apiKey: "ghp_a" }, "work");
-    createCredential("B GitHub", "github", { apiKey: "ghp_b" }, "work");
-    const pick = pickCredential("github", { preferredUsageContext: ["work"] });
     expect(pick!.reason).toBe("first-match-fallback");
+    expect(pick!.candidateCount).toBe(2);
   });
 });
 

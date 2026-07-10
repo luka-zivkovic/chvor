@@ -198,10 +198,18 @@ export function getCredentialData(
   }
 }
 
+/**
+ * Per-field update payload. A `null` value explicitly deletes that field; an
+ * empty string keeps the existing value (forms submit blank to mean
+ * "unchanged"). Plain `CredentialData` is assignable since `string` widens to
+ * `string | null`.
+ */
+export type CredentialDataPatch = Record<string, string | null>;
+
 export function updateCredential(
   id: string,
   name: string | undefined,
-  data: CredentialData | undefined,
+  data: CredentialDataPatch | undefined,
   usageContext?: string
 ): CredentialSummary | null {
   const db = getDb();
@@ -219,12 +227,24 @@ export function updateCredential(
   const now = new Date().toISOString();
 
   const newName = name ?? cred.name;
-  // Merge data; empty string values = delete that field
-  const newData = data
-    ? Object.fromEntries(
-        Object.entries({ ...existingData, ...data }).filter(([, v]) => v !== "")
-      )
-    : existingData;
+  // Merge the patch into existing data:
+  //   null → explicitly delete the field
+  //   ""   → keep the existing value (forms submit blank to mean "unchanged")
+  //   else → set the new value
+  // Previously an empty string DELETED the field, which silently dropped
+  // unchanged secrets (and corrupted OAuth token blobs) on partial updates.
+  let newData: CredentialData;
+  if (data) {
+    const merged: CredentialData = { ...existingData };
+    for (const [k, v] of Object.entries(data)) {
+      if (v === null) delete merged[k];
+      else if (v === "") continue;
+      else merged[k] = v;
+    }
+    newData = merged;
+  } else {
+    newData = existingData;
+  }
   const newEncrypted = data ? encrypt(JSON.stringify(newData)) : cred.encryptedData;
   const newTestStatus = data ? "untested" : (cred.testStatus ?? "untested");
   const newUsageContext = usageContext !== undefined ? usageContext : cred.usageContext;

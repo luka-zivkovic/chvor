@@ -12,23 +12,23 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { lookup } from "node:dns/promises";
-import * as https from "node:https";
-import * as http from "node:http";
-import type { Tool, SynthesizedEndpoint, ConnectionConfig } from "@chvor/shared";
+import type { Tool, SynthesizedEndpoint } from "@chvor/shared";
 import { getCredentialData, listCredentials, updateCredential } from "../db/credential-store.ts";
-import { isPrivateIp, isPrivateHostname } from "./url-safety.ts";
 import { logError } from "./error-logger.ts";
 import { insertActivity } from "../db/activity-store.ts";
 import { requestApproval, recordSuccess, recordFailure, getSessionStats } from "./approval-gate.ts";
 import { refreshAccessToken, type OAuthProviderConfig } from "./oauth-engine.ts";
 import { getDirectOAuthProvider } from "./oauth-providers.ts";
-import { SynthesizedToolError } from "./errors.ts";
 import { pickCredential, type PickResult } from "./credential-picker.ts";
+import { resolveSafeSynthesizedTarget, pinnedHttpsRequest, type PinnedResponse, type ResolvedTarget } from "./synthesized/network.ts";
+export { assertSafeSynthesizedUrl, pinnedHttpsRequest, resolveSafeSynthesizedTarget } from "./synthesized/network.ts";
+export type { PinnedResponse, ResolvedTarget } from "./synthesized/network.ts";
+import { applyAuth, buildUrl, stripCrlf } from "./synthesized/auth.ts";
 import {
   addSecretsToSeal,
   extractSecretValues,
   redactKnownSecrets,
+  redactKnownSecretsInString,
   withSecretSeal,
 } from "./credential-injector.ts";
 
@@ -36,7 +36,6 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 600_000;
 const MAX_RESPONSE_BYTES = 200 * 1024;
 const TRUNCATION_PREVIEW_BYTES = 4 * 1024;
-const ALLOW_PRIVATE = process.env.CHVOR_SYNTH_ALLOW_PRIVATE === "1";
 
 export interface CallContext {
   sessionId?: string;
@@ -107,229 +106,8 @@ function pickCredentialForCall(
   }
 }
 
-// ── URL construction ───────────────────────────────────────────
-
-function substitutePathParams(path: string, pathParams: Record<string, string | number>): string {
-  return path.replace(/\{([^}]+)\}/g, (match, key: string) => {
-    const k = key.trim();
-    if (!(k in pathParams)) return match;
-    return encodeURIComponent(String(pathParams[k]));
-  });
-}
-
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
-}
-
-function buildUrl(
-  baseUrl: string,
-  endpointPath: string,
-  pathParams: Record<string, string | number>,
-  queryParams: Record<string, string | number | boolean>
-): string {
-  const path = substitutePathParams(endpointPath, pathParams);
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  const url = new URL(normalizeBaseUrl(baseUrl) + normalizedPath);
-  for (const [key, value] of Object.entries(queryParams)) {
-    if (value === undefined || value === null || value === "") continue;
-    url.searchParams.set(key, String(value));
-  }
-  return url.toString();
-}
-
-// ── Network safety ─────────────────────────────────────────────
-
-export interface ResolvedTarget {
-  url: URL;
-  resolvedIp: string;
-  hostname: string;
-}
-
-/**
- * Validate the URL and resolve the hostname exactly once.
- * The returned resolvedIp is what the HTTP request will actually connect to,
- * preventing a second DNS lookup that could rebind to a private address.
- */
-export async function resolveSafeSynthesizedTarget(rawUrl: string): Promise<ResolvedTarget> {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new SynthesizedToolError(`invalid URL: ${rawUrl}`, {
-      code: "synth.url_blocked",
-      context: { rawUrl, reason: "parse_failed" },
-      userFacing: true,
-    });
-  }
-  if (parsed.protocol !== "https:") {
-    throw new SynthesizedToolError(
-      `non-HTTPS blocked (got ${parsed.protocol}) — synthesized tool calls require HTTPS`,
-      { code: "synth.url_blocked", context: { rawUrl, reason: "non_https" }, userFacing: true }
-    );
-  }
-  const hostname = parsed.hostname;
-  // Block IP literals — hostname must be DNS-resolvable
-  if (/^[0-9.]+$/.test(hostname) || hostname.includes(":")) {
-    throw new SynthesizedToolError(`IP literal hostname blocked: ${hostname}`, {
-      code: "synth.url_blocked",
-      context: { hostname, reason: "ip_literal" },
-      userFacing: true,
-    });
-  }
-  if (!ALLOW_PRIVATE && isPrivateHostname(hostname)) {
-    throw new SynthesizedToolError(`private/internal hostname blocked: ${hostname}`, {
-      code: "synth.url_blocked",
-      context: { hostname, reason: "private_hostname" },
-      userFacing: true,
-    });
-  }
-  const { address } = await lookup(hostname);
-  if (!ALLOW_PRIVATE && isPrivateIp(address)) {
-    throw new SynthesizedToolError(`private/link-local address blocked: ${hostname} → ${address}`, {
-      code: "synth.url_blocked",
-      context: { hostname, address, reason: "private_resolution" },
-      userFacing: true,
-    });
-  }
-  return { url: parsed, resolvedIp: address, hostname };
-}
-
-/** Legacy alias kept for spec-fetcher callers. */
-export async function assertSafeSynthesizedUrl(rawUrl: string): Promise<URL> {
-  const { url } = await resolveSafeSynthesizedTarget(rawUrl);
-  return url;
-}
-
-// ── Pinned-IP HTTPS request ────────────────────────────────────
-
-export interface PinnedResponse {
-  status: number;
-  statusText: string;
-  headers: Record<string, string>;
-  body: Buffer;
-  truncated: boolean;
-  size: number;
-}
-
-/**
- * HTTPS request where the connection is pinned to `target.resolvedIp`, while
- * SNI and the `Host:` header preserve the original hostname so TLS cert
- * validation + virtual hosting still work. This closes the DNS-rebinding
- * window between the safety check and the actual connection.
- */
-export async function pinnedHttpsRequest(args: {
-  target: ResolvedTarget;
-  method: string;
-  headers: Record<string, string>;
-  body?: Buffer;
-  timeoutMs: number;
-  maxBytes: number;
-}): Promise<PinnedResponse> {
-  const { target, method, headers, body, timeoutMs, maxBytes } = args;
-  const { url, resolvedIp, hostname } = target;
-
-  return await new Promise<PinnedResponse>((resolve, reject) => {
-    const options: https.RequestOptions = {
-      method,
-      host: resolvedIp,
-      servername: hostname,
-      port: url.port ? Number(url.port) : 443,
-      path: `${url.pathname}${url.search}`,
-      headers: { ...headers, Host: hostname },
-      timeout: timeoutMs,
-    };
-    const req = https.request(options, (res: http.IncomingMessage) => {
-      const chunks: Buffer[] = [];
-      let size = 0;
-      let truncated = false;
-      res.on("data", (chunk: Buffer) => {
-        if (truncated) return;
-        const c = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        if (size + c.byteLength > maxBytes) {
-          const remaining = maxBytes - size;
-          if (remaining > 0) chunks.push(c.subarray(0, remaining));
-          size = maxBytes;
-          truncated = true;
-          req.destroy();
-          return;
-        }
-        chunks.push(c);
-        size += c.byteLength;
-      });
-      res.on("end", () => {
-        const headersOut: Record<string, string> = {};
-        for (const [k, v] of Object.entries(res.headers)) {
-          if (typeof v === "string") headersOut[k.toLowerCase()] = v;
-          else if (Array.isArray(v)) headersOut[k.toLowerCase()] = v.join(", ");
-        }
-        resolve({
-          status: res.statusCode ?? 0,
-          statusText: res.statusMessage ?? "",
-          headers: headersOut,
-          body: Buffer.concat(chunks),
-          truncated,
-          size,
-        });
-      });
-      res.on("error", reject);
-    });
-    req.on("error", reject);
-    req.on("timeout", () => {
-      req.destroy(new Error(`request timed out after ${timeoutMs}ms`));
-    });
-    if (body !== undefined) req.write(body);
-    req.end();
-  });
-}
-
-// ── Auth application ───────────────────────────────────────────
-
-/** Strip CR/LF to prevent header injection via credential values or templates. */
-function stripCrlf(input: string): string {
-  return input.replace(/[\r\n]+/g, "");
-}
-
-function applyAuth(
-  headers: Record<string, string>,
-  url: URL,
-  auth: ConnectionConfig["auth"],
-  data: Record<string, string>
-): void {
-  const apiKey = data.apiKey ?? data.token ?? data.accessToken ?? "";
-
-  const renderTemplate = (template: string | undefined, fallback: string): string => {
-    const t = template ?? fallback;
-    const rendered = t.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => data[k] ?? "");
-    return stripCrlf(rendered);
-  };
-
-  switch (auth.scheme) {
-    case "bearer":
-      headers["Authorization"] = renderTemplate(auth.headerTemplate, `Bearer ${apiKey}`);
-      break;
-    case "api-key-header":
-      headers[stripCrlf(auth.headerName ?? "x-api-key")] = renderTemplate(
-        auth.headerTemplate,
-        apiKey
-      );
-      break;
-    case "basic": {
-      const user = data.username ?? "";
-      const pass = data.password ?? apiKey;
-      headers["Authorization"] =
-        `Basic ${Buffer.from(`${stripCrlf(user)}:${stripCrlf(pass)}`).toString("base64")}`;
-      break;
-    }
-    case "query-param":
-      url.searchParams.set(auth.queryParam ?? "api_key", apiKey);
-      break;
-    case "custom":
-      if (auth.headerName && auth.headerTemplate) {
-        headers[stripCrlf(auth.headerName)] = renderTemplate(auth.headerTemplate, apiKey);
-      }
-      break;
-  }
-}
+// URL construction + auth application live in ./synthesized/auth.ts
+// Network safety + pinned HTTPS request live in ./synthesized/network.ts
 
 // ── Auth diagnostics ───────────────────────────────────────────
 
@@ -339,8 +117,10 @@ function diagnoseAuthError(args: {
   tool: Tool;
   endpoint: SynthesizedEndpoint;
   sessionId?: string;
+  /** True when the credential is OAuth-derived (so "re-enter token" is wrong). */
+  isOAuth?: boolean;
 }): AuthDiagnosis {
-  const { status, responseBody, tool, endpoint, sessionId } = args;
+  const { status, responseBody, tool, endpoint, sessionId, isOAuth } = args;
   const body = responseBody.toLowerCase();
   const stats = getSessionStats(sessionId, tool.id, endpoint.name);
 
@@ -355,6 +135,18 @@ function diagnoseAuthError(args: {
   }
 
   if (/expired|invalid_token|token revoked|jwt exp|token.* (expired|revoked)/.test(body)) {
+    // OAuth credentials cannot be fixed by pasting a new token — the user must
+    // re-run the connect flow so a fresh access/refresh token pair is minted.
+    if (isOAuth) {
+      return {
+        error: "auth_failed",
+        status,
+        likelyCause: "expired_token",
+        userFacingHint: `Your ${tool.metadata.name} connection expired and couldn't be refreshed automatically. Reconnect it from Settings → Integrations to re-authorize.`,
+        aiGuidance:
+          "This is an OAuth credential. Do NOT call native__request_credential to paste a token; tell the user to reconnect via the OAuth flow (Settings → Integrations).",
+      };
+    }
     return {
       error: "auth_failed",
       status,
@@ -808,7 +600,9 @@ export async function callSynthesizedEndpoint(
         endpointName: endpoint.name,
         method: endpoint.method,
         path: endpoint.path,
-        resolvedUrl: target.url.toString(),
+        // query-param auth schemes put the secret in the URL; scrub it so the
+        // approval modal and the stored approval record never show it.
+        resolvedUrl: redactKnownSecretsInString(target.url.toString()),
         argsPreview,
         pathParams: Object.keys(pathParams).length > 0 ? pathParams : undefined,
         queryParams: Object.keys(queryParams).length > 0 ? queryParams : undefined,
@@ -857,9 +651,9 @@ export async function callSynthesizedEndpoint(
       return { ok: false, error: `network error: ${msg}`, durationMs: Date.now() - started };
     }
 
-    const rawText = response.body.toString("utf-8");
-    const truncated = response.truncated;
-    const size = response.size;
+    let rawText = response.body.toString("utf-8");
+    let truncated = response.truncated;
+    let size = response.size;
 
     logError("mcp_crash" as const, "", {
       kind: "synthesized_call",
@@ -885,7 +679,7 @@ export async function callSynthesizedEndpoint(
       parsed = rawText;
     }
 
-    const finalBody = truncated
+    let finalBody = truncated
       ? {
           truncated: true as const,
           preview: rawText.slice(0, TRUNCATION_PREVIEW_BYTES),
@@ -944,25 +738,25 @@ export async function callSynthesizedEndpoint(
             };
           }
 
-          const refreshedRawText = response.body.toString("utf-8");
-          const refreshedTruncated = response.truncated;
-          const refreshedSize = response.size;
+          rawText = response.body.toString("utf-8");
+          truncated = response.truncated;
+          size = response.size;
           const refreshedContentType = response.headers["content-type"] ?? "";
           let refreshedParsed: unknown;
           if (refreshedContentType.includes("application/json")) {
             try {
-              refreshedParsed = JSON.parse(refreshedRawText);
+              refreshedParsed = JSON.parse(rawText);
             } catch {
-              refreshedParsed = refreshedRawText;
+              refreshedParsed = rawText;
             }
           } else {
-            refreshedParsed = refreshedRawText;
+            refreshedParsed = rawText;
           }
-          const refreshedFinalBody = refreshedTruncated
+          finalBody = truncated
             ? {
                 truncated: true as const,
-                preview: refreshedRawText.slice(0, TRUNCATION_PREVIEW_BYTES),
-                size: refreshedSize,
+                preview: rawText.slice(0, TRUNCATION_PREVIEW_BYTES),
+                size,
               }
             : refreshedParsed;
 
@@ -989,16 +783,16 @@ export async function callSynthesizedEndpoint(
                 queryParams,
                 body: bodyValue,
                 responseStatus: response.status,
-                responseBody: refreshedFinalBody,
+                responseBody: finalBody,
                 durationMs: Date.now() - started,
               });
             }
             return {
               ok: true,
               status: response.status,
-              body: refreshedFinalBody,
-              truncated: refreshedTruncated,
-              size: refreshedSize,
+              body: finalBody,
+              truncated,
+              size,
               durationMs: Date.now() - started,
             };
           }
@@ -1018,6 +812,11 @@ export async function callSynthesizedEndpoint(
         tool,
         endpoint,
         sessionId: context.sessionId,
+        // Only treat as OAuth on strong signals. A bare `accessToken` field is
+        // a legitimate manual credential key for some providers (e.g. Matrix),
+        // and the "reconnect via OAuth" remedy only makes sense when there is
+        // actually a refresh path (refreshToken) or token endpoint (tokenUrl).
+        isOAuth: Boolean(cred.data.refreshToken || cred.data.tokenUrl),
       });
       return {
         ok: false,
@@ -1033,7 +832,9 @@ export async function callSynthesizedEndpoint(
       return {
         ok: false,
         status: response.status,
-        error: `${response.status} ${response.statusText}: ${rawText.slice(0, 500)}`,
+        // Some providers echo the submitted token (or PII) in error bodies;
+        // scrub known secret values before the body reaches the LLM.
+        error: `${response.status} ${response.statusText}: ${redactKnownSecretsInString(rawText.slice(0, 500))}`,
         durationMs: Date.now() - started,
       };
     }
@@ -1063,125 +864,5 @@ export async function callSynthesizedEndpoint(
   });
 }
 
-// ── Generic credential probe (Track 0.3) ───────────────────────
-
-export interface ProbeResult {
-  ok: boolean;
-  status?: number;
-  /** Resolved URL we actually called (helps diagnose typos in baseUrl). */
-  probedUrl?: string;
-  /** Short body preview when failing. */
-  bodyPreview?: string;
-  error?: string;
-  durationMs: number;
-}
-
-/**
- * Probes a service with a candidate ConnectionConfig + credential data, before
- * the credential is saved. Useful as a pre-save sanity check so users find out
- * about wrong baseUrls / auth-scheme mismatches immediately rather than minutes
- * later when the AI tries to use the credential.
- *
- * Strategy: a single GET against `probePath` (or `/` if omitted) on baseUrl, with
- * full SSRF gates and the same auth pipeline as live calls. Any 2xx/3xx is a
- * pass; 401/403 is a fail with the diagnosis carried in the body preview.
- *
- * Note: many APIs serve a 404 at root but a 200 at e.g. `/v1/me`. Callers
- * should pass a `probePath` when known. Without one, a 404 is treated as
- * "host reachable but path unknown" and reported as ambiguous — not a hard
- * failure — because the credential may still be valid for actual endpoints.
- */
-export async function probeCredentialConfig(args: {
-  connection: ConnectionConfig;
-  data: Record<string, string>;
-  probePath?: string;
-  timeoutMs?: number;
-}): Promise<ProbeResult> {
-  const started = Date.now();
-  const { connection, data, probePath } = args;
-  const timeoutMs = Math.min(args.timeoutMs ?? 15_000, MAX_TIMEOUT_MS);
-
-  if (!connection.baseUrl) {
-    return { ok: false, error: "connectionConfig.baseUrl is required for probe", durationMs: 0 };
-  }
-  const baseUrl = connection.baseUrl;
-
-  return withSecretSeal(extractSecretValues(data), async () => {
-    const path = probePath && probePath.trim() ? probePath.trim() : "/";
-    let target: ResolvedTarget;
-    try {
-      const urlStr = buildUrl(baseUrl, path, {}, {});
-      target = await resolveSafeSynthesizedTarget(urlStr);
-    } catch (err) {
-      return {
-        ok: false,
-        error: `URL safety check failed: ${err instanceof Error ? err.message : String(err)}`,
-        durationMs: Date.now() - started,
-      };
-    }
-
-    const headersObj: Record<string, string> = { Accept: "application/json" };
-    if (connection.headers) {
-      for (const [k, v] of Object.entries(connection.headers)) {
-        headersObj[stripCrlf(k)] = stripCrlf(v);
-      }
-    }
-    applyAuth(headersObj, target.url, connection.auth, data);
-
-    let response: PinnedResponse;
-    try {
-      response = await pinnedHttpsRequest({
-        target,
-        method: "GET",
-        headers: headersObj,
-        timeoutMs,
-        maxBytes: 64 * 1024,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        ok: false,
-        probedUrl: target.url.toString(),
-        error: `network error: ${msg}`,
-        durationMs: Date.now() - started,
-      };
-    }
-
-    const bodyPreview = response.body.toString("utf-8").slice(0, 500);
-    const status = response.status;
-    const probedUrl = target.url.toString();
-
-    if (status >= 200 && status < 400) {
-      return { ok: true, status, probedUrl, durationMs: Date.now() - started };
-    }
-    // 404 with no probePath: ambiguous — the host responded, the credential may still be valid.
-    if (status === 404 && !probePath) {
-      return {
-        ok: true,
-        status,
-        probedUrl,
-        bodyPreview:
-          "host reachable, root path returned 404 — credential not validated, but baseUrl works",
-        durationMs: Date.now() - started,
-      };
-    }
-    if (status === 401 || status === 403) {
-      return {
-        ok: false,
-        status,
-        probedUrl,
-        bodyPreview,
-        error: `auth rejected (${status}) — check the credential value and auth scheme`,
-        durationMs: Date.now() - started,
-      };
-    }
-    return {
-      ok: false,
-      status,
-      probedUrl,
-      bodyPreview,
-      error: `HTTP ${status} ${response.statusText}`,
-      durationMs: Date.now() - started,
-    };
-  });
-}
+export { probeCredentialConfig } from "./synthesized/probe.ts";
+export type { ProbeResult } from "./synthesized/probe.ts";

@@ -38,8 +38,8 @@ export function hasRequiredCredentials(
 /**
  * Optional context to drive the multi-credential picker (Phase E).
  * - `sessionId` enables session pin lookup.
- * - `preferredUsageContext` is the union of active skills' hints — used to
- *   tie-break between candidates by `usage_context` token overlap.
+ * - `preferredUsageContext` is retained for caller compatibility but no longer
+ *   influences the pick (the usage_context scoring tier was removed).
  * - `onPick` is a sink for picker rationale; orchestrator wires it to a
  *   canvas event so users can see *which* credential fired.
  */
@@ -68,7 +68,7 @@ function loadPickedCredentialData(
   });
   if (!pick) return null;
   if (pick.reason === "first-match-fallback" && pick.candidateCount > 1 && !pickerCtx?.allowAmbiguousFallback) {
-    throw new Error(`[credential-resolver] multiple credentials of type "${reqType}" are available and no pin or usage_context selected a clear winner — pin a credential for this session or use a more specific credential reference`);
+    throw new Error(`[credential-resolver] multiple credentials of type "${reqType}" are available and none was pinned or explicitly selected — pin a credential for this session or use a more specific credential reference`);
   }
   const full = getCredentialData(pick.credentialId);
   if (!full) return null;

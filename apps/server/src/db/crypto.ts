@@ -14,13 +14,33 @@ const ALGORITHM = "aes-256-gcm";
 const KEY_PATH = join(DATA_DIR, ".encryption-key");
 
 function loadOrCreateKey(): Buffer {
+  // Highest priority: an env-provided key. This lets the master key live
+  // outside the data volume (e.g. in a secrets manager / systemd credential)
+  // rather than in plaintext next to the DB — the only thing that gives
+  // encryption-at-rest real value against disk access.
+  const envKey = process.env.CHVOR_ENCRYPTION_KEY?.trim();
+  if (envKey) {
+    const buf = Buffer.from(envKey, "hex");
+    if (buf.length !== 32) {
+      throw new Error(
+        "CHVOR_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes); " +
+          `got ${envKey.length} chars (${buf.length} bytes)`
+      );
+    }
+    return buf;
+  }
+
   mkdirSync(DATA_DIR, { recursive: true });
   if (existsSync(KEY_PATH)) {
     return Buffer.from(readFileSync(KEY_PATH, "utf8").trim(), "hex");
   }
   const key = randomBytes(32);
   writeFileSync(KEY_PATH, key.toString("hex"), { mode: 0o600 });
-  console.log("[crypto] generated new encryption key");
+  console.log(
+    "[crypto] generated new encryption key at the data dir. For stronger " +
+      "at-rest protection, set CHVOR_ENCRYPTION_KEY instead so the key lives " +
+      "outside the data volume."
+  );
   return key;
 }
 

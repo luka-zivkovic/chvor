@@ -693,6 +693,14 @@ if (!hasLLM) {
 
 const server = serve({ fetch: app.fetch, port }, () => {
   console.log(`[chvor] server running at http://localhost:${port}`);
+  if (!isAuthEnabled()) {
+    console.warn(
+      `[chvor] ⚠ authentication is DISABLED — every API endpoint (including ` +
+        `credential reveal) is open to anyone who can reach http://localhost:${port}. ` +
+        `This is the intended posture for single-user localhost use; set up a ` +
+        `password in Settings → Security if this host is reachable by others.`
+    );
+  }
 });
 
 server.on("error", (err: NodeJS.ErrnoException) => {

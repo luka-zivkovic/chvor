@@ -10,9 +10,10 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --workspace-concurrency=1 test",
-    "lint": "eslint apps/ packages/",
+    "lint": "pnpm lint:lines && eslint apps/ packages/",
     "format": "prettier --write \"apps/**/*.{ts,tsx}\" \"packages/**/*.ts\"",
-    "format:check": "prettier --check \"apps/**/*.{ts,tsx}\" \"packages/**/*.ts\""
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx}\" \"packages/**/*.ts\"",
+    "lint:lines": "node scripts/check-file-line-limit.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9",
