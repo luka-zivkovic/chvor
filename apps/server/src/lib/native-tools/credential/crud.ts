@@ -437,7 +437,24 @@ export const handleUseCredential: NativeToolHandler = async (
     reasons: ["explicit credential value reveal requested"],
     checkpointId,
     originClientId: context.originClientId,
+    toolCallId: context.toolCallId,
+    abortSignal: context.abortSignal,
   });
+
+  if (!outcome.allowed && outcome.reason === "aborted") {
+    context.emitEvent?.({
+      type: "security.approval.resolved",
+      data: {
+        toolName: USE_CREDENTIAL_NAME,
+        kind: "native",
+        status: "expired",
+        decision: null,
+      },
+    });
+    const abortError = new Error("Credential reveal approval aborted");
+    abortError.name = "AbortError";
+    throw abortError;
+  }
 
   if (!outcome.allowed) {
     context.emitEvent?.({
@@ -454,7 +471,8 @@ export const handleUseCredential: NativeToolHandler = async (
   }
 
   const { withSecretSeal, extractSecretValues } = await import("../../credential-injector.ts");
-  return withSecretSeal(extractSecretValues(record.data), async () => {
+  const secrets = extractSecretValues(record.data);
+  return withSecretSeal(secrets, async () => {
     context.emitEvent?.({
       type: "security.approval.resolved",
       data: {

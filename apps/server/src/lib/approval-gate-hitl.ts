@@ -14,6 +14,10 @@ import {
   getApproval,
 } from "../db/approval-store.ts";
 import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
+import {
+  recordTrajectoryApprovalRequested,
+  recordTrajectoryApprovalResolved,
+} from "./orchestrator/trajectory-adapter.ts";
 
 /**
  * Phase D4 — durable HITL gate for HIGH-risk native/MCP/PC/shell actions.
@@ -64,6 +68,7 @@ function getTimeoutMs(): number {
 export interface RequestNativeApprovalArgs {
   sessionId: string | null;
   actionId: string | null;
+  toolCallId?: string;
   toolName: string;
   kind: SecurityActionKind;
   args: Record<string, unknown>;
@@ -72,11 +77,12 @@ export interface RequestNativeApprovalArgs {
   checkpointId: string | null;
   /** WS clientId of the originating UI session (when known). */
   originClientId?: string;
+  abortSignal?: AbortSignal;
 }
 
 export type ApprovalOutcome =
   | { allowed: true; decision: "allow-once" | "allow-session"; record: ApprovalRecord }
-  | { allowed: false; reason: "denied" | "expired" | "no-ws"; record: ApprovalRecord | null };
+  | { allowed: false; reason: "denied" | "expired" | "no-ws" | "aborted"; record: ApprovalRecord | null };
 
 /**
  * Persist a pending approval row, emit `approval.requested`, and wait for
@@ -118,6 +124,30 @@ export async function requestNativeApproval(
     });
   });
 
+  // Capture only after both the durable row and in-memory waiter exist. The
+  // adapter is best-effort and cannot change approval behavior.
+  try {
+    const pendingRecord = getApproval(id);
+    if (pendingRecord) recordTrajectoryApprovalRequested(pendingRecord, args.toolCallId);
+  } catch (error) {
+    console.warn("[approval-gate-hitl] failed to capture pending approval:", error);
+  }
+
+  let aborted = false;
+  let removeAbortListener = (): void => undefined;
+  const abortPromise = new Promise<"aborted">((resolve) => {
+    if (!args.abortSignal) return;
+    const onAbort = (): void => {
+      aborted = true;
+      resolve("aborted");
+    };
+    if (args.abortSignal.aborted) onAbort();
+    else {
+      args.abortSignal.addEventListener("abort", onAbort, { once: true });
+      removeAbortListener = () => args.abortSignal?.removeEventListener("abort", onAbort);
+    }
+  });
+
   // Emit the WS event so the canvas can render the prompt. We don't return
   // early on `no-ws` — REST decide is still a valid path, and if there's
   // truly no decider the auto-expire job will close the row.
@@ -139,7 +169,7 @@ export async function requestNativeApproval(
   try {
     const { getWSInstance } = await import("../gateway/ws-instance.ts");
     const ws = getWSInstance();
-    if (!ws) {
+    if (!ws || aborted) {
       wsAvailable = false;
     } else {
       const event: GatewayServerEvent = { type: "approval.requested", data: wsEvent };
@@ -154,7 +184,20 @@ export async function requestNativeApproval(
     wsAvailable = false;
   }
 
-  const decision = await decisionPromise;
+  const decision = await Promise.race([decisionPromise, abortPromise]);
+  removeAbortListener();
+
+  if (decision === "aborted") {
+    const handle = pending.get(id);
+    if (handle) {
+      pending.delete(id);
+      clearTimeout(handle.timer);
+    }
+    expireApprovalById(id);
+    const record = getApproval(id);
+    if (record) recordTrajectoryApprovalResolved(record, args.toolCallId);
+    return { allowed: false, reason: "aborted", record };
+  }
 
   if (decision === "expired") {
     // Conditional pending → expired. If the periodic sweep got there first
@@ -163,6 +206,7 @@ export async function requestNativeApproval(
     // matters for the audit trail.
     expireApprovalById(id);
     const record = getApproval(id);
+    if (record) recordTrajectoryApprovalResolved(record, args.toolCallId);
     return {
       allowed: false,
       reason: wsAvailable ? "expired" : "no-ws",
@@ -176,6 +220,7 @@ export async function requestNativeApproval(
   if (!record) {
     return { allowed: false, reason: "expired", record: null };
   }
+  recordTrajectoryApprovalResolved(record, args.toolCallId);
   if (record.status === "allowed" && (decision === "allow-once" || decision === "allow-session")) {
     return { allowed: true, decision, record };
   }

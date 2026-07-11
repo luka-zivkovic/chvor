@@ -197,6 +197,8 @@ describe("canonical trajectory v1", () => {
   it("redacts sensitive keys and embedded credentials without mutating input", () => {
     const payload = {
       apiKey: "sk-abcdefghijklmnopqrstuvwxyz",
+      "X-API-Key": "opaque-header-secret",
+      "X-Auth-Token": "opaque-auth-secret",
       nested: {
         accessToken: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.signaturevalue",
         message: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
@@ -209,6 +211,8 @@ describe("canonical trajectory v1", () => {
     const sanitized = sanitizeTrajectoryValue(payload);
     expect(sanitized).toEqual({
       apiKey: TRAJECTORY_REDACTED_VALUE,
+      "X-API-Key": TRAJECTORY_REDACTED_VALUE,
+      "X-Auth-Token": TRAJECTORY_REDACTED_VALUE,
       nested: {
         accessToken: TRAJECTORY_REDACTED_VALUE,
         message: `Authorization=${TRAJECTORY_REDACTED_VALUE}`,

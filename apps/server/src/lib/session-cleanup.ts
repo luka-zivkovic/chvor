@@ -3,6 +3,7 @@ import { getStaleSessions, getRecentMessages, deleteSession, getActiveSessionIds
 import { extractAndStoreMemories } from "./memory-extractor.ts";
 import { resetSession } from "./session-reset.ts";
 import { clearSecrets } from "./sensitive-filter.ts";
+import { clearTrajectorySecrets } from "./orchestrator/trajectory-adapter.ts";
 import { pruneOldSnapshots } from "../db/emotion-store.ts";
 import { pruneTerminalTrajectories } from "../db/trajectory-store.ts";
 import { startPeriodicJob, stopPeriodicJob } from "./job-runner.ts";
@@ -19,6 +20,10 @@ export interface RetentionCleanupResult {
 }
 
 export async function runRetentionCleanup(): Promise<RetentionCleanupResult> {
+  // A retention pass is also a credential-cache lifecycle boundary. Active
+  // trajectories keep their run-local taints, while future runs repopulate the
+  // bounded cache from credential and MCP resolution as needed.
+  clearTrajectorySecrets();
   const config = getRetentionConfig();
   let trajectoriesDeleted = 0;
 
@@ -73,7 +78,7 @@ export async function runRetentionCleanup(): Promise<RetentionCleanupResult> {
     if (deleteSession(session.id)) deleted++;
   }
 
-  // Clear registered secrets to bound memory growth
+  // Clear the sensitive-filter cache when its backing sessions are removed.
   if (deleted > 0) clearSecrets();
 
   // Prune old emotion snapshots (same age as session retention)

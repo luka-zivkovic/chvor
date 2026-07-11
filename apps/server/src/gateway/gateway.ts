@@ -27,6 +27,7 @@ export class Gateway extends EventEmitter {
   private sessions = new SessionManager();
   private sessionLocks = new Map<string, Promise<void>>();
   private sessionAbortControllers = new Map<string, AbortController>();
+  private sessionStopAcknowledgers = new Map<string, () => void>();
 
   constructor() {
     super();
@@ -41,6 +42,7 @@ export class Gateway extends EventEmitter {
     const ctrl = this.sessionAbortControllers.get(sessionKey);
     if (ctrl) {
       ctrl.abort();
+      this.sessionStopAcknowledgers.get(sessionKey)?.();
       return true;
     }
     return false;
@@ -192,6 +194,16 @@ export class Gateway extends EventEmitter {
       const ws = getWSInstance();
       return ws ? ws.getClientsBySessionId(message.channelId) : (targetClient ? [targetClient] : []);
     };
+    let stopAcknowledged = false;
+    const acknowledgeStop = (): void => {
+      if (stopAcknowledged) return;
+      stopAcknowledged = true;
+      for (const clientId of sessionBroadcastClients()) {
+        this.emitEvent({ type: "chat.streamEnd", data: {} }, clientId);
+        this.emitEvent({ type: "chat.stopped", data: {} }, clientId);
+      }
+    };
+    this.sessionStopAcknowledgers.set(sessionKey, acknowledgeStop);
     try {
       const onChunk = (text: string) => {
         const content = redactSensitiveData(stripToolAnnotations(text));
@@ -217,6 +229,24 @@ export class Gateway extends EventEmitter {
         voiceContext: { ttsActive: willTtsBeActive(message.inputModality ?? "text") },
         extraRounds,
         abortSignal: abortController.signal,
+        trajectory: {
+          origin: {
+            kind: message.channelType === "web" ? "web-chat" : "channel",
+            sessionId: session.id,
+            channelType: message.channelType,
+            channelId: message.channelId,
+          },
+          actor: {
+            type: "user",
+            id: message.senderId,
+            ...(message.senderName ? { displayName: message.senderName } : {}),
+          },
+          attributes: {
+            legacyExecutionId: message.id,
+            workspaceId: message.workspaceId ?? session.workspaceId,
+            ...(message.threadId ? { threadId: message.threadId } : {}),
+          },
+        },
       });
       responseText = redactSensitiveData(stripToolAnnotations(result.text));
       actions = result.actions;
@@ -238,10 +268,7 @@ export class Gateway extends EventEmitter {
         // User stopped generation — discard partial response
         aborted = true;
         console.log(`[gateway] generation stopped by user for session: ${sessionKey}`);
-        for (const clientId of sessionBroadcastClients()) {
-          this.emitEvent({ type: "chat.streamEnd", data: {} }, clientId);
-          this.emitEvent({ type: "chat.stopped", data: {} }, clientId);
-        }
+        acknowledgeStop();
         this.emitEvent({
           type: "execution.event",
           data: { type: "execution.failed", data: { error: "Stopped by user" } },
@@ -262,6 +289,7 @@ export class Gateway extends EventEmitter {
       }
     } finally {
       this.sessionAbortControllers.delete(sessionKey);
+      this.sessionStopAcknowledgers.delete(sessionKey);
     }
 
     // Aborted — all cleanup already handled in catch block

@@ -33,6 +33,8 @@
  * Every other module imports the redactor.
  */
 
+import { registerTrajectorySecrets } from "./orchestrator/trajectory-adapter.ts";
+
 /** Single source of truth for the placeholder syntax. */
 export const PLACEHOLDER_RE = /\{\{credentials\.([^}]+)\}\}/g;
 
@@ -87,15 +89,16 @@ const NON_SECRET_FIELD_NAMES = new Set<string>([
 
 /**
  * Pick the values from `cred.data` that should be sealed during a call.
- * Anything that isn't on the non-secret allowlist is included; values that
- * are too short to scrub safely are skipped.
+ * Anything that isn't on the non-secret allowlist is included. Short values
+ * remain available for trajectory-scoped exact redaction, while the global
+ * process scrubber still ignores them to avoid broad false positives.
  */
 export function extractSecretValues(data: Record<string, string>): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(data)) {
     if (typeof v !== "string") continue;
     if (NON_SECRET_FIELD_NAMES.has(k)) continue;
-    if (v.length < MIN_SCRUB_LENGTH) continue;
+    if (v.length === 0) continue;
     out.push(v);
   }
   return out;
@@ -181,8 +184,10 @@ export async function withSecretSeal<T>(
   secrets: Iterable<string>,
   fn: () => Promise<T>
 ): Promise<T> {
+  const candidates = Array.from(secrets);
+  registerTrajectorySecrets(candidates);
   const added: string[] = [];
-  for (const raw of secrets) {
+  for (const raw of candidates) {
     if (!raw || raw.length < MIN_SCRUB_LENGTH) continue;
     activeSecrets.add(raw);
     secretRefcount.set(raw, (secretRefcount.get(raw) ?? 0) + 1);
@@ -205,8 +210,10 @@ export async function withSecretSeal<T>(
 
 /** Synchronous variant for tests + non-async call sites. */
 export function withSecretSealSync<T>(secrets: Iterable<string>, fn: () => T): T {
+  const candidates = Array.from(secrets);
+  registerTrajectorySecrets(candidates);
   const added: string[] = [];
-  for (const raw of secrets) {
+  for (const raw of candidates) {
     if (!raw || raw.length < MIN_SCRUB_LENGTH) continue;
     activeSecrets.add(raw);
     secretRefcount.set(raw, (secretRefcount.get(raw) ?? 0) + 1);
@@ -239,8 +246,10 @@ export function withSecretSealSync<T>(secrets: Iterable<string>, fn: () => T): T
  *   try { ...retry... } finally { release(); }
  */
 export function addSecretsToSeal(secrets: Iterable<string>): () => void {
+  const candidates = Array.from(secrets);
+  registerTrajectorySecrets(candidates);
   const added: string[] = [];
-  for (const raw of secrets) {
+  for (const raw of candidates) {
     if (!raw || raw.length < MIN_SCRUB_LENGTH) continue;
     activeSecrets.add(raw);
     secretRefcount.set(raw, (secretRefcount.get(raw) ?? 0) + 1);

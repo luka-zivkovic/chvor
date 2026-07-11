@@ -1,5 +1,7 @@
 import { listCredentials, getCredentialData } from "../db/credential-store.ts";
 import { pickCredential, type PickResult } from "./credential-picker.ts";
+import { extractSecretValues } from "./credential-injector.ts";
+import { registerTrajectorySecrets } from "./orchestrator/trajectory-adapter.ts";
 
 const PLACEHOLDER_RE = /\{\{credentials\.([^}]+)\}\}/g;
 
@@ -56,6 +58,7 @@ export interface PickerContext {
   }) => void;
   /** Fail closed by default instead of silently using first-match fallback. */
   allowAmbiguousFallback?: boolean;
+  onSecrets?: (values: string[]) => void;
 }
 
 function loadPickedCredentialData(
@@ -72,6 +75,10 @@ function loadPickedCredentialData(
   }
   const full = getCredentialData(pick.credentialId);
   if (!full) return null;
+  const secrets = extractSecretValues(full.data);
+  const registeredSecrets = secrets.flatMap((secret) => [secret, encodeURIComponent(secret)]);
+  registerTrajectorySecrets(registeredSecrets);
+  pickerCtx?.onSecrets?.(registeredSecrets);
   if (pickerCtx?.onPick) {
     try {
       const summary = listCredentials().find((c) => c.id === pick.credentialId);

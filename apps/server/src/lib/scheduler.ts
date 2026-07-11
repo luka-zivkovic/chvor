@@ -143,9 +143,10 @@ async function runSchedule(id: string): Promise<void> {
   console.log(`[scheduler] firing "${schedule.name}" (${id})`);
 
   try {
+    const messageId = `sched-${id}-${Date.now()}`;
     const messages: ChatMessage[] = [
       {
-        id: `sched-${id}-${Date.now()}`,
+        id: messageId,
         role: "user",
         content: `[SCHEDULED TASK EXECUTION — This task is already scheduled and running automatically. Do NOT create, modify, or delete any schedules. Just perform the task below.]\n\n${schedule.prompt}`,
         channelType: "scheduler",
@@ -187,9 +188,11 @@ async function runSchedule(id: string): Promise<void> {
 
         const workflowPrompt = `[WORKFLOW EXECUTION: "${skill.metadata.name}" — Triggered by schedule "${schedule.name}"]\n\nExecute the following workflow steps in order. Complete each step fully before moving to the next. Use your available tools as needed.\n\n${instructions}`;
 
+        const workflowMessageId = `sched-wf-${id}-${Date.now()}`;
+        const workflowSessionId = `sched-wf-${id}`;
         const workflowMessages: ChatMessage[] = [
           {
-            id: `sched-wf-${id}-${Date.now()}`,
+            id: workflowMessageId,
             role: "user",
             content: workflowPrompt,
             channelType: "scheduler",
@@ -201,11 +204,46 @@ async function runSchedule(id: string): Promise<void> {
           excludeTools: WORKFLOW_EXCLUDED_TOOLS,
           extraRounds: 5,
           channelType: "scheduler",
-          sessionId: `sched-wf-${id}`,
+          sessionId: workflowSessionId,
+          trajectory: {
+            origin: {
+              kind: "schedule",
+              scheduleId: schedule.id,
+              sessionId: workflowSessionId,
+              channelType: "scheduler",
+            },
+            actor: { type: "schedule", id: schedule.id, displayName: schedule.name },
+            attributes: {
+              legacyExecutionId: `sched-${id}`,
+              messageId: workflowMessageId,
+              scheduleId: schedule.id,
+              workspaceId: schedule.workspaceId,
+              workflowId: schedule.workflowId,
+            },
+          },
         });
         result = convResult.text;
       } else {
-        const convResult = await executeConversation(messages, emit, undefined, undefined, SCHEDULE_EXEC_OPTIONS);
+        const scheduleSessionId = `sched-${id}`;
+        const convResult = await executeConversation(messages, emit, undefined, undefined, {
+          ...SCHEDULE_EXEC_OPTIONS,
+          trajectory: {
+            origin: {
+              kind: "schedule",
+              scheduleId: schedule.id,
+              sessionId: scheduleSessionId,
+              channelType: "scheduler",
+            },
+            actor: { type: "schedule", id: schedule.id, displayName: schedule.name },
+            attributes: {
+              legacyExecutionId: `sched-${id}`,
+              messageId,
+              scheduleId: schedule.id,
+              workspaceId: schedule.workspaceId,
+              ...(schedule.workflowId === undefined ? {} : { workflowId: schedule.workflowId }),
+            },
+          },
+        });
         result = convResult.text;
       }
       emit({ type: "execution.completed", data: { output: result } });

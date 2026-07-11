@@ -4,10 +4,19 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import type { GatewayServerEvent } from "@chvor/shared";
+import type { ApprovalRecord, GatewayServerEvent, SecurityRisk } from "@chvor/shared";
 import { classifyCommand } from "../command-classifier.ts";
 import type { ClassificationResult } from "../command-classifier.ts";
 import { logShellExecution } from "../shell-audit.ts";
+import {
+  createAbortError,
+  throwIfAborted,
+  withAbortSideEffectFence,
+} from "../orchestrator/abort.ts";
+import {
+  recordTrajectoryApprovalRequested,
+  recordTrajectoryApprovalResolved,
+} from "../orchestrator/trajectory-adapter.ts";
 import {
   getShellConfig as getShellApprovalConfig,
   isTrustedCommand,
@@ -51,6 +60,69 @@ const shellExecuteToolDef = tool({
 
 const MAX_PENDING_APPROVALS = 50;
 
+function approvalRisk(classification: ClassificationResult): SecurityRisk {
+  if (classification.tier === "safe") return "low";
+  if (classification.tier === "moderate") return "medium";
+  return "high";
+}
+
+function transientApprovalRecord(
+  requestId: string,
+  command: string,
+  workingDir: string,
+  classification: ClassificationResult,
+  context?: NativeToolContext
+): ApprovalRecord {
+  const createdAt = Date.now();
+  const pcTask = /^PC Task:/i.test(command);
+  const pcShell = /^PC shell:/i.test(command);
+  const isPc = pcTask || pcShell;
+  return {
+    id: requestId,
+    sessionId: context?.sessionId ?? null,
+    actionId: null,
+    toolName: pcTask ? "native__pc_do" : pcShell ? "native__pc_shell" : SHELL_EXECUTE_NAME,
+    kind: isPc ? "pc_control" : "shell",
+    args: { command, workingDir, classifiedCommands: classification.subCommands },
+    risk: approvalRisk(classification),
+    reasons: [`${classification.tier} command requires user approval`],
+    checkpointId: null,
+    status: "pending",
+    decision: null,
+    decidedAt: null,
+    decidedBy: null,
+    createdAt,
+    expiresAt: createdAt + APPROVAL_TIMEOUT_MS,
+  };
+}
+
+function captureApprovalRequested(record: ApprovalRecord, toolCallId?: string): void {
+  try {
+    recordTrajectoryApprovalRequested(record, toolCallId);
+  } catch (error) {
+    console.warn("[shell] failed to capture pending approval:", error);
+  }
+}
+
+function captureApprovalResolved(
+  record: ApprovalRecord,
+  outcome: "allowed" | "denied" | "expired",
+  decidedBy: "user" | "system" | "auto-expire",
+  toolCallId?: string
+): void {
+  try {
+    recordTrajectoryApprovalResolved({
+      ...record,
+      status: outcome,
+      decision: outcome === "allowed" ? "allow-once" : outcome === "denied" ? "deny" : null,
+      decidedAt: Date.now(),
+      decidedBy,
+    }, toolCallId);
+  } catch (error) {
+    console.warn("[shell] failed to capture approval resolution:", error);
+  }
+}
+
 const pendingApprovals = new Map<
   string,
   {
@@ -68,9 +140,13 @@ export async function requestApproval(
   context?: NativeToolContext,
   opts?: { allowTrusted?: boolean; allowAlwaysAllow?: boolean }
 ): Promise<{ approved: boolean; requestId: string }> {
+  const abortSignal = context?.abortSignal;
+  throwIfAborted(abortSignal);
+
   // Check trusted commands — auto-approve if matched
   const isPc = /^PC (Task|shell):/i.test(command);
   if (opts?.allowTrusted !== false && isTrustedCommand(command, isPc)) {
+    throwIfAborted(abortSignal);
     return { approved: true, requestId: "trusted-auto" };
   }
 
@@ -80,9 +156,17 @@ export async function requestApproval(
   }
 
   const requestId = randomUUID();
+  const trajectoryApproval = transientApprovalRecord(
+    requestId,
+    command,
+    workingDir,
+    classification,
+    context
+  );
 
   // Send confirmation request via WS
   const { getWSInstance } = await import("../../gateway/ws-instance.ts");
+  throwIfAborted(abortSignal);
   const ws = getWSInstance();
 
   const confirmEvent: GatewayServerEvent = {
@@ -98,46 +182,93 @@ export async function requestApproval(
     },
   };
 
-  // Route to originating client if web, or broadcast
-  if (context?.originClientId) {
-    ws?.sendTo(context.originClientId, confirmEvent);
-  } else {
-    ws?.broadcast(confirmEvent);
-  }
-
-  // For non-web channels, send approval prompt (with inline buttons if supported)
-  if (context?.channelType && context.channelType !== "web" && context.channelId) {
-    const { getGatewayInstance } = await import("../../gateway/gateway-instance.ts");
-    const gw = getGatewayInstance();
-    if (gw) {
-      const channel = gw.getChannel(context.channelType);
-      if (channel?.sendApproval) {
-        await channel.sendApproval(context.channelId, requestId, command, classification.tier);
-      } else {
-        // Fallback for channels without inline approval buttons
-        const tierEmoji = classification.tier === "dangerous" ? "\u{1f534}" : "\u{1f7e1}";
-        await gw.sendToChannel(
-          context.channelType,
-          context.channelId,
-          `${tierEmoji} **Command requires approval:**\n\`\`\`\n${command}\n\`\`\`\nRisk: ${classification.tier.toUpperCase()}\n\nApprove or deny this command in the web dashboard.`
-        );
-      }
-    }
-  }
-
-  const approved = await new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => {
+  // Install the waiter before notifying clients so an immediate response
+  // cannot beat registration. Cancellation resolves to a marker rather than
+  // rejecting while notification imports/sends may still be in flight.
+  let timedOut = false;
+  const approvalPromise = new Promise<boolean | "aborted">((resolve) => {
+    let settled = false;
+    const finish = (approved: boolean | "aborted"): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       pendingApprovals.delete(requestId);
-      resolve(false);
+      abortSignal?.removeEventListener("abort", onAbort);
+      resolve(approved);
+    };
+    const onAbort = (): void => finish("aborted");
+    const timer = setTimeout(() => {
+      timedOut = true;
+      finish(false);
     }, APPROVAL_TIMEOUT_MS);
 
     pendingApprovals.set(requestId, {
-      resolve,
+      resolve: (approved) => finish(approved),
       timer,
       command,
       allowAlwaysAllow: opts?.allowAlwaysAllow !== false,
     });
+
+    if (abortSignal?.aborted) onAbort();
+    else abortSignal?.addEventListener("abort", onAbort, { once: true });
   });
+  captureApprovalRequested(trajectoryApproval, context?.toolCallId);
+
+  try {
+    // Route to originating client if web, or broadcast
+    throwIfAborted(abortSignal);
+    if (context?.originClientId) {
+      ws?.sendTo(context.originClientId, confirmEvent);
+    } else {
+      ws?.broadcast(confirmEvent);
+    }
+
+    // For non-web channels, send approval prompt (with inline buttons if supported)
+    if (context?.channelType && context.channelType !== "web" && context.channelId) {
+      const { getGatewayInstance } = await import("../../gateway/gateway-instance.ts");
+      throwIfAborted(abortSignal);
+      const gw = getGatewayInstance();
+      if (gw) {
+        const channel = gw.getChannel(context.channelType);
+        if (channel?.sendApproval) {
+          throwIfAborted(abortSignal);
+          await channel.sendApproval(context.channelId, requestId, command, classification.tier);
+          throwIfAborted(abortSignal);
+        } else {
+          // Fallback for channels without inline approval buttons
+          const tierEmoji = classification.tier === "dangerous" ? "\u{1f534}" : "\u{1f7e1}";
+          throwIfAborted(abortSignal);
+          await gw.sendToChannel(
+            context.channelType,
+            context.channelId,
+            `${tierEmoji} **Command requires approval:**\n\`\`\`\n${command}\n\`\`\`\nRisk: ${classification.tier.toUpperCase()}\n\nApprove or deny this command in the web dashboard.`
+          );
+          throwIfAborted(abortSignal);
+        }
+      }
+    }
+  } catch (error) {
+    pendingApprovals.get(requestId)?.resolve(false);
+    await approvalPromise;
+    if (abortSignal?.aborted) {
+      captureApprovalResolved(trajectoryApproval, "expired", "system", context?.toolCallId);
+      throw createAbortError();
+    }
+    captureApprovalResolved(trajectoryApproval, "expired", "system", context?.toolCallId);
+    throw error;
+  }
+
+  const approved = await approvalPromise;
+  if (approved === "aborted" || abortSignal?.aborted) {
+    captureApprovalResolved(trajectoryApproval, "expired", "system", context?.toolCallId);
+    throw createAbortError();
+  }
+  captureApprovalResolved(
+    trajectoryApproval,
+    approved ? "allowed" : timedOut ? "expired" : "denied",
+    timedOut ? "auto-expire" : "user",
+    context?.toolCallId
+  );
 
   return { approved, requestId };
 }
@@ -229,21 +360,43 @@ export function buildSafeEnv(): Record<string, string> {
 function executeCommand(
   command: string,
   workingDir: string,
-  timeoutMs: number
+  timeoutMs: number,
+  abortSignal?: AbortSignal
 ): Promise<{ stdout: string; stderr: string; exitCode: number; durationMs: number }> {
+  throwIfAborted(abortSignal);
   const { shell, shellFlag } = getShellConfig();
   const start = Date.now();
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    throwIfAborted(abortSignal);
     const proc = spawn(shell, [shellFlag, command], {
       cwd: workingDir,
       env: buildSafeEnv(),
       timeout: timeoutMs,
       windowsHide: true,
+      detached: process.platform !== "win32",
+      signal: abortSignal,
     });
 
     let stdout = "";
     let stderr = "";
+    let aborted = false;
+    let processError: Error | null = null;
+    const killProcessTree = (): void => {
+      aborted = true;
+      if (proc.pid && process.platform !== "win32") {
+        try {
+          process.kill(-proc.pid, "SIGKILL");
+          return;
+        } catch {
+          // Fall back to killing the direct child below.
+        }
+      }
+      if (!proc.killed) {
+        try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+      }
+    };
+    abortSignal?.addEventListener("abort", killProcessTree, { once: true });
 
     proc.stdout?.on("data", (data: Buffer) => {
       stdout += data.toString();
@@ -261,18 +414,29 @@ function executeCommand(
 
     // Force-kill if process ignores SIGTERM after timeout
     proc.on("close", (code, signal) => {
+      abortSignal?.removeEventListener("abort", killProcessTree);
+      if (aborted || abortSignal?.aborted) {
+        reject(createAbortError());
+        return;
+      }
       resolve({
         stdout: stdout.trimEnd(),
         stderr:
           signal === "SIGKILL"
             ? (stderr.trimEnd() + "\n[process killed after timeout]").trimStart()
-            : stderr.trimEnd(),
+            : processError
+              ? processError.message
+              : stderr.trimEnd(),
         exitCode: code ?? 1,
         durationMs: Date.now() - start,
       });
     });
 
     proc.on("error", (err) => {
+      if (err.name === "AbortError" || abortSignal?.aborted) {
+        killProcessTree();
+        return;
+      }
       // Node fires 'error' with code ETIMEDOUT when spawn timeout triggers —
       // escalate to SIGKILL in case the process ignored SIGTERM
       if (!proc.killed) {
@@ -282,12 +446,7 @@ function executeCommand(
           /* already dead */
         }
       }
-      resolve({
-        stdout: stdout.trimEnd(),
-        stderr: err.message,
-        exitCode: 1,
-        durationMs: Date.now() - start,
-      });
+      processError = err;
     });
   });
 }
@@ -310,6 +469,7 @@ const handleShellExecute: NativeToolHandler = async (
   args: Record<string, unknown>,
   context?: NativeToolContext
 ): Promise<NativeToolResult> => {
+  throwIfAborted(context?.abortSignal);
   const command = String(args.command);
   const workingDir = args.workingDir ? String(args.workingDir) : homedir();
   const timeoutMs = Math.min(Number(args.timeoutMs) || 30_000, 300_000);
@@ -383,6 +543,7 @@ const handleShellExecute: NativeToolHandler = async (
 
   if (needsApproval) {
     const { approved } = await requestApproval(command, workingDir, classification, context);
+    throwIfAborted(context?.abortSignal);
 
     if (!approved) {
       logShellExecution({
@@ -401,7 +562,11 @@ const handleShellExecute: NativeToolHandler = async (
   }
 
   // 4. Execute
-  const result = await executeCommand(command, workingDir, timeoutMs);
+  throwIfAborted(context?.abortSignal);
+  const result = await withAbortSideEffectFence(
+    executeCommand(command, workingDir, timeoutMs, context?.abortSignal),
+    context?.abortSignal
+  );
 
   // 5. Audit
   logShellExecution({

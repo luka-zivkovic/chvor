@@ -9,6 +9,7 @@ import type { Tool } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
 import { resolveEnvPlaceholders, resolveUrlPlaceholders } from "./credential-resolver.ts";
 import { loadTools } from "./capability-loader.ts";
+import { registerTrajectorySecrets } from "./orchestrator/trajectory-adapter.ts";
 
 // Read version from package.json once at module load
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -47,6 +48,7 @@ interface McpConnection {
   tools: McpToolInfo[];
   toolId: string;
   tool: Tool; // stored for auto-reconnect on failure
+  secretValues: string[];
 }
 
 class McpManager {
@@ -58,22 +60,46 @@ class McpManager {
     this.spawning = new Map();
   }
 
+  registerConnectionSecrets(toolIds: Iterable<string>): void {
+    registerTrajectorySecrets(this.getConnectionSecrets(toolIds));
+  }
+
+  getConnectionSecrets(toolIds: Iterable<string>): string[] {
+    return Array.from(toolIds).flatMap(
+      (toolId) => this.connections.get(toolId)?.secretValues ?? []
+    );
+  }
+
+  /** Secrets retained only for the lifetime of currently active MCP connections. */
+  snapshotActiveConnectionSecrets(): string[] {
+    return Array.from(this.connections.values()).flatMap((connection) => connection.secretValues);
+  }
+
   /**
    * Get or spawn an MCP server for a tool. Lazy: first call spawns, subsequent reuse.
    * Concurrent calls for the same tool are deduplicated.
    */
   async getConnection(tool: Tool): Promise<McpConnection> {
     const existing = this.connections.get(tool.id);
-    if (existing) return existing;
+    if (existing) {
+      registerTrajectorySecrets(existing.secretValues);
+      return existing;
+    }
 
     // Dedup: return in-flight spawn promise if one exists
     const inflight = this.spawning.get(tool.id);
-    if (inflight) return inflight;
+    if (inflight) {
+      const connection = await inflight;
+      registerTrajectorySecrets(connection.secretValues);
+      return connection;
+    }
 
     const promise = this.spawnConnection(tool);
     this.spawning.set(tool.id, promise);
     try {
-      return await promise;
+      const connection = await promise;
+      registerTrajectorySecrets(connection.secretValues);
+      return connection;
     } catch (err) {
       logError("mcp_crash", err, { toolId: tool.id, command: tool.mcpServer?.command });
       throw err;
@@ -88,6 +114,8 @@ class McpManager {
     }
 
     const transportType = tool.mcpServer.transport ?? "stdio";
+    const secretValues = new Set<string>();
+    const pickerContext = { onSecrets: (values: string[]) => values.forEach((value) => secretValues.add(value)) };
     let transport: StdioClientTransport | SSEClientTransport;
 
     if (transportType === "sse" || transportType === "http") {
@@ -97,7 +125,8 @@ class McpManager {
       }
       const resolvedUrl = resolveUrlPlaceholders(
         tool.mcpServer.url,
-        tool.metadata.requires?.credentials
+        tool.metadata.requires?.credentials,
+        pickerContext
       );
       // Log redacted URL for diagnostics
       const redacted = resolvedUrl.replace(/\/[^/]{8,}$/, "/***");
@@ -111,7 +140,8 @@ class McpManager {
 
       const resolvedEnv = resolveEnvPlaceholders(
         tool.mcpServer.env,
-        tool.metadata.requires?.credentials
+        tool.metadata.requires?.credentials,
+        pickerContext
       );
 
       // On Windows, npx needs to be npx.cmd
@@ -166,6 +196,7 @@ class McpManager {
       tools,
       toolId: tool.id,
       tool,
+      secretValues: Array.from(secretValues),
     };
 
     this.connections.set(tool.id, connection);
@@ -183,26 +214,32 @@ class McpManager {
   async callTool(
     toolId: string,
     toolName: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    signal?: AbortSignal
   ): Promise<unknown> {
     const conn = this.connections.get(toolId);
     if (!conn) throw new Error(`No MCP connection for tool: ${toolId}`);
+    registerTrajectorySecrets(conn.secretValues);
 
     try {
       return await withTimeout(
-        conn.client.callTool({ name: toolName, arguments: args }),
+        conn.client.callTool({ name: toolName, arguments: args }, undefined, { signal }),
         CALL_TIMEOUT_MS,
         `MCP callTool ${toolId}/${toolName}`,
       );
     } catch (firstErr) {
+      if (signal?.aborted || (firstErr instanceof Error && firstErr.name === "AbortError")) {
+        throw firstErr;
+      }
       console.warn(`[mcp] callTool failed for ${toolId}/${toolName}, attempting reconnect…`);
       const toolRef = conn.tool;
       await this.closeConnection(toolId);
       await this.getConnection(toolRef);
       const newConn = this.connections.get(toolId);
       if (!newConn) throw firstErr;
+      registerTrajectorySecrets(newConn.secretValues);
       return await withTimeout(
-        newConn.client.callTool({ name: toolName, arguments: args }),
+        newConn.client.callTool({ name: toolName, arguments: args }, undefined, { signal }),
         CALL_TIMEOUT_MS,
         `MCP callTool retry ${toolId}/${toolName}`,
       );

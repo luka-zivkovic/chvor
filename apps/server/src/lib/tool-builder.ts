@@ -111,6 +111,11 @@ let inflightBuild: {
   promise: Promise<Record<string, ReturnType<typeof tool>>>;
 } | null = null;
 
+/** Seed input redaction from secrets tied to currently active MCP connections. */
+export function snapshotActiveMcpSecrets(): readonly string[] {
+  return mcpManager.snapshotActiveConnectionSecrets();
+}
+
 function scopeSignature(scope?: ToolBagScope): string {
   const allowedCreds = scope?.allowedCredentialTypes
     ? Array.from(scope.allowedCredentialTypes).sort().join(",")
@@ -267,16 +272,23 @@ export async function buildToolDefinitions(
     .join(",")}|${scopeSignature(scope)}|${credentialSurfaceSignature(eligibleTools, scope)}`;
 
   if (hash === cachedToolHash && cachedToolDefs) {
+    mcpManager.registerConnectionSecrets(eligibleTools.map((tool) => tool.id));
     return cachedToolDefs;
   }
 
   // Dedup concurrent calls — only reuse if building for the same tool set
-  if (inflightBuild && inflightBuild.hash === hash) return inflightBuild.promise;
+  if (inflightBuild && inflightBuild.hash === hash) {
+    const definitions = await inflightBuild.promise;
+    mcpManager.registerConnectionSecrets(eligibleTools.map((tool) => tool.id));
+    return definitions;
+  }
 
   const buildPromise = doBuild(eligibleTools, tools, hash, scope);
   inflightBuild = { hash, promise: buildPromise };
   try {
-    return await buildPromise;
+    const definitions = await buildPromise;
+    mcpManager.registerConnectionSecrets(eligibleTools.map((tool) => tool.id));
+    return definitions;
   } finally {
     inflightBuild = null;
   }

@@ -1,8 +1,9 @@
-import type { MediaArtifact } from "@chvor/shared";
+import type { MediaArtifact, TrajectoryJsonValue } from "@chvor/shared";
 import { listCredentials } from "../../db/credential-store.ts";
 import { LLM_CRED_TYPES } from "../provider-registry.ts";
 import { redactSensitiveData } from "../sensitive-filter.ts";
 import { storeMediaFromBase64 } from "../media-store.ts";
+import { sanitizeTrajectoryPayload } from "./trajectory-payload.ts";
 
 /** PC control tools whose media (screenshots) should not be shown in the chat UI */
 export const PC_INTERNAL_MEDIA_TOOLS = new Set(["native__pc_do", "native__pc_observe"]);
@@ -140,6 +141,18 @@ export function sanitizeResultForLLM(result: unknown, _media?: MediaArtifact[]):
       };
     }),
   };
+}
+
+/** Produce bounded, JSON-only, redacted tool output for trajectory persistence. */
+export function sanitizeResultForTrajectory(
+  result: unknown,
+  media?: MediaArtifact[],
+  toolName?: string
+): TrajectoryJsonValue {
+  if (toolName === "native__use_credential") {
+    return { content: [{ type: "text", text: "Credential retrieved." }] };
+  }
+  return sanitizeTrajectoryPayload(sanitizeResultForLLM(result, media));
 }
 
 /** Summarize a tool result into a short human-readable string */

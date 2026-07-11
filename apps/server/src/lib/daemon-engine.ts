@@ -28,6 +28,7 @@ import {
   playbookStepRefForLoop,
 } from "./cognitive-loop-playbooks.ts";
 import { containsSensitiveData, redactSensitiveData } from "./sensitive-filter.ts";
+import { settleTimedOutDaemonExecution, shouldRetryDaemonFailure } from "./daemon-timeout.ts";
 
 let wsRef: WSManager | null = null;
 let currentTask: DaemonTask | null = null;
@@ -344,6 +345,7 @@ async function daemonTick(): Promise<void> {
       );
       wsRef?.broadcast({ type: "daemon.taskUpdate", data: task });
 
+      let timedOut = false;
       try {
         console.log(`[daemon] executing task: ${task.title}`);
         const { executeConversation } = await import("./orchestrator.ts");
@@ -353,15 +355,14 @@ async function daemonTick(): Promise<void> {
 
         emit({ type: "execution.started", data: { executionId: `daemon-${task.id}` } });
 
-        // Race execution against timeout, with proper cleanup.
-        // Note: if the timeout wins, execPromise continues in the background
-        // because executeConversation does not accept an AbortSignal.
-        // The running guard (currentTask) prevents claiming new tasks until
-        // the finally block clears it.
+        const messageId = randomUUID();
+        const abortController = new AbortController();
+
+        // Race execution against timeout and abort the engine if the deadline wins.
         const execPromise = executeConversation(
           [
             {
-              id: randomUUID(),
+              id: messageId,
               role: "user" as const,
               content: `[DAEMON TASK — This task was queued for autonomous execution. Complete it now.]\n\n${task.prompt}`,
               channelType: "daemon",
@@ -376,15 +377,44 @@ async function daemonTick(): Promise<void> {
             channelType: "daemon",
             channelId: "daemon",
             actor: { type: "daemon", id: task.id },
+            abortSignal: abortController.signal,
+            trajectory: {
+              origin: task.loopId
+                ? {
+                    kind: "cognitive-loop",
+                    loopId: task.loopId,
+                    channelType: "daemon",
+                    channelId: "daemon",
+                  }
+                : {
+                    kind: "daemon",
+                    channelType: "daemon",
+                    channelId: "daemon",
+                  },
+              actor: { type: "daemon", id: task.id },
+              attributes: {
+                legacyExecutionId: `daemon-${task.id}`,
+                messageId,
+                taskId: task.id,
+                ...(task.retryCount === undefined ? {} : { retryCount: task.retryCount }),
+                ...(task.source === undefined ? {} : { source: task.source }),
+              },
+            },
           }
         );
         const timeoutPromise = new Promise<null>((resolve) => {
-          taskTimeoutHandle = setTimeout(() => resolve(null), TASK_TIMEOUT_MS);
+          taskTimeoutHandle = setTimeout(() => {
+            timedOut = true;
+            resolve(null);
+            abortController.abort();
+          }, TASK_TIMEOUT_MS);
         });
 
         const result = await Promise.race([execPromise, timeoutPromise]);
 
         if (result === null) {
+          timedOut = true;
+          await settleTimedOutDaemonExecution(execPromise, abortController.signal);
           throw new Error(`Task timed out after ${TASK_TIMEOUT_MS / 1000}s`);
         }
 
@@ -411,7 +441,7 @@ async function daemonTick(): Promise<void> {
 
         // Retry logic: re-queue if under retry limit
         const retryCount = task.retryCount ?? 0;
-        if (retryCount < MAX_RETRIES) {
+        if (shouldRetryDaemonFailure(timedOut, retryCount, MAX_RETRIES)) {
           updateDaemonTask(task.id, {
             status: "queued",
             retryCount: retryCount + 1,
@@ -427,9 +457,12 @@ async function daemonTick(): Promise<void> {
             `[daemon] task "${task.title}" failed, re-queued (retry ${retryCount + 1}/${MAX_RETRIES})`
           );
         } else {
+          const finalError = timedOut
+            ? `Timed out; not retried because operation settlement cannot be guaranteed: ${persistedError}`
+            : `Failed after ${MAX_RETRIES} retries: ${persistedError}`;
           updateDaemonTask(task.id, {
             status: "failed",
-            error: `Failed after ${MAX_RETRIES} retries: ${persistedError}`,
+            error: finalError,
           });
           const failedTask = getDaemonTask(task.id);
           if (failedTask) wsRef?.broadcast({ type: "daemon.taskUpdate", data: failedTask });
@@ -437,7 +470,7 @@ async function daemonTick(): Promise<void> {
           const failEntry = insertActivity({
             source: "daemon",
             title: `Failed: ${task.title}`,
-            content: `Failed after ${MAX_RETRIES} retries: ${persistedError}`.slice(0, 2000),
+            content: finalError.slice(0, 2000),
           });
           wsRef?.broadcast({ type: "activity.new", data: failEntry });
           console.error(`[daemon] task permanently failed: ${task.title}`, persistedError);

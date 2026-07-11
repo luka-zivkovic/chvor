@@ -13,6 +13,8 @@ export interface NativeToolContext {
   sessionId?: string;
   emitEvent?: (event: ExecutionEvent) => void;
   originClientId?: string;
+  toolCallId?: string;
+  abortSignal?: AbortSignal;
   channelType?: string;
   channelId?: string;
   workspaceId?: string;

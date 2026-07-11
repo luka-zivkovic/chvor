@@ -16,6 +16,8 @@ import { classifyCommand } from "../command-classifier.ts";
 import { getPcControlEnabled } from "../../db/config-store.ts";
 import { insertActivity } from "../../db/activity-store.ts";
 import { requestApproval } from "./shell.ts";
+import type { PcBackend } from "../pc-backend.ts";
+import { throwIfAborted, withAbortSideEffectFence } from "../orchestrator/abort.ts";
 import type {
   NativeToolContentItem,
   NativeToolContext,
@@ -143,10 +145,40 @@ async function requestPcTaskApproval(
   return approved;
 }
 
+/** Guard every backend boundary so a pipeline continuing after cancellation
+ * cannot initiate a stale desktop or shell side effect. */
+function abortAwareBackend(backend: PcBackend, abortSignal?: AbortSignal): PcBackend {
+  return {
+    mode: backend.mode,
+    id: backend.id,
+    hostname: backend.hostname,
+    os: backend.os,
+    screenSize: backend.screenSize,
+    coordinateSize: backend.coordinateSize,
+    captureScreen: () => {
+      throwIfAborted(abortSignal);
+      return withAbortSideEffectFence(backend.captureScreen(), abortSignal);
+    },
+    executeAction: (action) => {
+      throwIfAborted(abortSignal);
+      return withAbortSideEffectFence(backend.executeAction(action), abortSignal);
+    },
+    executeShell: (command, cwd) => {
+      throwIfAborted(abortSignal);
+      return withAbortSideEffectFence(backend.executeShell(command, cwd), abortSignal);
+    },
+    queryA11yTree: (opts) => {
+      throwIfAborted(abortSignal);
+      return withAbortSideEffectFence(backend.queryA11yTree(opts), abortSignal);
+    },
+  };
+}
+
 const handlePcDo: NativeToolHandler = async (
   args: Record<string, unknown>,
   context?: NativeToolContext
 ): Promise<NativeToolResult> => {
+  throwIfAborted(context?.abortSignal);
   if (!getPcControlEnabled()) {
     return {
       content: [
@@ -168,6 +200,7 @@ const handlePcDo: NativeToolHandler = async (
   } catch (err) {
     return { content: [{ type: "text", text: (err as Error).message }] };
   }
+  const guardedBackend = abortAwareBackend(backend, context?.abortSignal);
 
   // Safety approval — classify exact routed actions when available. In
   // semi-autonomous mode, only low-impact action-router tasks auto-execute;
@@ -195,6 +228,7 @@ const handlePcDo: NativeToolHandler = async (
 
   if (shouldPreApproveRouted) {
     const approved = await requestPcTaskApproval(task, backend.hostname, safetyAssessment, context);
+    throwIfAborted(context?.abortSignal);
     if (!approved) {
       return { content: [{ type: "text", text: "Task denied by user." }] };
     }
@@ -203,8 +237,10 @@ const handlePcDo: NativeToolHandler = async (
 
   // Build LLM call function using the server's LLM infrastructure
   const llmCall: LlmCallFn = async (prompt: string, image?: { data: string; mimeType: string }) => {
+    throwIfAborted(context?.abortSignal);
     const { createModelForRole } = await import("../llm-router.ts");
     const { generateText } = await import("ai");
+    throwIfAborted(context?.abortSignal);
 
     // Use "lightweight" role for a11y text-only calls, "primary" for vision
     const model = image ? createModelForRole("primary") : createModelForRole("lightweight");
@@ -226,16 +262,22 @@ const handlePcDo: NativeToolHandler = async (
     const result = await generateText({
       model,
       messages: messages as Parameters<typeof generateText>[0]["messages"],
+      abortSignal: context?.abortSignal,
     });
 
+    throwIfAborted(context?.abortSignal);
     return result.text;
   };
 
-  const result = await executePcTask(task, backend, {
-    emit: context?.emitEvent ?? (() => {}),
+  throwIfAborted(context?.abortSignal);
+  const result = await executePcTask(task, guardedBackend, {
+    emit: (event) => {
+      if (!context?.abortSignal?.aborted) context?.emitEvent?.(event);
+    },
     llmCall,
     safetyLevel,
     authorizeActions: async (actions: PcAction[], layer: PipelineLayer) => {
+      throwIfAborted(context?.abortSignal);
       if (layer === "action-router") return { allowed: true };
 
       const plannedAssessment = assessPcTaskSafety(task, actions, { routedActions: false });
@@ -254,11 +296,13 @@ const handlePcDo: NativeToolHandler = async (
         plannedAssessment,
         context
       );
+      throwIfAborted(context?.abortSignal);
       return approved
         ? { allowed: true }
         : { allowed: false, error: "Planned PC actions denied by user." };
     },
   });
+  throwIfAborted(context?.abortSignal);
 
   // Audit log
   try {
@@ -294,6 +338,7 @@ const handlePcObserve: NativeToolHandler = async (
   args: Record<string, unknown>,
   context?: NativeToolContext
 ): Promise<NativeToolResult> => {
+  throwIfAborted(context?.abortSignal);
   if (!getPcControlEnabled()) {
     return {
       content: [
@@ -315,17 +360,20 @@ const handlePcObserve: NativeToolHandler = async (
   } catch (err) {
     return { content: [{ type: "text", text: (err as Error).message }] };
   }
+  const guardedBackend = abortAwareBackend(backend, context?.abortSignal);
 
+  throwIfAborted(context?.abortSignal);
   context?.emitEvent?.({ type: "pc.screenshot", data: { agentId: backend.id } });
 
   // Capture screenshot and a11y tree in parallel
   const [screenshot, a11yTree] = await Promise.all([
-    backend.captureScreen().catch((err) => {
+    guardedBackend.captureScreen().catch((err) => {
       console.error("[pc-observe] screenshot failed:", err);
       return null;
     }),
-    backend.queryA11yTree({ maxDepth: 5 }).catch(() => null),
+    guardedBackend.queryA11yTree({ maxDepth: 5 }).catch(() => null),
   ]);
+  throwIfAborted(context?.abortSignal);
 
   const content: NativeToolContentItem[] = [];
 
@@ -375,6 +423,7 @@ const handlePcShell: NativeToolHandler = async (
   args: Record<string, unknown>,
   context?: NativeToolContext
 ): Promise<NativeToolResult> => {
+  throwIfAborted(context?.abortSignal);
   if (!getPcControlEnabled()) {
     return {
       content: [
@@ -393,6 +442,7 @@ const handlePcShell: NativeToolHandler = async (
   } catch (err) {
     return { content: [{ type: "text", text: (err as Error).message }] };
   }
+  const guardedBackend = abortAwareBackend(backend, context?.abortSignal);
 
   const classification = classifyCommand(command);
   if (classification.tier === "blocked") {
@@ -415,11 +465,14 @@ const handlePcShell: NativeToolHandler = async (
     context,
     { allowTrusted: false, allowAlwaysAllow: false }
   );
+  throwIfAborted(context?.abortSignal);
   if (!approved) {
     return { content: [{ type: "text", text: "Shell command denied by user." }] };
   }
 
-  const result = await backend.executeShell(command, cwd);
+  throwIfAborted(context?.abortSignal);
+  const result = await guardedBackend.executeShell(command, cwd);
+  throwIfAborted(context?.abortSignal);
 
   // Audit log
   try {
