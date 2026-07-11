@@ -36,6 +36,7 @@ export * from "./types/checkpoint.js";
 export * from "./types/approval.js";
 export * from "./types/trajectory.js";
 export * from "./types/evaluation-case.js";
+export * from "./types/evaluation-run.js";
 
 // Lib
 export * from "./lib/validate-skill.js";

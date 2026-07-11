@@ -11,17 +11,58 @@ const program = new Command()
   .description("Your own AI — install and run chvor.")
   .version(pkg.version);
 
-program
-  .action(async () => {
-    const { isOnboarded } = await import("./lib/config.js");
-    if (!isOnboarded()) {
-      const { onboard } = await import("./commands/onboard.js");
-      await onboard();
-    } else {
-      const { start } = await import("./commands/start.js");
-      await start({});
-    }
+const evalCommand = program.command("eval").description("Run isolated evaluation datasets");
+evalCommand
+  .command("run [files...]")
+  .description("Run saved case IDs or portable evaluation case files")
+  .option("--case <ids...>", "Saved evaluation case IDs")
+  .requiredOption("--provider <id>", "Model provider ID")
+  .requiredOption("--model <id>", "Model ID")
+  .option(
+    "--prompt <text>",
+    "Evaluation system prompt",
+    "You are Chvor. Complete the evaluation input safely."
+  )
+  .option("--tool-stubs <file>", "JSON file containing deterministic simulated tools")
+  .option("--max-cost <usd>", "Maximum USD per case")
+  .option("--input-price <usd>", "Input-token USD per million")
+  .option("--output-price <usd>", "Output-token USD per million")
+  .option("--max-latency <ms>", "Maximum latency per case")
+  .option("--url <url>", "Chvor API base URL")
+  .option("--token <token>", "API bearer token")
+  .option("--json", "Print canonical JSON")
+  .action(async (files: string[], opts) => {
+    const { runEvaluationCommand } = await import("./commands/eval.js");
+    process.exitCode = await runEvaluationCommand(files, {
+      ...opts,
+      baseUrl: opts.url,
+      cases: opts.case,
+    });
   });
+evalCommand
+  .command("compare <baseline> <candidate>")
+  .description("Compare two completed evaluation reports")
+  .option("--url <url>", "Chvor API base URL")
+  .option("--token <token>", "API bearer token")
+  .option("--json", "Print JSON")
+  .action(async (baseline: string, candidate: string, opts) => {
+    const { compareEvaluationCommand } = await import("./commands/eval.js");
+    process.exitCode = await compareEvaluationCommand(baseline, candidate, {
+      ...opts,
+      baseUrl: opts.url,
+    });
+  });
+
+program.action(async () => {
+  const { isOnboarded } = await import("./lib/config.js");
+  if (!isOnboarded()) {
+    const { onboard } = await import("./commands/onboard.js");
+    await onboard();
+  } else {
+    const { start } = await import("./commands/start.js");
+    await start({});
+  }
+});
 
 program
   .command("start")
@@ -70,15 +111,12 @@ program
     await init(opts);
   });
 
-const instancesCmd = program
-  .command("instances")
-  .description("Manage chvor instances");
+const instancesCmd = program.command("instances").description("Manage chvor instances");
 
-instancesCmd
-  .action(async () => {
-    const { listInstances } = await import("./commands/instances.js");
-    await listInstances();
-  });
+instancesCmd.action(async () => {
+  const { listInstances } = await import("./commands/instances.js");
+  await listInstances();
+});
 
 instancesCmd
   .command("start <name>")
@@ -125,9 +163,7 @@ program
     await docker(opts);
   });
 
-const skillCmd = program
-  .command("skill")
-  .description("Manage skills from the community registry");
+const skillCmd = program.command("skill").description("Manage skills from the community registry");
 
 skillCmd
   .command("search <query>")
@@ -185,9 +221,7 @@ skillCmd
     await skillPublish(path);
   });
 
-const toolCmd = program
-  .command("tool")
-  .description("Manage tools from the community registry");
+const toolCmd = program.command("tool").description("Manage tools from the community registry");
 
 toolCmd
   .command("search <query>")
@@ -253,9 +287,7 @@ program
     await open();
   });
 
-const serviceCmd = program
-  .command("service")
-  .description("Manage auto-start on login");
+const serviceCmd = program.command("service").description("Manage auto-start on login");
 
 serviceCmd
   .command("install")
@@ -296,9 +328,7 @@ serviceCmd
     await serviceStatus(opts);
   });
 
-const authCmd = program
-  .command("auth")
-  .description("Manage authentication");
+const authCmd = program.command("auth").description("Manage authentication");
 
 authCmd
   .command("reset")

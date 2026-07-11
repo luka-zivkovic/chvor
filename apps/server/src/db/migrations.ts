@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { migrateTrajectoryPersistenceV31 } from "./migrations/trajectory-v31.ts";
 import { migrateTrajectoryQueryIndexV32 } from "./migrations/trajectory-query-v32.ts";
 import { migrateEvaluationCasesV33 } from "./migrations/evaluation-cases-v33.ts";
+import { migrateEvaluationRunsV34 } from "./migrations/evaluation-runs-v34.ts";
 
 interface MigrationMessage {
   id: string;
@@ -979,5 +980,10 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
   if (currentVersion < 33) {
     migrateEvaluationCasesV33(db);
     console.log("[db] migration v33 applied: versioned evaluation cases");
+  }
+
+  if (currentVersion < 34) {
+    migrateEvaluationRunsV34(db);
+    console.log("[db] migration v34 applied: immutable evaluation run reports");
   }
 }

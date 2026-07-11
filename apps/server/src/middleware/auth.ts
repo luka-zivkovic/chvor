@@ -64,19 +64,22 @@ export function scopeMatches(granted: string[], required: string): boolean {
   return false;
 }
 
+function normalizeScopePath(path: string): string {
+  const rawPath = path.replace(/\?.*$/, "").replace(/\/$/, "");
+  try {
+    return decodeURIComponent(rawPath);
+  } catch {
+    // Keep malformed encoding conservative and let routing reject it later.
+    return rawPath;
+  }
+}
+
 /**
  * Classify a request path + method into a required scope.
  * Returns null when the path is outside the scope system (use-all-or-nothing).
  */
 export function requiredScopeFor(method: string, path: string): string | null {
-  // Strip query + trailing slash for normalization
-  const rawPath = path.replace(/\?.*$/, "").replace(/\/$/, "");
-  let p = rawPath;
-  try {
-    p = decodeURIComponent(rawPath);
-  } catch {
-    // Keep malformed encoding conservative and let routing reject it later.
-  }
+  const p = normalizeScopePath(path);
 
   // Auth endpoints already whitelisted upstream — no scope required.
   if (p.startsWith("/api/auth")) return null;
@@ -102,6 +105,10 @@ export function requiredScopeFor(method: string, path: string): string | null {
   // own read/write scope boundary, separate from generic API access.
   if (p === "/api/evaluation-cases" || p.startsWith("/api/evaluation-cases/")) {
     return method === "GET" || method === "HEAD" ? "evaluation:read" : "evaluation:write";
+  }
+
+  if (p === "/api/evaluation-runs" || p.startsWith("/api/evaluation-runs/")) {
+    return method === "GET" || method === "HEAD" ? "evaluation:read" : "evaluation:run";
   }
 
   // Session credential pins — credential-domain decision, not tool execution.
@@ -145,6 +152,20 @@ export function requiredScopeFor(method: string, path: string): string | null {
   return "api:write";
 }
 
+/**
+ * Return every scope required for a request. Most routes retain the existing
+ * single-scope behavior; starting an evaluation additionally requires read
+ * access because the runner loads evaluation cases and returns their details.
+ */
+export function requiredScopesFor(method: string, path: string): string[] {
+  const required = requiredScopeFor(method, path);
+  if (!required) return [];
+  if (method === "POST" && normalizeScopePath(path) === "/api/evaluation-runs") {
+    return [required, "evaluation:read"];
+  }
+  return [required];
+}
+
 export const chvorAuth = createMiddleware<AuthEnv>(async (c, next) => {
   const path = new URL(c.req.url).pathname;
 
@@ -183,43 +204,45 @@ export const chvorAuth = createMiddleware<AuthEnv>(async (c, next) => {
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.slice(7);
 
-    // API key: starts with "chvor_"
-    if (token.startsWith("chvor_")) {
-      const result = validateApiKey(token);
-      if (result.valid) {
-        const granted = parseScopes(result.scopes);
-        const required = requiredScopeFor(c.req.method, path);
-        if (required && !scopeMatches(granted, required)) {
-          appendAudit({
-            eventType: "apikey.forbidden",
-            actorType: "apikey",
-            actorId: result.keyId ?? null,
-            resourceType: "scope",
-            resourceId: required,
-            action: "deny",
-            httpMethod: c.req.method,
-            httpPath: path,
-            httpStatusCode: 403,
-            error: `API key missing required scope "${required}"`,
-          });
-          return c.json(
-            { error: "Forbidden", detail: `API key missing required scope "${required}"` },
-            403
-          );
-        }
-        c.set("authType", "apikey");
-        c.set("apiKeyId", result.keyId);
-        c.set("apiKeyScopes", granted);
-        return next();
+    // Validate every bearer as an API key first. Current keys use the
+    // `chvor_` prefix, while installation-era CHVOR_TOKEN values are imported
+    // as wildcard API keys and may be unprefixed hexadecimal strings.
+    const apiKey = validateApiKey(token);
+    if (apiKey.valid) {
+      const granted = parseScopes(apiKey.scopes);
+      const missing = requiredScopesFor(c.req.method, path).find(
+        (required) => !scopeMatches(granted, required)
+      );
+      if (missing) {
+        appendAudit({
+          eventType: "apikey.forbidden",
+          actorType: "apikey",
+          actorId: apiKey.keyId ?? null,
+          resourceType: "scope",
+          resourceId: missing,
+          action: "deny",
+          httpMethod: c.req.method,
+          httpPath: path,
+          httpStatusCode: 403,
+          error: `API key missing required scope "${missing}"`,
+        });
+        return c.json(
+          { error: "Forbidden", detail: `API key missing required scope "${missing}"` },
+          403
+        );
       }
-    } else {
-      // Session token via header (for non-cookie clients)
-      const result = validateSession(token);
-      if (result.valid) {
-        c.set("authType", "session");
-        c.set("sessionId", result.sessionId);
-        return next();
-      }
+      c.set("authType", "apikey");
+      c.set("apiKeyId", apiKey.keyId);
+      c.set("apiKeyScopes", granted);
+      return next();
+    }
+
+    // Session token via header (for non-cookie clients)
+    const session = validateSession(token);
+    if (session.valid) {
+      c.set("authType", "session");
+      c.set("sessionId", session.sessionId);
+      return next();
     }
   }
 

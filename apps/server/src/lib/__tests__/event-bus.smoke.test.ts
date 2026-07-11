@@ -17,13 +17,16 @@ let listAudit: typeof import("../../db/audit-log-store.ts").listAudit;
 let parseScopes: typeof import("../../middleware/auth.ts").parseScopes;
 let scopeMatches: typeof import("../../middleware/auth.ts").scopeMatches;
 let requiredScopeFor: typeof import("../../middleware/auth.ts").requiredScopeFor;
+let requiredScopesFor: typeof import("../../middleware/auth.ts").requiredScopesFor;
 let runSecurityAudit: typeof import("../security-auditor.ts").runSecurityAudit;
 
 beforeAll(async () => {
   ({ beginAction, finishAction, failAction } = await import("../event-bus.ts"));
   ({ listTraces } = await import("../../db/event-store.ts"));
   ({ appendAudit, listAudit } = await import("../../db/audit-log-store.ts"));
-  ({ parseScopes, scopeMatches, requiredScopeFor } = await import("../../middleware/auth.ts"));
+  ({ parseScopes, scopeMatches, requiredScopeFor, requiredScopesFor } = await import(
+    "../../middleware/auth.ts"
+  ));
   ({ runSecurityAudit } = await import("../security-auditor.ts"));
 });
 
@@ -83,10 +86,16 @@ describe("Phase A + B smoke — typed events, audit log, scope matcher", () => {
 
   it("matches scopes with wildcards correctly", () => {
     expect(scopeMatches(parseScopes("*"), "tool:execute:anything")).toBe(true);
-    expect(scopeMatches(parseScopes("tool:execute:*"), "tool:execute:native__web_search")).toBe(true);
-    expect(scopeMatches(parseScopes("tool:execute:native__web_*"), "tool:execute:native__web_search")).toBe(true);
+    expect(scopeMatches(parseScopes("tool:execute:*"), "tool:execute:native__web_search")).toBe(
+      true
+    );
+    expect(
+      scopeMatches(parseScopes("tool:execute:native__web_*"), "tool:execute:native__web_search")
+    ).toBe(true);
     expect(scopeMatches(parseScopes("credential:read"), "credential:write")).toBe(false);
-    expect(scopeMatches(parseScopes("tool:execute:shell"), "tool:execute:native__shell_execute")).toBe(false);
+    expect(
+      scopeMatches(parseScopes("tool:execute:shell"), "tool:execute:native__shell_execute")
+    ).toBe(false);
   });
 
   it("maps paths to required scopes", () => {
@@ -103,6 +112,14 @@ describe("Phase A + B smoke — typed events, audit log, scope matcher", () => {
     expect(requiredScopeFor("POST", "/api/evaluation-cases/import")).toBe("evaluation:write");
     expect(requiredScopeFor("PUT", "/api/%65valuation-cases/case-1")).toBe("evaluation:write");
     expect(scopeMatches(parseScopes("api:write"), "evaluation:write")).toBe(false);
+    expect(requiredScopeFor("GET", "/api/evaluation-runs/run-1")).toBe("evaluation:read");
+    expect(requiredScopeFor("POST", "/api/evaluation-runs")).toBe("evaluation:run");
+    expect(requiredScopesFor("POST", "/api/evaluation-runs")).toEqual([
+      "evaluation:run",
+      "evaluation:read",
+    ]);
+    expect(requiredScopesFor("GET", "/api/evaluation-runs")).toEqual(["evaluation:read"]);
+    expect(scopeMatches(parseScopes("evaluation:write"), "evaluation:run")).toBe(false);
   });
 
   it("requires write scope for destructive /api/debug POSTs", () => {

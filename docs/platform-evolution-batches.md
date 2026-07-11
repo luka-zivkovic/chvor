@@ -140,7 +140,8 @@ Every batch must preserve these properties:
 
 ### A06 — Save trajectory as evaluation case
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#111](https://github.com/luka-zivkovic/chvor/pull/111)
 - **Dependencies:** A05
 - **Outcome:** Convert a production trajectory into a versioned local regression case.
 - **Acceptance criteria:**
@@ -152,7 +153,7 @@ Every batch must preserve these properties:
 
 ### A07 — Evaluation runner and comparison report
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** A06
 - **Outcome:** Run datasets against a selected engine/model/prompt configuration and compare outcomes.
 - **Acceptance criteria:**

@@ -5,6 +5,7 @@ import { api } from "../../lib/api";
 import { cn } from "../../lib/utils";
 import { TrajectoryInspector } from "../trajectories/TrajectoryInspector";
 import { EmptyState } from "../ui/empty-state";
+import { EvaluationRunsView } from "../evaluations/EvaluationRunsView";
 
 const STATUS_OPTIONS = [
   "all",
@@ -29,6 +30,7 @@ function summary(record: TrajectoryListItem): string {
 }
 
 export function ExecutionsPanel() {
+  const [view, setView] = useState<"executions" | "evaluations">("executions");
   const [records, setRecords] = useState<TrajectoryListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -162,137 +164,161 @@ export function ExecutionsPanel() {
   };
 
   return (
-    <div className="flex min-h-[calc(100vh-9rem)] flex-col gap-4 md:flex-row">
-      <aside className="max-h-64 w-full shrink-0 overflow-y-auto border-b border-border/40 pb-3 md:max-h-none md:w-56 md:border-r md:border-b-0 md:pr-3 md:pb-0">
-        <label className="mb-3 block font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-          Status
-          <select
-            value={status}
-            onChange={(event) => setStatus(event.target.value as typeof status)}
-            className="mt-1.5 w-full rounded-lg border border-border bg-background/60 px-2 py-2 text-xs text-foreground outline-none focus:border-primary/50"
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option}>{option}</option>
-            ))}
-          </select>
-        </label>
-        <button
-          onClick={() => void loadList()}
-          disabled={loadingList}
-          className="mb-3 w-full rounded-lg border border-border/40 px-2 py-1.5 text-[9px] text-muted-foreground hover:bg-muted disabled:opacity-50"
-        >
-          {loadingList ? "Refreshing…" : "Refresh"}
-        </button>
-        <label className="mb-3 block cursor-pointer rounded-lg border border-border/40 px-2 py-1.5 text-center text-[9px] text-muted-foreground hover:bg-muted">
-          {importing ? "Importing…" : "Import evaluation JSON"}
-          <input
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            disabled={importing}
-            onChange={(event) => void handleImport(event)}
-          />
-        </label>
-        {importMessage && (
-          <p
-            role="status"
-            className="mb-3 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2 text-[9px] text-emerald-200"
-          >
-            {importMessage}
-          </p>
-        )}
-        {importError && (
-          <p
-            role="alert"
-            className="mb-3 rounded-lg border border-rose-500/25 bg-rose-500/5 p-2 text-[9px] text-rose-200"
-          >
-            Import failed · {importError}
-          </p>
-        )}
-
-        {loadingList && records.length === 0 && (
-          <p className="py-8 text-center text-xs text-muted-foreground">Loading executions…</p>
-        )}
-        {listError && records.length === 0 && (
-          <EmptyState
-            size="compact"
-            title="Could not load executions"
-            description={listError}
-            action={{ label: "Retry", onClick: () => void loadList() }}
-          />
-        )}
-        {!loadingList && !listError && records.length === 0 && (
-          <EmptyState
-            size="compact"
-            title="No executions yet"
-            description="Run a chat, schedule, webhook, or daemon task to create a trajectory."
-          />
-        )}
-
-        <div className="space-y-1.5">
-          {records.map((record) => (
-            <button
-              key={record.id}
-              onClick={() => {
-                selectedIdRef.current = record.id;
-                setSelectedId(record.id);
-              }}
-              className={cn(
-                "w-full rounded-lg border p-2.5 text-left transition-colors",
-                selectedId === record.id
-                  ? "border-primary/40 bg-primary/10"
-                  : "border-border/30 bg-card/20 hover:border-border hover:bg-card/40"
-              )}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-[11px] font-medium">{summary(record)}</span>
-                <span className="shrink-0 font-mono text-[8px] uppercase text-muted-foreground">
-                  {record.status}
-                </span>
-              </div>
-              <p className="mt-1 text-[9px] text-muted-foreground">
-                {record.origin.kind} · {record.stepCount} steps
-              </p>
-              <p className="mt-1 text-[9px] text-muted-foreground/70">
-                {shortTime(record.startedAt)}
-              </p>
-            </button>
-          ))}
-        </div>
-
-        {listError && records.length > 0 && (
-          <p className="mt-3 rounded-lg border border-rose-500/25 bg-rose-500/5 p-2 text-[10px] text-rose-200">
-            Could not {listErrorAction} · {listError}
-          </p>
-        )}
-
-        {nextCursor && !loadingList && (
+    <div className="space-y-4">
+      <div className="flex gap-2 border-b border-border/40 pb-2">
+        {(["executions", "evaluations"] as const).map((option) => (
           <button
-            onClick={() => void loadList(nextCursor)}
-            disabled={loadingMore}
-            className="mt-3 w-full rounded-lg border border-border px-3 py-2 text-[10px] text-muted-foreground hover:bg-muted disabled:opacity-50"
+            key={option}
+            onClick={() => setView(option)}
+            className={cn(
+              "rounded px-3 py-1 text-xs capitalize",
+              view === option
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted"
+            )}
           >
-            {loadingMore ? "Loading…" : "Load more"}
+            {option}
           </button>
-        )}
-      </aside>
+        ))}
+      </div>
+      {view === "evaluations" ? (
+        <EvaluationRunsView />
+      ) : (
+        <div className="flex min-h-[calc(100vh-9rem)] flex-col gap-4 md:flex-row">
+          <aside className="max-h-64 w-full shrink-0 overflow-y-auto border-b border-border/40 pb-3 md:max-h-none md:w-56 md:border-r md:border-b-0 md:pr-3 md:pb-0">
+            <label className="mb-3 block font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+              Status
+              <select
+                value={status}
+                onChange={(event) => setStatus(event.target.value as typeof status)}
+                className="mt-1.5 w-full rounded-lg border border-border bg-background/60 px-2 py-2 text-xs text-foreground outline-none focus:border-primary/50"
+              >
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              onClick={() => void loadList()}
+              disabled={loadingList}
+              className="mb-3 w-full rounded-lg border border-border/40 px-2 py-1.5 text-[9px] text-muted-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {loadingList ? "Refreshing…" : "Refresh"}
+            </button>
+            <label className="mb-3 block cursor-pointer rounded-lg border border-border/40 px-2 py-1.5 text-center text-[9px] text-muted-foreground hover:bg-muted">
+              {importing ? "Importing…" : "Import evaluation JSON"}
+              <input
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                disabled={importing}
+                onChange={(event) => void handleImport(event)}
+              />
+            </label>
+            {importMessage && (
+              <p
+                role="status"
+                className="mb-3 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2 text-[9px] text-emerald-200"
+              >
+                {importMessage}
+              </p>
+            )}
+            {importError && (
+              <p
+                role="alert"
+                className="mb-3 rounded-lg border border-rose-500/25 bg-rose-500/5 p-2 text-[9px] text-rose-200"
+              >
+                Import failed · {importError}
+              </p>
+            )}
 
-      <main className="min-w-0 flex-1">
-        {!selectedId && !loadingList && records.length > 0 && (
-          <p className="py-12 text-center text-xs text-muted-foreground">Select an execution.</p>
-        )}
-        {loadingDetail && (
-          <p className="py-12 text-center text-xs text-muted-foreground">Loading execution…</p>
-        )}
-        {detailError && selectedId && (
-          <EmptyState
-            title="Could not load execution"
-            description={detailError}
-            action={{ label: "Retry", onClick: () => void loadDetail(selectedId) }}
-          />
-        )}
-        {detail && <TrajectoryInspector trajectory={detail} />}
-      </main>
+            {loadingList && records.length === 0 && (
+              <p className="py-8 text-center text-xs text-muted-foreground">Loading executions…</p>
+            )}
+            {listError && records.length === 0 && (
+              <EmptyState
+                size="compact"
+                title="Could not load executions"
+                description={listError}
+                action={{ label: "Retry", onClick: () => void loadList() }}
+              />
+            )}
+            {!loadingList && !listError && records.length === 0 && (
+              <EmptyState
+                size="compact"
+                title="No executions yet"
+                description="Run a chat, schedule, webhook, or daemon task to create a trajectory."
+              />
+            )}
+
+            <div className="space-y-1.5">
+              {records.map((record) => (
+                <button
+                  key={record.id}
+                  onClick={() => {
+                    selectedIdRef.current = record.id;
+                    setSelectedId(record.id);
+                  }}
+                  className={cn(
+                    "w-full rounded-lg border p-2.5 text-left transition-colors",
+                    selectedId === record.id
+                      ? "border-primary/40 bg-primary/10"
+                      : "border-border/30 bg-card/20 hover:border-border hover:bg-card/40"
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-[11px] font-medium">{summary(record)}</span>
+                    <span className="shrink-0 font-mono text-[8px] uppercase text-muted-foreground">
+                      {record.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[9px] text-muted-foreground">
+                    {record.origin.kind} · {record.stepCount} steps
+                  </p>
+                  <p className="mt-1 text-[9px] text-muted-foreground/70">
+                    {shortTime(record.startedAt)}
+                  </p>
+                </button>
+              ))}
+            </div>
+
+            {listError && records.length > 0 && (
+              <p className="mt-3 rounded-lg border border-rose-500/25 bg-rose-500/5 p-2 text-[10px] text-rose-200">
+                Could not {listErrorAction} · {listError}
+              </p>
+            )}
+
+            {nextCursor && !loadingList && (
+              <button
+                onClick={() => void loadList(nextCursor)}
+                disabled={loadingMore}
+                className="mt-3 w-full rounded-lg border border-border px-3 py-2 text-[10px] text-muted-foreground hover:bg-muted disabled:opacity-50"
+              >
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            )}
+          </aside>
+
+          <main className="min-w-0 flex-1">
+            {!selectedId && !loadingList && records.length > 0 && (
+              <p className="py-12 text-center text-xs text-muted-foreground">
+                Select an execution.
+              </p>
+            )}
+            {loadingDetail && (
+              <p className="py-12 text-center text-xs text-muted-foreground">Loading execution…</p>
+            )}
+            {detailError && selectedId && (
+              <EmptyState
+                title="Could not load execution"
+                description={detailError}
+                action={{ label: "Retry", onClick: () => void loadDetail(selectedId) }}
+              />
+            )}
+            {detail && <TrajectoryInspector trajectory={detail} />}
+          </main>
+        </div>
+      )}
     </div>
   );
 }

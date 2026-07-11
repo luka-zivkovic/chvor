@@ -1,5 +1,9 @@
 # Eval Harness Spike — Notes
 
+> Legacy spike only. The production A07 runner is documented in
+> [`docs/evaluation-runs.md`](../../../../docs/evaluation-runs.md) and does not execute this
+> fixture harness.
+
 Outcome of the 1-day spike: **skip `@mastra/evals`, keep three local LLM-judge scorers**. Mastra's non-eval primitives overlap entirely with chvor's existing stack (orchestrator, memory graph, MCP manager, llm-router), and the eval scorers themselves are thin prompt wrappers that reimplement in ~30 lines each. Adopting the package pinned us to someone else's prompt changes and a transitive tree we don't need.
 
 ## What this spike builds

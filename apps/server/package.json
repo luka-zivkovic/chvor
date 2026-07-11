@@ -55,6 +55,7 @@
     "@types/adm-zip": "^0.5.8",
     "@types/archiver": "^6",
     "@types/better-sqlite3": "^7",
+    "@types/node": "^25",
     "@types/pdf-parse": "^1.1.5",
     "@types/qrcode": "^1",
     "@types/yauzl": "^2",

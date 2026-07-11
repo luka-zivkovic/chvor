@@ -30,6 +30,8 @@
     "better-sqlite3": "^11"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7",
+    "@types/node": "^25",
     "vitest": "^4.1.0"
   },
   "repository": {
