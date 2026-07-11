@@ -100,7 +100,8 @@ Every batch must preserve these properties:
 
 ### A03 — Orchestrator trajectory adapter
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#108](https://github.com/luka-zivkovic/chvor/pull/108)
 - **Dependencies:** A02
 - **Outcome:** Record complete trajectories from current Chvor execution without coupling storage to the current engine.
 - **Scope:** One adapter from existing execution/tool events into the canonical contract, including chat and non-chat origins.
@@ -113,7 +114,7 @@ Every batch must preserve these properties:
 
 ### A04 — Trajectory query API
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** A03
 - **Outcome:** Provide authenticated, paginated APIs for listing and inspecting trajectories.
 - **Acceptance criteria:**

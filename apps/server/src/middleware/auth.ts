@@ -70,7 +70,13 @@ export function scopeMatches(granted: string[], required: string): boolean {
  */
 export function requiredScopeFor(method: string, path: string): string | null {
   // Strip query + trailing slash for normalization
-  const p = path.replace(/\?.*$/, "").replace(/\/$/, "");
+  const rawPath = path.replace(/\?.*$/, "").replace(/\/$/, "");
+  let p = rawPath;
+  try {
+    p = decodeURIComponent(rawPath);
+  } catch {
+    // Keep malformed encoding conservative and let routing reject it later.
+  }
 
   // Auth endpoints already whitelisted upstream — no scope required.
   if (p.startsWith("/api/auth")) return null;
@@ -85,6 +91,11 @@ export function requiredScopeFor(method: string, path: string): string | null {
   // own narrow scope distinct from the generic api:write default.
   if (p.startsWith("/api/audit")) {
     return method === "GET" || method === "HEAD" ? "audit:read" : "audit:run";
+  }
+
+  // Canonical execution history can contain sensitive operational metadata.
+  if (p === "/api/trajectories" || p.startsWith("/api/trajectories/")) {
+    return "trajectory:read";
   }
 
   // Session credential pins — credential-domain decision, not tool execution.

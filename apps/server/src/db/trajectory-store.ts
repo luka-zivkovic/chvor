@@ -10,6 +10,7 @@ import {
   type TrajectoryError,
   type TrajectoryStatus,
 } from "@chvor/shared";
+import { trajectoryTimestampKey } from "../lib/trajectory-time.ts";
 import { getDb } from "./database.ts";
 
 const TERMINAL_STATUSES = new Set<TrajectoryStatus>([
@@ -230,9 +231,9 @@ function insertTrajectoryRow(db: Database.Database, trajectory: CanonicalTraject
   db.prepare(
     `INSERT INTO trajectories (
        id, schema_version, origin_kind, origin, actor, status, title, summary,
-       started_at, completed_at, duration_ms, input, output, model_usage,
+       started_at, started_at_key, completed_at, duration_ms, input, output, model_usage,
        error, labels, attributes, extensions, next_sequence, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
   ).run(
     trajectory.id,
     trajectory.schemaVersion,
@@ -243,6 +244,7 @@ function insertTrajectoryRow(db: Database.Database, trajectory: CanonicalTraject
     trajectory.title ?? null,
     trajectory.summary ?? null,
     trajectory.startedAt,
+    trajectoryTimestampKey(trajectory.startedAt),
     trajectory.completedAt ?? null,
     trajectory.durationMs ?? null,
     serializeOptionalJson(trajectory.input),

@@ -94,6 +94,10 @@ describe("Phase A + B smoke — typed events, audit log, scope matcher", () => {
     expect(requiredScopeFor("POST", "/api/credentials/abc")).toBe("credential:write");
     expect(requiredScopeFor("POST", "/api/sessions")).toBe("tool:execute:*");
     expect(requiredScopeFor("GET", "/api/health")).toBe("api:read");
+    expect(requiredScopeFor("GET", "/api/trajectories")).toBe("trajectory:read");
+    expect(requiredScopeFor("GET", "/api/trajectories/run-1")).toBe("trajectory:read");
+    expect(requiredScopeFor("GET", "/api/%74rajectories/run-1")).toBe("trajectory:read");
+    expect(scopeMatches(parseScopes("api:read"), "trajectory:read")).toBe(false);
   });
 
   it("requires write scope for destructive /api/debug POSTs", () => {
