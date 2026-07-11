@@ -79,10 +79,10 @@ afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-describe("trajectory migration v31", () => {
-  it("creates the normalized v31 schema and ordering/cascade indexes on a fresh database", () => {
+describe("trajectory migrations v31-v32", () => {
+  it("creates normalized storage and chronological query indexes on a fresh database", () => {
     const db = getDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(31);
+    expect(db.pragma("user_version", { simple: true })).toBe(32);
 
     const tables = db
       .prepare(
@@ -103,6 +103,7 @@ describe("trajectory migration v31", () => {
     expect(indexes.map(({ name }) => name)).toEqual(
       expect.arrayContaining([
         "idx_trajectories_completed",
+        "idx_trajectories_started_key",
         "idx_trajectories_status_updated",
         "idx_trajectory_artifacts_step_position",
         "idx_trajectory_steps_trajectory_started",
@@ -120,7 +121,7 @@ describe("trajectory migration v31", () => {
     );
   });
 
-  it("upgrades an explicit v30 database to v31 without requiring older application tables", () => {
+  it("upgrades an explicit v30 database through v32 without requiring older application tables", () => {
     const migrationDir = mkdtempSync(join(tmpdir(), "chvor-v30-v31-"));
     const databasePath = join(migrationDir, "migration.db");
     const db = new Database(databasePath);
@@ -131,7 +132,7 @@ describe("trajectory migration v31", () => {
       db.pragma("user_version = 30");
       runMigrations(db, false);
 
-      expect(db.pragma("user_version", { simple: true })).toBe(31);
+      expect(db.pragma("user_version", { simple: true })).toBe(32);
       expect(
         db
           .prepare(
@@ -140,7 +141,7 @@ describe("trajectory migration v31", () => {
           .get("trajectories", "trajectory_steps", "trajectory_artifacts")
       ).toEqual({ count: 3 });
       expect(() => runMigrations(db, false)).not.toThrow();
-      expect(db.pragma("user_version", { simple: true })).toBe(31);
+      expect(db.pragma("user_version", { simple: true })).toBe(32);
     } finally {
       db.close();
       rmSync(migrationDir, { recursive: true, force: true });
