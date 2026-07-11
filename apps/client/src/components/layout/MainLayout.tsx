@@ -20,6 +20,7 @@ import { IntegrationsPanel } from "../panels/IntegrationsPanel";
 import { IntegrationCatalogPanel } from "../panels/IntegrationCatalogPanel";
 import { ConversationsPanel } from "../panels/ConversationsPanel";
 import ActivityPanel from "../panels/ActivityPanel";
+import { ExecutionsPanel } from "../panels/ExecutionsPanel";
 import { EmotionHistoryPanel } from "../panels/EmotionHistoryPanel";
 import { RegistryBrowserPanel } from "../panels/RegistryBrowserPanel";
 import { CanvasPage } from "../canvas-page/CanvasPage";
@@ -47,6 +48,7 @@ const MOBILE_NAV_ITEMS: Array<{ panel: PanelId | "settings"; label: string }> = 
   { panel: "schedules", label: "Schedules" },
   { panel: "webhooks", label: "Webhooks" },
   { panel: "conversations", label: "Conversations" },
+  { panel: "executions", label: "Executions" },
   { panel: "settings", label: "Settings" },
 ];
 
@@ -99,6 +101,12 @@ const PANEL_META: Record<string, { title: string; subtitle: string; width?: numb
   "integration-catalog": { title: "Integration Catalog", subtitle: "Browse & request services", info: "Every service Chvor knows how to connect to, plus a Tier-3 research request for anything not listed." },
   conversations: { title: "Conversations", subtitle: "Browse and manage chat history" },
   activity: { title: "Activity", subtitle: "System events" },
+  executions: {
+    title: "Executions",
+    subtitle: "Inspectable agent trajectories",
+    width: 860,
+    info: "Read-only, redacted execution history with model, tool, approval, timing, and error details.",
+  },
   "emotion-history": { title: "Emotional World", subtitle: "Inner state, arc & patterns" },
   registry: { title: "Registry", subtitle: "Browse & install templates, skills & tools" },
 };
@@ -137,6 +145,8 @@ function PanelContent({ panel }: { panel: string }) {
       return <ConversationsPanel />;
     case "activity":
       return <ActivityPanel />;
+    case "executions":
+      return <ExecutionsPanel />;
     case "emotion-history":
       return <EmotionHistoryPanel />;
     case "registry":
