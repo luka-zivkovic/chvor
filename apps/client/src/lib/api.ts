@@ -86,8 +86,8 @@ import type {
   TrajectoryToolCall,
 } from "@chvor/shared";
 import { createEvaluationCasesApi } from "./evaluation-cases-api";
+import { createEvaluationRunsApi } from "./evaluation-runs-api";
 import { responseErrorMessage } from "./http-error";
-
 export interface ProvidersResponse {
   llm: LLMProviderDef[];
   embedding: EmbeddingProviderDef[];
@@ -201,7 +201,6 @@ export interface TrajectoryStepDetail {
   attributes: unknown | TrajectoryPayloadPreview;
   [key: string]: unknown;
 }
-
 export interface TrajectoryDetail {
   schemaVersion: 1;
   id: string;
@@ -590,6 +589,7 @@ export const api = {
   },
 
   evaluationCases: createEvaluationCasesApi(request, requestText),
+  evaluationRuns: createEvaluationRunsApi(request),
 
   retention: {
     get: () => request<RetentionConfig>("/config/retention"),

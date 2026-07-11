@@ -126,6 +126,23 @@ export function getEvaluationCase(id: string): EvaluationCaseRecord | null {
   return row ? recordFromRow(row) : null;
 }
 
+export function getEvaluationCaseRevision(
+  id: string,
+  revision: number
+): EvaluationCaseRecord | null {
+  if (!Number.isSafeInteger(revision) || revision < 1) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT c.id, r.revision, r.document AS document_json,
+              c.created_at, r.created_at AS updated_at
+         FROM evaluation_cases c
+         JOIN evaluation_case_revisions r ON r.case_id = c.id
+        WHERE c.id = ? AND r.revision = ?`
+    )
+    .get(id, revision) as EvaluationCaseRow | undefined;
+  return row ? recordFromRow(row) : null;
+}
+
 export function listEvaluationCases(
   limit = EVALUATION_CASE_PAGE_MAX,
   cursor?: EvaluationCaseListCursor

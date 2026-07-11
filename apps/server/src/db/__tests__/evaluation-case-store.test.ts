@@ -45,7 +45,7 @@ afterAll(() => {
 describe("evaluation-case migration v33", () => {
   it("creates identity and immutable revision storage on fresh databases", () => {
     const db = getDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(33);
+    expect(db.pragma("user_version", { simple: true })).toBe(34);
     const tables = db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'evaluation_case%' ORDER BY name"
@@ -72,7 +72,7 @@ describe("evaluation-case migration v33", () => {
       db.pragma("foreign_keys = ON");
       db.pragma("user_version = 32");
       runMigrations(db, false);
-      expect(db.pragma("user_version", { simple: true })).toBe(33);
+      expect(db.pragma("user_version", { simple: true })).toBe(34);
       expect(
         db
           .prepare(
