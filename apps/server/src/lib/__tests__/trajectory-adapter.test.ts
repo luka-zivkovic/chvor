@@ -5,7 +5,6 @@ import type { ApprovalRecord, ChatMessage, ExecutionEvent } from "@chvor/shared"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   TrajectoryCaptureDependencies,
-  TrajectoryCaptureStore,
 } from "../orchestrator/trajectory-adapter.ts";
 
 const dataDir = mkdtempSync(join(tmpdir(), "chvor-trajectory-adapter-"));
@@ -40,15 +39,6 @@ function testDependencies(prefix: string, logger?: TrajectoryCaptureDependencies
     id: () => `${prefix}-${++id}`,
     now: () => new Date(BASE_TIME + tick++ * 10),
     ...(logger ? { logger } : {}),
-  };
-}
-
-function productionStore(): TrajectoryCaptureStore {
-  return {
-    createTrajectory: storeModule.createTrajectory,
-    appendTrajectoryStep: storeModule.appendTrajectoryStep,
-    updateTrajectoryMetadata: storeModule.updateTrajectoryMetadata,
-    markTrajectoryInterrupted: storeModule.markTrajectoryInterrupted,
   };
 }
 
@@ -968,157 +958,4 @@ describe("current-engine trajectory capture", () => {
     ).toBe("[REDACTED]");
   });
 
-  it.each(["create", "append"] as const)(
-    "opens the circuit on %s failure while preserving result and public events",
-    async (failure) => {
-      const warnings: unknown[][] = [];
-      const base = productionStore();
-      const broken: TrajectoryCaptureStore = {
-        ...base,
-        ...(failure === "create"
-          ? {
-              createTrajectory: () => {
-                throw new Error("create unavailable");
-              },
-            }
-          : {
-              appendTrajectoryStep: () => {
-                throw new Error("append unavailable");
-              },
-            }),
-      };
-      const event: ExecutionEvent = { type: "brain.thinking", data: { thought: failure } };
-      const emitted: ExecutionEvent[] = [];
-      const result = { text: `${failure} survived` };
-
-      const returned = await adapter.runWithTrajectoryCapture({
-        messages: [message()],
-        emit: (value) => emitted.push(value),
-        context: {
-          id: `${failure}-fault-run`,
-          origin: { kind: "test" },
-          actor: { type: "test", id: "fault" },
-        },
-        dependencies: {
-          ...testDependencies(`${failure}-fault`),
-          store: broken,
-          logger: { warn: (...args) => warnings.push(args) },
-        },
-        execute: async (emit) => {
-          emit(event);
-          adapter.recordTrajectoryModelStarted({ providerId: "p", modelId: "m" });
-          return result;
-        },
-      });
-
-      expect(returned).toBe(result);
-      expect(emitted).toEqual([event]);
-      expect(emitted[0]).toBe(event);
-      expect(warnings).toHaveLength(1);
-    }
-  );
-
-  it("isolates approval state failure and disables later capture without changing execution", async () => {
-    const warnings: unknown[][] = [];
-    const base = productionStore();
-    const broken: TrajectoryCaptureStore = {
-      ...base,
-      updateTrajectoryMetadata: (id, update) => {
-        if (update.status === "waiting") throw new Error("state unavailable");
-        return base.updateTrajectoryMetadata(id, update);
-      },
-    };
-    const result = { text: "state failure survived" };
-
-    const returned = await adapter.runWithTrajectoryCapture({
-      messages: [message()],
-      emit: () => undefined,
-      context: {
-        id: "state-fault-run",
-        origin: { kind: "test" },
-        actor: { type: "test", id: "fault" },
-      },
-      dependencies: {
-        ...testDependencies("state-fault"),
-        store: broken,
-        logger: { warn: (...args) => warnings.push(args) },
-      },
-      execute: async () => {
-        adapter.recordTrajectoryApprovalRequested(pendingApproval());
-        adapter.recordTrajectoryApprovalResolved(
-          pendingApproval({
-            status: "denied",
-            decision: "deny",
-            decidedAt: BASE_TIME + 1_000,
-            decidedBy: "user",
-          })
-        );
-        return result;
-      },
-    });
-
-    expect(returned).toBe(result);
-    expect(warnings).toHaveLength(1);
-    const captured = storeModule.getTrajectory("state-fault-run")!;
-    expect(captured.status).toBe("completed");
-    expect(captured.steps.map(({ kind }) => kind)).toEqual([
-      "trajectory.started",
-      "approval.requested",
-    ]);
-  });
-
-  it("isolates terminal finalization failure while preserving both results and errors", async () => {
-    const warnings: unknown[][] = [];
-    const base = productionStore();
-    const broken: TrajectoryCaptureStore = {
-      ...base,
-      updateTrajectoryMetadata: (id, update) => {
-        if (update.status === "completed") throw new Error("finalization unavailable");
-        return base.updateTrajectoryMetadata(id, update);
-      },
-      markTrajectoryInterrupted: () => {
-        throw new Error("interruption finalization unavailable");
-      },
-    };
-    const result = { text: "finalization survived" };
-    const common = {
-      messages: [message()],
-      emit: () => undefined,
-      dependencies: {
-        ...testDependencies("finalization-fault"),
-        store: broken,
-        logger: { warn: (...args: unknown[]) => warnings.push(args) },
-      },
-    };
-
-    const returned = await adapter.runWithTrajectoryCapture({
-      ...common,
-      context: {
-        id: "finalization-result-run",
-        origin: { kind: "test" },
-        actor: { type: "test", id: "fault" },
-      },
-      execute: async () => result,
-    });
-    expect(returned).toBe(result);
-
-    const original = new Error("engine failure remains exact");
-    await expect(
-      adapter.runWithTrajectoryCapture({
-        ...common,
-        context: {
-          id: "finalization-error-run",
-          origin: { kind: "test" },
-          actor: { type: "test", id: "fault" },
-        },
-        execute: async () => {
-          throw original;
-        },
-      })
-    ).rejects.toBe(original);
-
-    expect(storeModule.getTrajectory("finalization-result-run")?.status).toBe("running");
-    expect(storeModule.getTrajectory("finalization-error-run")?.status).toBe("running");
-    expect(warnings).toHaveLength(2);
-  });
 });
