@@ -126,6 +126,28 @@ export function TopBar({ layoutMode }: { layoutMode?: LayoutMode }) {
       {/* Right: status + clock + chat toggle */}
       <div className="flex items-center gap-2 md:gap-4">
         <button
+          onClick={() => togglePanel("executions")}
+          className="relative flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+          title="Execution inspector"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M4 6h16" />
+            <path d="M4 12h10" />
+            <path d="M4 18h7" />
+            <circle cx="18" cy="16" r="3" />
+            <path d="m20.5 18.5 2 2" />
+          </svg>
+        </button>
+        <button
           onClick={() => togglePanel("activity")}
           className="relative flex items-center justify-center w-7 h-7 rounded-md hover:bg-white/10 transition-colors"
           title="Activity feed"

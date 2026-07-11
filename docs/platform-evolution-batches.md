@@ -114,7 +114,8 @@ Every batch must preserve these properties:
 
 ### A04 — Trajectory query API
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#109](https://github.com/luka-zivkovic/chvor/pull/109)
 - **Dependencies:** A03
 - **Outcome:** Provide authenticated, paginated APIs for listing and inspecting trajectories.
 - **Acceptance criteria:**
@@ -126,7 +127,7 @@ Every batch must preserve these properties:
 
 ### A05 — Execution inspector UI
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** A04
 - **Outcome:** Turn execution history into a useful per-step debugger.
 - **Acceptance criteria:**

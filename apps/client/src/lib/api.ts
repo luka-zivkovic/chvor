@@ -76,6 +76,14 @@ import type {
   OAuthProviderDef,
   OAuthConnection,
   OrchestratorCheckpoint,
+  TrajectoryActor,
+  TrajectoryArtifactRef,
+  TrajectoryError,
+  TrajectoryModelUsage,
+  TrajectoryOrigin,
+  TrajectoryStatus,
+  TrajectoryStepStatus,
+  TrajectoryToolCall,
 } from "@chvor/shared";
 
 export interface ProvidersResponse {
@@ -143,6 +151,87 @@ export interface CognitiveLoopDiffResponse {
 export interface CognitiveLoopBranchesResponse {
   sourceLoop: CognitiveLoopRun;
   branches: CognitiveLoopRun[];
+}
+
+export interface TrajectoryPayloadPreview {
+  preview: string;
+  truncated: true;
+  originalBytes: number;
+}
+
+export interface TrajectoryListItem {
+  id: string;
+  origin: TrajectoryOrigin;
+  actor: TrajectoryActor;
+  status: TrajectoryStatus;
+  title?: string;
+  summary?: string;
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  input?: unknown | TrajectoryPayloadPreview;
+  output?: unknown | TrajectoryPayloadPreview;
+  modelUsage: TrajectoryModelUsage[];
+  stepCount: number;
+  artifactCount: number;
+}
+
+export interface TrajectoryStepDetail {
+  id: string;
+  trajectoryId: string;
+  sequence: number;
+  parentStepId?: string | null;
+  kind: string;
+  customType?: string;
+  status: TrajectoryStepStatus;
+  name?: string;
+  actor?: TrajectoryActor;
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  input?: unknown | TrajectoryPayloadPreview;
+  output?: unknown | TrajectoryPayloadPreview;
+  modelUsage?: TrajectoryModelUsage;
+  toolCall?: TrajectoryToolCall & { args?: unknown | TrajectoryPayloadPreview };
+  approval?: Record<string, unknown>;
+  error?: TrajectoryError;
+  artifacts: TrajectoryArtifactRef[];
+  attributes: unknown | TrajectoryPayloadPreview;
+  [key: string]: unknown;
+}
+
+export interface TrajectoryDetail {
+  schemaVersion: 1;
+  id: string;
+  origin: TrajectoryOrigin;
+  actor: TrajectoryActor;
+  status: TrajectoryStatus;
+  title?: string;
+  summary?: string;
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  input?: unknown | TrajectoryPayloadPreview;
+  output?: unknown | TrajectoryPayloadPreview;
+  modelUsage: TrajectoryModelUsage[];
+  steps: TrajectoryStepDetail[];
+  artifacts: TrajectoryArtifactRef[];
+  error?: TrajectoryError;
+  labels: string[];
+  attributes: unknown | TrajectoryPayloadPreview;
+  [key: string]: unknown;
+}
+
+export interface TrajectoryListResponse {
+  records: TrajectoryListItem[];
+  nextCursor: string | null;
+}
+
+export interface TrajectoryListFilters {
+  limit?: number;
+  cursor?: string;
+  status?: TrajectoryStatus;
+  origin?: TrajectoryOrigin["kind"];
 }
 
 const BASE = "/api";
@@ -461,6 +550,21 @@ export const api = {
       request<{ ok: boolean }>(`/activity/${id}/read`, { method: "PATCH" }),
     markAllRead: () =>
       request<{ ok: boolean }>("/activity/read-all", { method: "PATCH" }),
+  },
+
+  trajectories: {
+    list: (filters: TrajectoryListFilters = {}) => {
+      const params = new URLSearchParams();
+      params.set("limit", String(filters.limit ?? 25));
+      if (filters.cursor) params.set("cursor", filters.cursor);
+      if (filters.status) params.set("status", filters.status);
+      if (filters.origin) params.set("origin", filters.origin);
+      return request<TrajectoryListResponse>(`/trajectories?${params.toString()}`);
+    },
+    get: (id: string) =>
+      request<{ trajectory: TrajectoryDetail }>(`/trajectories/${encodeURIComponent(id)}`).then(
+        ({ trajectory }) => trajectory
+      ),
   },
 
   retention: {

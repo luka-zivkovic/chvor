@@ -21,6 +21,7 @@ export function SlideOverPanel({
   children,
   width,
 }: Props) {
+  const resolvedWidth = width ?? 560;
   return (
     <div
       className={cn(
@@ -30,9 +31,9 @@ export function SlideOverPanel({
         "overflow-x-hidden"
       )}
       style={{
-        width: width ?? 560,
-        maxWidth: width ?? 560,
-        minWidth: width ?? 560,
+        width: `min(100vw, ${resolvedWidth}px)`,
+        maxWidth: resolvedWidth,
+        minWidth: 0,
         background: "var(--glass-bg-strong)",
       }}
     >
