@@ -153,7 +153,8 @@ Every batch must preserve these properties:
 
 ### A07 — Evaluation runner and comparison report
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#112](https://github.com/luka-zivkovic/chvor/pull/112)
 - **Dependencies:** A06
 - **Outcome:** Run datasets against a selected engine/model/prompt configuration and compare outcomes.
 - **Acceptance criteria:**
@@ -167,7 +168,7 @@ Every batch must preserve these properties:
 
 ### B10 — Context hierarchy contract
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** A03
 - **Outcome:** Define explicit identity, human, working, procedural, episodic, and knowledge context layers.
 - **Acceptance criteria:**
