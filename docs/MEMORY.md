@@ -59,10 +59,20 @@ Every memory also carries:
 - **Strength** (0.0-1.0) -- how vivid the memory is; decays over time
 - **Decay rate** (default 0.1) -- how fast it fades; slows with repeated access
 - **Confidence** (0.0-1.0) -- how certain the system is about this fact
-- **Provenance** -- where it came from: `stated`, `extracted`, `inferred`, or `consolidated`
+- **Provenance** -- where it came from: `stated`, `extracted`, `inferred`, `consolidated`, or `resource`
 - **Access count** -- how many times it's been retrieved
 - **Emotional valence/intensity** -- the emotional context when created (optional)
 - **Source** -- which channel and session produced it
+
+---
+
+## Context hierarchy projection
+
+Graph memories are projected into the context hierarchy without migration. A memory is classified
+as knowledge when `sourceResourceId` is non-null, `provenance` is `resource`, or `sourceChannel` is
+`knowledge`; all other graph memories are episodic. The graph remains the source persistence, so no
+row rewrite, duplication, or schema migration is required. See [`CONTEXT.md`](CONTEXT.md) for
+precedence, authority, budgeting, and trace rules.
 
 ---
 

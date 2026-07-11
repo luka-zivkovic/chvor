@@ -3,6 +3,14 @@
 A04 exposes persisted canonical trajectories as an authenticated, read-only API. It does not
 provide mutation, replay, evaluation, or UI behavior.
 
+## Context inclusion traces
+
+B10 defines the contract for future context inclusion traces. Each trace must be content-free: it
+may contain a stable item reference, layer, inclusion reason, and applicable budget or
+ordering metadata, but never context bodies or sensitive excerpts. The existing trajectory API does
+not expose or claim B12 context assembly runtime integration. See [`CONTEXT.md`](CONTEXT.md) for the
+authoritative hierarchy and trace policy.
+
 ## Authorization
 
 Browser sessions retain full access. API keys require the dedicated `trajectory:read` scope;

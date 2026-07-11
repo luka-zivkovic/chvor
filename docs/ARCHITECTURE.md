@@ -436,6 +436,7 @@ When adding a feature: write the test first if it has any non-obvious branch, ed
 - [`SKILLS-AND-TOOLS.md`](SKILLS-AND-TOOLS.md) — skill/tool authoring
 - [`CHANNELS.md`](CHANNELS.md) — multi-channel setup (Telegram, Discord, …)
 - [`MEMORY.md`](MEMORY.md) — graph memory model, retrieval, decay
+- [`CONTEXT.md`](CONTEXT.md) — authoritative six-layer context hierarchy and context assembly policy
 - [`EMOTIONS.md`](EMOTIONS.md) — VAD engine + canvas color mapping
 - [`CANVAS.md`](CANVAS.md) — node types, layout, status transitions
 - [`A2UI.md`](A2UI.md) — server-driven UI protocol
