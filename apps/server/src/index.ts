@@ -77,6 +77,7 @@ import debugRoute from "./routes/debug.ts";
 import auditRoute from "./routes/audit.ts";
 import approvalsRoute from "./routes/approvals.ts";
 import trajectoriesRoute from "./routes/trajectories.ts";
+import evaluationCasesRoute from "./routes/evaluation-cases.ts";
 import resumeRoute from "./routes/orchestrator-resume.ts";
 import sessionPinsRoute from "./routes/session-pins.ts";
 import adminRoute, { registerShutdownHandler } from "./routes/admin.ts";
@@ -460,6 +461,7 @@ app.route("/api/debug", debugRoute);
 app.route("/api/audit", auditRoute);
 app.route("/api/approvals", approvalsRoute);
 app.route("/api/trajectories", trajectoriesRoute);
+app.route("/api/evaluation-cases", evaluationCasesRoute);
 app.route("/api/orchestrator/resume", resumeRoute);
 app.route("/api/admin", adminRoute);
 

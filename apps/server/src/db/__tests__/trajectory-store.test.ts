@@ -82,7 +82,7 @@ afterAll(() => {
 describe("trajectory migrations v31-v32", () => {
   it("creates normalized storage and chronological query indexes on a fresh database", () => {
     const db = getDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(32);
+    expect(db.pragma("user_version", { simple: true })).toBe(33);
 
     const tables = db
       .prepare(
@@ -121,7 +121,7 @@ describe("trajectory migrations v31-v32", () => {
     );
   });
 
-  it("upgrades an explicit v30 database through v32 without requiring older application tables", () => {
+  it("upgrades an explicit v30 database through current migrations without requiring older application tables", () => {
     const migrationDir = mkdtempSync(join(tmpdir(), "chvor-v30-v31-"));
     const databasePath = join(migrationDir, "migration.db");
     const db = new Database(databasePath);
@@ -132,7 +132,7 @@ describe("trajectory migrations v31-v32", () => {
       db.pragma("user_version = 30");
       runMigrations(db, false);
 
-      expect(db.pragma("user_version", { simple: true })).toBe(32);
+      expect(db.pragma("user_version", { simple: true })).toBe(33);
       expect(
         db
           .prepare(
@@ -141,7 +141,7 @@ describe("trajectory migrations v31-v32", () => {
           .get("trajectories", "trajectory_steps", "trajectory_artifacts")
       ).toEqual({ count: 3 });
       expect(() => runMigrations(db, false)).not.toThrow();
-      expect(db.pragma("user_version", { simple: true })).toBe(32);
+      expect(db.pragma("user_version", { simple: true })).toBe(33);
     } finally {
       db.close();
       rmSync(migrationDir, { recursive: true, force: true });

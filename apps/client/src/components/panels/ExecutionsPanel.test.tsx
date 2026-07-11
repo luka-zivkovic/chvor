@@ -1,11 +1,13 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EVALUATION_CASE_DOCUMENT_MAX_BYTES } from "@chvor/shared";
 import type { TrajectoryDetail, TrajectoryListResponse } from "../../lib/api";
 
-const { listTrajectories, getTrajectory } = vi.hoisted(() => ({
+const { listTrajectories, getTrajectory, importEvaluationCase } = vi.hoisted(() => ({
   listTrajectories: vi.fn(),
   getTrajectory: vi.fn(),
+  importEvaluationCase: vi.fn(),
 }));
 
 vi.mock("../../lib/api", () => ({
@@ -13,6 +15,9 @@ vi.mock("../../lib/api", () => ({
     trajectories: {
       list: listTrajectories,
       get: getTrajectory,
+    },
+    evaluationCases: {
+      import: importEvaluationCase,
     },
   },
 }));
@@ -192,6 +197,7 @@ describe("ExecutionsPanel", () => {
   beforeEach(() => {
     listTrajectories.mockReset();
     getTrajectory.mockReset();
+    importEvaluationCase.mockReset();
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -342,5 +348,55 @@ describe("ExecutionsPanel", () => {
     await act(async () => refreshed.resolve(firstPage));
     await flushEffects();
     expect(getTrajectory).toHaveBeenLastCalledWith("run-second");
+  });
+
+  it("imports portable evaluation JSON and surfaces API errors", async () => {
+    listTrajectories.mockResolvedValue({ records: [], nextCursor: null });
+    const document = {
+      schemaVersion: 1 as const,
+      name: "Imported case",
+      input: { prompt: "hello" },
+      expected: { status: "completed" as const, outputContains: [] },
+      requiredTools: [],
+      forbiddenTools: [],
+      safetyAssertions: [],
+    };
+    importEvaluationCase
+      .mockResolvedValueOnce({
+        id: "case-1",
+        revision: 1,
+        document,
+        createdAt: startedAt,
+        updatedAt: startedAt,
+      })
+      .mockRejectedValueOnce(new Error("schemaVersion must be 1"));
+
+    await act(async () => root.render(<ExecutionsPanel />));
+    await flushEffects();
+    const picker = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const selectFile = async (contents: string, name: string) => {
+      const file = new File([contents], name, { type: "application/json" });
+      const readText = vi.fn().mockResolvedValue(contents);
+      Object.defineProperty(file, "text", { value: readText });
+      Object.defineProperty(picker, "files", { value: [file], configurable: true });
+      await act(async () => picker.dispatchEvent(new Event("change", { bubbles: true })));
+      await flushEffects();
+      return readText;
+    };
+
+    await selectFile(JSON.stringify(document), "case.json");
+    expect(importEvaluationCase).toHaveBeenCalledWith(document);
+    expect(container.textContent).toContain("Imported “Imported case” at revision 1.");
+
+    await selectFile(JSON.stringify(document), "invalid-case.json");
+    expect(container.textContent).toContain("Import failed · schemaVersion must be 1");
+
+    const oversizedRead = await selectFile(
+      "x".repeat(EVALUATION_CASE_DOCUMENT_MAX_BYTES + 2),
+      "oversized.json"
+    );
+    expect(oversizedRead).not.toHaveBeenCalled();
+    expect(importEvaluationCase).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("File exceeds the 512000-byte evaluation limit.");
   });
 });

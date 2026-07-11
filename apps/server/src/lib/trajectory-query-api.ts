@@ -14,6 +14,11 @@ export interface BoundedPayloadPreview {
   originalBytes: number;
 }
 
+interface BoundedPayloadResult {
+  payload: unknown;
+  truncated: boolean;
+}
+
 function serialized(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
@@ -31,22 +36,34 @@ function utf8Preview(value: string, maxBytes: number): string {
   return Buffer.from(value).subarray(0, maxBytes).toString("utf8");
 }
 
+function boundedTrajectoryPayloadResult(value: unknown, maxBytes: number): BoundedPayloadResult {
+  if (value === undefined) return { payload: undefined, truncated: false };
+  const safe = sanitizeTrajectoryPayload(value);
+  const json = serialized(safe);
+  if (json === undefined) {
+    return {
+      payload: { preview: "[UNSERIALIZABLE]", truncated: true, originalBytes: 0 },
+      truncated: true,
+    };
+  }
+  const bytes = Buffer.byteLength(json);
+  if (bytes <= maxBytes) return { payload: safe, truncated: false };
+  return {
+    payload: {
+      preview: utf8Preview(json, maxBytes),
+      truncated: true,
+      originalBytes: bytes,
+    },
+    truncated: true,
+  };
+}
+
 /** Defense-in-depth redaction plus a hard per-payload response bound. */
 export function boundedTrajectoryPayload(
   value: unknown,
   maxBytes: number
 ): unknown | BoundedPayloadPreview {
-  if (value === undefined) return undefined;
-  const safe = sanitizeTrajectoryPayload(value);
-  const json = serialized(safe);
-  if (json === undefined) return { preview: "[UNSERIALIZABLE]", truncated: true, originalBytes: 0 };
-  const bytes = Buffer.byteLength(json);
-  if (bytes <= maxBytes) return safe;
-  return {
-    preview: utf8Preview(json, maxBytes),
-    truncated: true,
-    originalBytes: bytes,
-  };
+  return boundedTrajectoryPayloadResult(value, maxBytes).payload;
 }
 
 export function encodeTrajectoryCursor(cursor: TrajectoryListCursor): string {
@@ -108,14 +125,16 @@ export function trajectoryListItem(record: TrajectoryListRecord): Record<string,
 
 export function trajectoryDetail(trajectory: CanonicalTrajectoryV1): Record<string, unknown> {
   const { input, output, attributes, steps, artifacts, ...metadata } = trajectory;
+  const boundedInput = boundedTrajectoryPayloadResult(input, TRAJECTORY_DETAIL_PAYLOAD_BYTES);
+  const boundedOutput = boundedTrajectoryPayloadResult(output, TRAJECTORY_DETAIL_PAYLOAD_BYTES);
   return {
     ...sanitizedObject(metadata),
-    ...(input === undefined
-      ? {}
-      : { input: boundedTrajectoryPayload(input, TRAJECTORY_DETAIL_PAYLOAD_BYTES) }),
-    ...(output === undefined
-      ? {}
-      : { output: boundedTrajectoryPayload(output, TRAJECTORY_DETAIL_PAYLOAD_BYTES) }),
+    ...(input === undefined ? {} : { input: boundedInput.payload }),
+    ...(output === undefined ? {} : { output: boundedOutput.payload }),
+    payloadTruncation: {
+      input: boundedInput.truncated,
+      output: boundedOutput.truncated,
+    },
     attributes: boundedTrajectoryPayload(attributes, TRAJECTORY_DETAIL_PAYLOAD_BYTES),
     artifacts: sanitizeTrajectoryPayload(artifacts),
     steps: steps.map((step) => {

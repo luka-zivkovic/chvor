@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EVALUATION_CASE_DOCUMENT_MAX_BYTES, type EvaluationCaseDocumentV1 } from "@chvor/shared";
 import type { TrajectoryDetail, TrajectoryListItem } from "../../lib/api";
 import { api } from "../../lib/api";
 import { cn } from "../../lib/utils";
@@ -39,6 +40,9 @@ export function ExecutionsPanel() {
   const [listError, setListError] = useState<string | null>(null);
   const [listErrorAction, setListErrorAction] = useState<"refresh" | "load more">("refresh");
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const listRequest = useRef(0);
   const detailRequest = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
@@ -131,6 +135,32 @@ export function ExecutionsPanel() {
     []
   );
 
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const picker = event.currentTarget;
+    const file = picker.files?.[0];
+    if (!file) return;
+    setImportMessage(null);
+    setImportError(null);
+    if (file.size > EVALUATION_CASE_DOCUMENT_MAX_BYTES + 1) {
+      setImportError(
+        `File exceeds the ${EVALUATION_CASE_DOCUMENT_MAX_BYTES}-byte evaluation limit.`
+      );
+      picker.value = "";
+      return;
+    }
+    setImporting(true);
+    try {
+      const document = JSON.parse(await file.text()) as EvaluationCaseDocumentV1;
+      const record = await api.evaluationCases.import(document);
+      setImportMessage(`Imported “${record.document.name}” at revision ${record.revision}.`);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Could not import evaluation JSON");
+    } finally {
+      setImporting(false);
+      picker.value = "";
+    }
+  };
+
   return (
     <div className="flex min-h-[calc(100vh-9rem)] flex-col gap-4 md:flex-row">
       <aside className="max-h-64 w-full shrink-0 overflow-y-auto border-b border-border/40 pb-3 md:max-h-none md:w-56 md:border-r md:border-b-0 md:pr-3 md:pb-0">
@@ -153,6 +183,32 @@ export function ExecutionsPanel() {
         >
           {loadingList ? "Refreshing…" : "Refresh"}
         </button>
+        <label className="mb-3 block cursor-pointer rounded-lg border border-border/40 px-2 py-1.5 text-center text-[9px] text-muted-foreground hover:bg-muted">
+          {importing ? "Importing…" : "Import evaluation JSON"}
+          <input
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            disabled={importing}
+            onChange={(event) => void handleImport(event)}
+          />
+        </label>
+        {importMessage && (
+          <p
+            role="status"
+            className="mb-3 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2 text-[9px] text-emerald-200"
+          >
+            {importMessage}
+          </p>
+        )}
+        {importError && (
+          <p
+            role="alert"
+            className="mb-3 rounded-lg border border-rose-500/25 bg-rose-500/5 p-2 text-[9px] text-rose-200"
+          >
+            Import failed · {importError}
+          </p>
+        )}
 
         {loadingList && records.length === 0 && (
           <p className="py-8 text-center text-xs text-muted-foreground">Loading executions…</p>

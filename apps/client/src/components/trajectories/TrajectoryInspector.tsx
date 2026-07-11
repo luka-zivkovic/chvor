@@ -1,5 +1,8 @@
+import { useState } from "react";
 import type { TrajectoryDetail, TrajectoryStepDetail } from "../../lib/api";
 import { cn } from "../../lib/utils";
+import { Button } from "../ui/button";
+import { SaveEvaluationCaseDialog } from "./SaveEvaluationCaseDialog";
 
 const STATUS_STYLE: Record<string, string> = {
   completed: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
@@ -148,6 +151,7 @@ function StepCard({ step }: { step: TrajectoryStepDetail }) {
 }
 
 export function TrajectoryInspector({ trajectory }: { trajectory: TrajectoryDetail }) {
+  const [showEvaluationDialog, setShowEvaluationDialog] = useState(false);
   const steps = [...trajectory.steps].sort((left, right) => left.sequence - right.sequence);
   const active = ["pending", "running", "waiting"].includes(trajectory.status);
   const trajectoryAttributes =
@@ -175,6 +179,14 @@ export function TrajectoryInspector({ trajectory }: { trajectory: TrajectoryDeta
           </div>
           <StatusBadge status={trajectory.status} />
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3 h-7 text-[10px]"
+          onClick={() => setShowEvaluationDialog(true)}
+        >
+          Save as evaluation
+        </Button>
         {attemptLabel && (
           <p className="mt-2 font-mono text-[9px] uppercase text-amber-300">{attemptLabel}</p>
         )}
@@ -251,6 +263,12 @@ export function TrajectoryInspector({ trajectory }: { trajectory: TrajectoryDeta
           </div>
         )}
       </section>
+      {showEvaluationDialog && (
+        <SaveEvaluationCaseDialog
+          trajectory={trajectory}
+          onClose={() => setShowEvaluationDialog(false)}
+        />
+      )}
     </div>
   );
 }
