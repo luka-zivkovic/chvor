@@ -21,6 +21,7 @@ let expireApprovalById: typeof import("../../db/approval-store.ts").expireApprov
 let pruneApprovalsOlderThan: typeof import("../../db/approval-store.ts").pruneApprovalsOlderThan;
 let countApprovals: typeof import("../../db/approval-store.ts").countApprovals;
 let countPendingApprovals: typeof import("../../db/approval-store.ts").countPendingApprovals;
+let setWSInstance: typeof import("../../gateway/ws-instance.ts").setWSInstance;
 
 beforeAll(async () => {
   ({ requestNativeApproval, resolveHITLApproval, isHITLEnabled } = await import(
@@ -37,6 +38,7 @@ beforeAll(async () => {
     countApprovals,
     countPendingApprovals,
   } = await import("../../db/approval-store.ts"));
+  ({ setWSInstance } = await import("../../gateway/ws-instance.ts"));
 });
 
 describe("approval-store", () => {
@@ -257,6 +259,64 @@ describe("approval-gate-hitl — request/resolve flow", () => {
     const outcome = await promise;
     expect(outcome.allowed).toBe(false);
     if (!outcome.allowed) expect(outcome.reason).toBe("denied");
+  });
+
+  it("aborts a pending wait promptly and expires the durable approval", async () => {
+    const controller = new AbortController();
+    const promise = requestNativeApproval({
+      sessionId: "sess-abort",
+      actionId: null,
+      toolName: "native__shell_execute",
+      kind: "native",
+      args: {},
+      risk: "high",
+      reasons: ["test"],
+      checkpointId: null,
+      abortSignal: controller.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const [pendingApproval] = listApprovals({ sessionId: "sess-abort", status: "pending" });
+    expect(pendingApproval).toBeDefined();
+
+    controller.abort();
+    const outcome = await promise;
+    expect(outcome.allowed).toBe(false);
+    if (!outcome.allowed) {
+      expect(outcome.reason).toBe("aborted");
+      expect(outcome.record?.status).toBe("expired");
+      expect(outcome.record?.decidedBy).toBe("auto-expire");
+    }
+  });
+
+  it("does not emit a durable approval prompt for a pre-aborted request", async () => {
+    const events: unknown[] = [];
+    setWSInstance({
+      sendTo: (_target: string, event: unknown) => {
+        events.push(event);
+        return true;
+      },
+      broadcast: (event: unknown) => events.push(event),
+    } as never);
+    const controller = new AbortController();
+    controller.abort();
+    try {
+      const outcome = await requestNativeApproval({
+        sessionId: "sess-pre-abort",
+        actionId: null,
+        toolName: "native__shell_execute",
+        kind: "native",
+        args: {},
+        risk: "high",
+        reasons: ["test"],
+        checkpointId: null,
+        abortSignal: controller.signal,
+      });
+      expect(outcome.allowed).toBe(false);
+      if (!outcome.allowed) expect(outcome.reason).toBe("aborted");
+      expect(events).toEqual([]);
+    } finally {
+      setWSInstance(null);
+    }
   });
 
   it("the auto-expire timer closes a stale pending request as status='expired'", async () => {

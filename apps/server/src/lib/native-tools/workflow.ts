@@ -199,6 +199,7 @@ const handleRunWorkflow: NativeToolHandler = async (
 ): Promise<NativeToolResult> => {
   const { getSkill } = await import("../capability-loader.ts");
   const { executeConversation } = await import("../orchestrator.ts");
+  const { getActiveTrajectoryId, getActiveTrajectoryOrigin } = await import("../orchestrator/trajectory-adapter.ts");
 
   const workflowId = String(args.workflowId);
   const userParams = (args.parameters ?? {}) as Record<string, string>;
@@ -256,9 +257,10 @@ const handleRunWorkflow: NativeToolHandler = async (
   const executionPrompt = `[WORKFLOW EXECUTION: "${skill.metadata.name}"]\n\nExecute the following workflow steps in order. Complete each step fully before moving to the next. Use your available tools as needed.\n\n${instructions}`;
 
   // 5. Run through the orchestrator as a sub-conversation
+  const messageId = `wf-${workflowId}-${Date.now()}`;
   const messages: import("@chvor/shared").ChatMessage[] = [
     {
-      id: `wf-${workflowId}-${Date.now()}`,
+      id: messageId,
       role: "user" as const,
       content: executionPrompt,
       channelType: (context?.channelType ?? "web") as import("@chvor/shared").ChannelType,
@@ -267,6 +269,8 @@ const handleRunWorkflow: NativeToolHandler = async (
   ];
 
   const emit = context?.emitEvent ?? (() => {});
+  const parentTrajectoryId = getActiveTrajectoryId();
+  const parentOrigin = getActiveTrajectoryOrigin();
 
   try {
     const result = await executeConversation(
@@ -280,6 +284,55 @@ const handleRunWorkflow: NativeToolHandler = async (
         channelType: context?.channelType,
         channelId: context?.channelId,
         sessionId: context?.sessionId,
+        loopId: context?.loopId,
+        originClientId: context?.originClientId,
+        abortSignal: context?.abortSignal,
+        trajectory: {
+          origin: parentOrigin ?? (context?.loopId
+            ? {
+                kind: "cognitive-loop",
+                loopId: context.loopId,
+                ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+                ...(context.channelType ? { channelType: context.channelType } : {}),
+                ...(context.channelId ? { channelId: context.channelId } : {}),
+              }
+            : context?.channelType === "daemon"
+              ? {
+                  kind: "daemon",
+                  ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+                  channelType: context.channelType,
+                  ...(context.channelId ? { channelId: context.channelId } : {}),
+                }
+              : context?.channelType === "web"
+                ? {
+                    kind: "web-chat",
+                    ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+                    channelType: context.channelType,
+                    ...(context.channelId ? { channelId: context.channelId } : {}),
+                  }
+                : context?.channelType
+                  ? {
+                      kind: "channel",
+                      ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+                      channelType: context.channelType,
+                      ...(context.channelId ? { channelId: context.channelId } : {}),
+                    }
+                  : { kind: "system" }),
+          actor: {
+            type: "agent",
+            id: workflowId,
+            displayName: skill.metadata.name,
+          },
+          title: `Workflow: ${skill.metadata.name}`,
+          attributes: {
+            workflowId,
+            workflowName: skill.metadata.name,
+            messageId,
+            ...(parentTrajectoryId ? { parentTrajectoryId } : {}),
+            ...(context?.workspaceId ? { workspaceId: context.workspaceId } : {}),
+            ...(context?.originClientId ? { parentOriginClientId: context.originClientId } : {}),
+          },
+        },
       }
     );
 

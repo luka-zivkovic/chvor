@@ -14,6 +14,7 @@
 
 import { randomUUID } from "node:crypto";
 import type {
+  ApprovalRecord,
   SynthesizedConfirmData,
   SynthesizedResponseData,
 } from "@chvor/shared";
@@ -28,6 +29,10 @@ import {
   clearRepairAttemptsFor,
 } from "../db/synthesized-store.ts";
 import { HITL_TIMEOUT_MS } from "./hitl-timeouts.ts";
+import {
+  recordTrajectoryApprovalRequested,
+  recordTrajectoryApprovalResolved,
+} from "./orchestrator/trajectory-adapter.ts";
 
 // ── Session state ──────────────────────────────────────────────
 
@@ -116,6 +121,24 @@ export interface RequestApprovalArgs {
   body?: unknown;
   verified: boolean;
   source: "openapi" | "ai-draft";
+  abortSignal?: AbortSignal;
+  toolCallId?: string;
+}
+
+function captureApprovalRequested(record: ApprovalRecord, toolCallId?: string): void {
+  try {
+    recordTrajectoryApprovalRequested(record, toolCallId);
+  } catch (error) {
+    console.warn("[approval-gate] failed to capture pending approval:", error);
+  }
+}
+
+function captureApprovalResolved(record: ApprovalRecord, toolCallId?: string): void {
+  try {
+    recordTrajectoryApprovalResolved(record, toolCallId);
+  } catch (error) {
+    console.warn("[approval-gate] failed to capture approval resolution:", error);
+  }
 }
 
 /**
@@ -124,7 +147,7 @@ export interface RequestApprovalArgs {
  */
 export async function requestApproval(args: RequestApprovalArgs): Promise<
   | { allowed: true; persisted: boolean }
-  | { allowed: false; reason: "denied" | "no-ws" | "timeout" }
+  | { allowed: false; reason: "denied" | "no-ws" | "timeout" | "aborted" }
 > {
   const { sessionId } = args;
   const approvalKey = key(args.toolId, args.endpointName);
@@ -151,8 +174,38 @@ export async function requestApproval(args: RequestApprovalArgs): Promise<
   if (!ws) {
     return { allowed: false, reason: "no-ws" };
   }
+  if (args.abortSignal?.aborted) {
+    return { allowed: false, reason: "aborted" };
+  }
 
   const requestId = randomUUID();
+  const createdAt = Date.now();
+  const trajectoryRecord: ApprovalRecord = {
+    id: requestId,
+    sessionId: sessionId ?? null,
+    actionId: null,
+    toolName: args.toolName,
+    kind: "synthesized",
+    args: {
+      endpointName: args.endpointName,
+      method: args.method,
+      path: args.path,
+      resolvedUrl: args.resolvedUrl,
+      argsPreview: args.argsPreview,
+      ...(args.pathParams ? { pathParams: args.pathParams } : {}),
+      ...(args.queryParams ? { queryParams: args.queryParams } : {}),
+      ...(args.body === undefined ? {} : { body: args.body }),
+    },
+    risk: "high",
+    reasons: ["Non-GET synthesized endpoint requires user approval"],
+    checkpointId: null,
+    status: "pending",
+    decision: null,
+    decidedAt: null,
+    decidedBy: null,
+    createdAt,
+    expiresAt: createdAt + MAX_PENDING,
+  };
   const event: import("@chvor/shared").GatewayServerEvent = {
     type: "synthesized.confirm",
     data: {
@@ -177,22 +230,58 @@ export async function requestApproval(args: RequestApprovalArgs): Promise<
     } satisfies SynthesizedConfirmData,
   };
 
-  if (args.originClientId) {
-    ws.sendTo(args.originClientId, event);
-  } else {
-    ws.broadcast(event);
-  }
-
-  const response = await new Promise<SynthesizedResponseData>((resolve) => {
+  let timedOut = false;
+  const responsePromise = new Promise<SynthesizedResponseData | "aborted">((resolve) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      pendingApprovals.delete(requestId);
+      resolve("aborted");
+    };
     const timer = setTimeout(() => {
+      timedOut = true;
+      args.abortSignal?.removeEventListener("abort", onAbort);
       pendingApprovals.delete(requestId);
       resolve({ requestId, decision: "deny" });
     }, MAX_PENDING);
     pendingApprovals.set(requestId, {
       targetClientId: args.originClientId,
-      resolve: (r) => { clearTimeout(timer); resolve(r); },
+      resolve: (r) => {
+        clearTimeout(timer);
+        args.abortSignal?.removeEventListener("abort", onAbort);
+        resolve(r);
+      },
     });
+    if (args.abortSignal?.aborted) onAbort();
+    else args.abortSignal?.addEventListener("abort", onAbort, { once: true });
   });
+  captureApprovalRequested(trajectoryRecord, args.toolCallId);
+  if (!args.abortSignal?.aborted) {
+    if (args.originClientId) {
+      ws.sendTo(args.originClientId, event);
+    } else {
+      ws.broadcast(event);
+    }
+  }
+  const response = await responsePromise;
+
+  if (response === "aborted") {
+    captureApprovalResolved({
+      ...trajectoryRecord,
+      status: "expired",
+      decidedAt: Date.now(),
+      decidedBy: "system",
+    }, args.toolCallId);
+    return { allowed: false, reason: "aborted" };
+  }
+
+  const allowed = response.decision === "allow-once" || response.decision === "allow-session";
+  captureApprovalResolved({
+    ...trajectoryRecord,
+    status: allowed ? "allowed" : timedOut ? "expired" : "denied",
+    decision: timedOut ? null : response.decision,
+    decidedAt: Date.now(),
+    decidedBy: timedOut ? "auto-expire" : "user",
+  }, args.toolCallId);
 
   if (response.decision === "allow-session" && sessionId && args.verified) {
     const state = getOrCreateSession(sessionId);

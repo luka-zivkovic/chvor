@@ -113,9 +113,10 @@ export async function executeWebhook(
 
   const renderedPrompt = renderTemplate(subscription.promptTemplate, parsed);
 
+  const messageId = `webhook-${subscription.id}-${Date.now()}`;
   const messages: ChatMessage[] = [
     {
-      id: `webhook-${subscription.id}-${Date.now()}`,
+      id: messageId,
       role: "user",
       content: `[WEBHOOK EVENT — This was triggered by an incoming webhook from ${subscription.source}. Process the event as instructed.]\n\n${renderedPrompt}`,
       channelType: "webhook",
@@ -141,6 +142,28 @@ export async function executeWebhook(
         excludeTools: WEBHOOK_EXCLUDED_TOOLS,
         channelType: "webhook",
         sessionId: `webhook-${subscription.id}`,
+        trajectory: {
+          origin: {
+            kind: "webhook",
+            webhookId: subscription.id,
+            sessionId: `webhook-${subscription.id}`,
+            channelType: "webhook",
+          },
+          actor: {
+            type: "webhook",
+            id: subscription.id,
+            displayName: subscription.name,
+          },
+          attributes: {
+            legacyExecutionId: `webhook-${subscription.id}`,
+            messageId,
+            workspaceId: subscription.workspaceId,
+            source: subscription.source,
+            eventType: parsed.eventType,
+            attempt: attempt + 1,
+            maxAttempts: MAX_ATTEMPTS,
+          },
+        },
       });
       result = convResult.text;
       error = null;

@@ -123,9 +123,9 @@ describe("credential-injector — extractSecretValues", () => {
     expect(out).not.toContain("us-east-1");
   });
 
-  it("drops short values to avoid scrubbing common substrings", () => {
-    const out = extractSecretValues({ apiKey: "abc" }); // 3 chars — too short
-    expect(out).toEqual([]);
+  it("keeps short values available for trajectory-scoped redaction", () => {
+    const out = extractSecretValues({ apiKey: "abc" });
+    expect(out).toEqual(["abc"]);
   });
 
   it("excludes provider connection-metadata fields from the seal", () => {

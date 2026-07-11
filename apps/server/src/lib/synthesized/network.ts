@@ -93,8 +93,9 @@ export async function pinnedHttpsRequest(args: {
   body?: Buffer;
   timeoutMs: number;
   maxBytes: number;
+  signal?: AbortSignal;
 }): Promise<PinnedResponse> {
-  const { target, method, headers, body, timeoutMs, maxBytes } = args;
+  const { target, method, headers, body, timeoutMs, maxBytes, signal } = args;
   const { url, resolvedIp, hostname } = target;
 
   return await new Promise<PinnedResponse>((resolve, reject) => {
@@ -143,6 +144,14 @@ export async function pinnedHttpsRequest(args: {
       res.on("error", reject);
     });
     req.on("error", reject);
+    const onAbort = (): void => {
+      const error = new Error("Request aborted");
+      error.name = "AbortError";
+      req.destroy(error);
+    };
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+    req.on("close", () => signal?.removeEventListener("abort", onAbort));
     req.on("timeout", () => {
       req.destroy(new Error(`request timed out after ${timeoutMs}ms`));
     });

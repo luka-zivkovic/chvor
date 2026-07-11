@@ -85,7 +85,8 @@ Every batch must preserve these properties:
 
 ### A02 — Trajectory persistence
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#107](https://github.com/luka-zivkovic/chvor/pull/107)
 - **Dependencies:** A01
 - **Outcome:** Persist append-only trajectories and steps in SQLite.
 - **Scope:** Migration, store, retention configuration, indexes, and store tests.
@@ -99,7 +100,7 @@ Every batch must preserve these properties:
 
 ### A03 — Orchestrator trajectory adapter
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** A02
 - **Outcome:** Record complete trajectories from current Chvor execution without coupling storage to the current engine.
 - **Scope:** One adapter from existing execution/tool events into the canonical contract, including chat and non-chat origins.

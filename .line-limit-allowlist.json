@@ -18,5 +18,9 @@
   {
     "path": "apps/client/public/chvor_logo.svg",
     "reason": "Static logo asset with embedded image data; user explicitly chose to keep it rather than replace/decompose it."
+  },
+  {
+    "path": "apps/server/src/lib/orchestrator/trajectory-adapter.ts",
+    "reason": "Single AsyncLocal trajectory state machine whose capture hooks share ordering, parentage, redaction, and a per-run failure circuit; splitting the mutable state across modules would weaken those invariants."
   }
 ]

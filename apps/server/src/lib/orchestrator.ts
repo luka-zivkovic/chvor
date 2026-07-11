@@ -1,6 +1,6 @@
 import { streamText } from "ai";
 import type { CoreMessage } from "ai";
-import type { ChatMessage, ExecutionEvent, Skill, ToolActionSummary, EmotionState, EmotionSnapshot, MediaArtifact, ModelUsedInfo, Memory } from "@chvor/shared";
+import type { ChatMessage, ExecutionEvent, ToolActionSummary, EmotionState, EmotionSnapshot, MediaArtifact, ModelUsedInfo, Memory } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
 import { LLMError } from "./errors.ts";
 import { createEmotionParser, stripEmotionMarker } from "./emotion-parser.ts";
@@ -14,7 +14,7 @@ import { getRelationshipState, updateRelationshipAfterTurn, incrementRelationshi
 import { createModel, getContextWindow, getMaxTokens, resolveRoleConfig, resolveRoleChain, resolveMediaConfig, isFallbackEligible } from "./llm-router.ts";
 import type { ResolvedConfig } from "./llm-router.ts";
 import { estimateTokens, fitMessagesToBudget } from "./token-counter.ts";
-import { buildToolDefinitions } from "./tool-builder.ts";
+import { buildToolDefinitions, snapshotActiveMcpSecrets } from "./tool-builder.ts";
 import { loadSkills, loadTools } from "./capability-loader.ts";
 import { getRelevantMemories, getRelevantMemoriesWithScores, getRelevantMemoriesByCategoryTiers, getMemory } from "../db/memory-store.ts";
 import { rerankMemories, classifyQueryCategories, computeCompositeScoreDetailed } from "./memory-projections.ts";
@@ -24,7 +24,7 @@ import { computeTopicHash, updateAccessLogTopics, predictNextMemories } from "./
 import { getCognitiveMemoryConfig } from "../db/config-store.ts";
 import { getPersona, isCapabilityEnabled, getExtendedThinking, getBrainConfig } from "../db/config-store.ts";
 import { buildSystemPrompt } from "./orchestrator/system-prompt.ts";
-import { publicMedia, sanitizeResultForLLM, summarizeToolResult, toolResultContentForLLM } from "./orchestrator/tool-result.ts";
+import { publicMedia, sanitizeResultForLLM, sanitizeResultForTrajectory, summarizeToolResult, toolResultContentForLLM } from "./orchestrator/tool-result.ts";
 import type { ActorType } from "@chvor/shared";
 import { resolveSkillBag, summarizeScope, filterTools as filterToolsByScope } from "./tool-groups.ts";
 import { snapshotRound } from "./checkpoint-manager.ts";
@@ -37,39 +37,16 @@ import {
 import { runParallelMultiMind } from "./multi-mind.ts";
 import { sessionToMessages } from "./orchestrator/messages.ts";
 import { runToolCalls } from "./orchestrator/tool-call-runner.ts";
-
+import { isWorkflowRelevant } from "./orchestrator/skill-relevance.ts";
+import { readTrackedModelMetadata, runTrackedModelSetup } from "./orchestrator/model-trajectory.ts";
+import { ignoreAfterAbort } from "./orchestrator/abort.ts";
+import { recordTrajectoryModelFailed, recordTrajectoryModelFinished, recordTrajectoryModelStarted, recordTrajectoryToolRound, runWithTrajectoryCapture, type TrajectoryRunContext } from "./orchestrator/trajectory-adapter.ts";
 export type EventEmitter = (event: ExecutionEvent) => void;
-
-/**
- * Lightweight relevance check for workflow skills.
- * Matches user query against skill name, tags, description, and needs.
- * Returns true if any keyword overlaps — no LLM call needed.
- */
-function isWorkflowRelevant(skill: Skill, query: string): boolean {
-  if (!query) return false;
-  const keywords: string[] = [];
-  const { name, description, tags, needs } = skill.metadata;
-  keywords.push(...name.toLowerCase().split(/\s+/));
-  keywords.push(...description.toLowerCase().split(/\s+/));
-  if (tags) keywords.push(...tags.map((t) => t.toLowerCase()));
-  if (needs) keywords.push(...needs.map((n) => n.split(":")[0].toLowerCase()));
-
-  // Filter out noise words
-  const noise = new Set(["a", "an", "the", "and", "or", "to", "in", "on", "for", "with", "via", "of", "is", "by"]);
-  const meaningful = keywords.filter((k) => k.length > 2 && !noise.has(k));
-
-  return meaningful.some((kw) => query.includes(kw));
-}
-
-/** @deprecated Use resolveRoleConfig from llm-router instead */
 export function resolveConfig(): ResolvedConfig {
   return resolveRoleConfig("primary");
 }
-
 export { sessionToMessages } from "./orchestrator/messages.ts";
-
 export type ChunkCallback = (text: string) => void;
-
 export interface ExecuteOptions {
   excludeTools?: string[];
   sessionSummary?: string | null;
@@ -86,8 +63,8 @@ export interface ExecuteOptions {
   actor?: { type: ActorType; id: string | null };
   /** Cognitive loop lineage for autonomous runs spawned by pulse/daemon/A2UI. */
   loopId?: string;
+  trajectory?: TrajectoryRunContext;
 }
-
 /** @deprecated Use ModelUsedInfo from @chvor/shared */
 export type ModelUsedResult = ModelUsedInfo;
 
@@ -104,11 +81,34 @@ export interface ConversationResult {
   /** Which model actually generated the response */
   modelUsed?: ModelUsedResult;
 }
-
 /**
  * Execute a conversation turn with streaming: send to LLM, handle tool calls, stream text chunks.
  */
 export async function executeConversation(
+  messages: ChatMessage[],
+  emit: EventEmitter,
+  onChunk?: ChunkCallback,
+  onStreamReset?: () => void,
+  options?: ExecuteOptions
+): Promise<ConversationResult> {
+  const guardedChunk = ignoreAfterAbort(onChunk, options?.abortSignal);
+  const guardedStreamReset = ignoreAfterAbort(onStreamReset, options?.abortSignal);
+  return runWithTrajectoryCapture({
+    messages,
+    emit,
+    execute: (trackedEmit) => executeConversationCore(messages, trackedEmit, guardedChunk, guardedStreamReset, options),
+    context: options?.trajectory,
+    sessionId: options?.sessionId,
+    channelType: options?.channelType,
+    channelId: options?.channelId,
+    loopId: options?.loopId,
+    auditActor: options?.actor,
+    abortSignal: options?.abortSignal,
+    initialSecrets: snapshotActiveMcpSecrets(),
+  });
+}
+
+async function executeConversationCore(
   messages: ChatMessage[],
   emit: EventEmitter,
   onChunk?: ChunkCallback,
@@ -577,7 +577,14 @@ export async function executeConversation(
     let streamSucceeded = false;
     for (let cfgIdx = activeConfigIndex; cfgIdx < configChain.length; cfgIdx++) {
       const currentConfig = configChain[cfgIdx];
-      const currentModel = createModel(currentConfig);
+      const modelRequestStepId = recordTrajectoryModelStarted({
+        providerId: currentConfig.providerId, modelId: currentConfig.model, role: "primary",
+        wasFallback: cfgIdx > 0, round: round + 1,
+      });
+      const currentModel = runTrackedModelSetup({
+        requestStepId: modelRequestStepId, config: currentConfig, wasFallback: cfgIdx > 0,
+        operation: () => createModel(currentConfig),
+      });
 
       // Extended thinking only applies to Anthropic models
       const providerOptions = (thinkingConfig.enabled && currentConfig.providerId === "anthropic")
@@ -592,13 +599,13 @@ export async function executeConversation(
         console.log(`[orchestrator] extended thinking enabled (budget: ${thinkingConfig.budgetTokens})`);
       }
 
-      const result = streamText({
-        model: currentModel,
-        messages: [...systemMessages, ...currentMessages],
-        tools: toolDefs,
-        maxSteps: 1,
-        abortSignal: options?.abortSignal,
-        ...(providerOptions ? { providerOptions } : {}),
+      const result = runTrackedModelSetup({
+        requestStepId: modelRequestStepId, config: currentConfig, wasFallback: cfgIdx > 0,
+        operation: () => streamText({
+          model: currentModel, messages: [...systemMessages, ...currentMessages], tools: toolDefs,
+          maxSteps: 1, abortSignal: options?.abortSignal,
+          ...(providerOptions ? { providerOptions } : {}),
+        }),
       });
 
       try {
@@ -625,13 +632,31 @@ export async function executeConversation(
             console.error(`[orchestrator] stream error:`, (part as unknown as { error: unknown }).error);
           }
         }
+        let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
+        let finishReason: string | undefined;
+        const metadata = await readTrackedModelMetadata(result.usage, result.finishReason);
+        if (metadata) [usage, finishReason] = metadata;
+        else console.warn("[orchestrator] model metadata unavailable");
+        recordTrajectoryModelFinished({
+          requestStepId: modelRequestStepId, providerId: currentConfig.providerId,
+          modelId: currentConfig.model, role: "primary", wasFallback: cfgIdx > 0,
+          output: { text: fullText, toolCallCount: toolCalls.length }, finishReason,
+          inputTokens: usage?.promptTokens, outputTokens: usage?.completionTokens,
+          totalTokens: usage?.totalTokens,
+        });
         // Stream succeeded — stick with this config for future rounds
         activeConfigIndex = cfgIdx;
         streamSucceeded = true;
         break;
       } catch (streamErr) {
         // Check if a fallback is available and the error is transient
-        if (cfgIdx < configChain.length - 1 && isFallbackEligible(streamErr)) {
+        const willFallback = cfgIdx < configChain.length - 1 && isFallbackEligible(streamErr);
+        recordTrajectoryModelFailed({
+          requestStepId: modelRequestStepId, providerId: currentConfig.providerId,
+          modelId: currentConfig.model, role: "primary", wasFallback: cfgIdx > 0,
+          error: streamErr, retryable: willFallback,
+        });
+        if (willFallback) {
           console.warn(`[orchestrator] ${currentConfig.providerId}/${currentConfig.model} failed (${(streamErr as Error).message}), trying fallback ${cfgIdx + 1}...`);
           logError("llm_fallback", streamErr, { round: round + 1, configIndex: cfgIdx, failedModel: `${currentConfig.providerId}/${currentConfig.model}`, nextModel: `${configChain[cfgIdx + 1].providerId}/${configChain[cfgIdx + 1].model}`, sessionId: options?.sessionId });
           // Reset partial state for next attempt
@@ -796,6 +821,7 @@ export async function executeConversation(
       roundToolOutcomes,
       toolOutcomeResults: roundToolOutcomeSignals,
     } = await runToolCalls({
+      round: round + 1,
       toolCalls,
       currentMessages,
       emit,
@@ -806,11 +832,23 @@ export async function executeConversation(
       toolSeverity,
       collectEmotionOutcomes: !!emotionEngine,
     });
+    recordTrajectoryToolRound({
+      round: round + 1,
+      calls: toolCalls.map((call) => ({ ...call,
+        toolKind: toolResults.find((result) => result.toolCallId === call.toolCallId)?.toolKind,
+      })),
+      results: toolResults.map((result) => ({
+        ...result,
+        result: sanitizeResultForTrajectory(result.result, result.media, result.toolName),
+      })),
+    });
     toolOutcomeResults.push(...roundToolOutcomeSignals);
 
     // Accumulate tool action summaries
     for (const tr of toolResults) {
-      const actionResult = sanitizeResultForLLM(tr.result, tr.media);
+      const actionResult = tr.toolName === "native__use_credential"
+        ? { content: [{ type: "text", text: "Credential retrieved." }] }
+        : sanitizeResultForLLM(tr.result, tr.media);
       const actionMedia = publicMedia(tr.media);
       allActions.push({
         tool: tr.toolName,

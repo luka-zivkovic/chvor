@@ -40,10 +40,12 @@ const TRUNCATION_PREVIEW_BYTES = 4 * 1024;
 export interface CallContext {
   sessionId?: string;
   originClientId?: string;
+  toolCallId?: string;
   /** Skill-aggregated `preferredUsageContext` used by the multi-credential picker. */
   preferredUsageContext?: string[];
   /** Skill-scoped credential whitelist for this turn. Undefined/empty ⇒ legacy unscoped. */
   allowedCredentialTypes?: string[];
+  abortSignal?: AbortSignal;
   /** Optional sink for picker rationale; orchestrator wires this to a canvas event. */
   onCredentialResolved?: (info: {
     credentialType: string;
@@ -609,6 +611,8 @@ export async function callSynthesizedEndpoint(
         body: bodyValue,
         verified: synth.verified,
         source: synth.source,
+        abortSignal: context.abortSignal,
+        toolCallId: context.toolCallId,
       });
 
       if (!approval.allowed) {
@@ -617,6 +621,8 @@ export async function callSynthesizedEndpoint(
           error:
             approval.reason === "denied"
               ? "user denied execution"
+              : approval.reason === "aborted"
+                ? "execution aborted"
               : approval.reason === "no-ws"
                 ? "cannot prompt for approval — no active UI connection"
                 : "approval timed out",
@@ -637,6 +643,7 @@ export async function callSynthesizedEndpoint(
         body: bodyValue !== undefined ? Buffer.from(JSON.stringify(bodyValue), "utf-8") : undefined,
         timeoutMs,
         maxBytes: MAX_RESPONSE_BYTES,
+        signal: context.abortSignal,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -727,6 +734,7 @@ export async function callSynthesizedEndpoint(
                   : undefined,
               timeoutMs,
               maxBytes: MAX_RESPONSE_BYTES,
+              signal: context.abortSignal,
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
