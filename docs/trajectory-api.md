@@ -48,4 +48,13 @@ limited to 2 KiB and detail payloads to 16 KiB per input, output, attribute, or 
 Larger values are represented as `{ preview, truncated: true, originalBytes }`; artifact metadata
 remains a reference and does not inline artifact bodies.
 
+Detail responses also include `payloadTruncation: { input, output }`. This out-of-band marker lets
+consumers distinguish an API-generated top-level preview from an ordinary user payload that happens
+to contain preview-like field names.
+
+`GET /api/trajectories/:id/evaluation-source` is an authenticated, `trajectory:read`-scoped escape
+hatch for evaluation capture. It returns the complete redacted input on demand when the inspector
+preview was truncated. The complete output is included only when the combined source remains within
+the evaluation-document limit; otherwise `outputOmitted` is true. Oversized inputs return `413`.
+
 Malformed cursors, invalid enum values, invalid time ranges, and invalid limits return `400`.

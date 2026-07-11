@@ -1,5 +1,9 @@
 import { Hono } from "hono";
-import type { TrajectoryOrigin, TrajectoryStatus } from "@chvor/shared";
+import {
+  EVALUATION_CASE_DOCUMENT_MAX_BYTES,
+  type TrajectoryOrigin,
+  type TrajectoryStatus,
+} from "@chvor/shared";
 import { getTrajectory } from "../db/trajectory-store.ts";
 import { listTrajectories, type TrajectoryListQuery } from "../db/trajectory-query-store.ts";
 import {
@@ -13,6 +17,7 @@ import {
   compareTrajectoryTimestamps,
   isCanonicalTrajectoryTimestamp,
 } from "../lib/trajectory-time.ts";
+import { sanitizeTrajectoryPayload } from "../lib/orchestrator/trajectory-payload.ts";
 
 const trajectories = new Hono();
 const MAX_LIMIT = 100;
@@ -119,6 +124,36 @@ trajectories.get("/", (c) => {
     }
     throw error;
   }
+});
+
+trajectories.get("/:id/evaluation-source", (c) => {
+  const id = c.req.param("id");
+  if (id.length === 0 || id.length > 512) {
+    return c.json({ error: "Invalid trajectory ID" }, 400);
+  }
+  const record = getTrajectory(id);
+  if (!record) return c.json({ error: "Trajectory not found" }, 404);
+
+  const input = sanitizeTrajectoryPayload(record.input ?? null);
+  const requiredSource = { input };
+  if (Buffer.byteLength(JSON.stringify(requiredSource)) > EVALUATION_CASE_DOCUMENT_MAX_BYTES) {
+    return c.json({ error: "Trajectory input is too large for an evaluation case" }, 413);
+  }
+
+  const output = record.output === undefined ? undefined : sanitizeTrajectoryPayload(record.output);
+  const completeSource = output === undefined ? requiredSource : { ...requiredSource, output };
+  const outputOmitted =
+    output !== undefined &&
+    Buffer.byteLength(JSON.stringify(completeSource)) > EVALUATION_CASE_DOCUMENT_MAX_BYTES;
+  return c.json({
+    data: {
+      source: {
+        ...requiredSource,
+        ...(output === undefined || outputOmitted ? {} : { output }),
+        outputOmitted,
+      },
+    },
+  });
 });
 
 trajectories.get("/:id", (c) => {

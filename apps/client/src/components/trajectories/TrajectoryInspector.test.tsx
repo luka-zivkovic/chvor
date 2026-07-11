@@ -74,4 +74,17 @@ describe("TrajectoryInspector states", () => {
     expect(container.textContent).toContain('"preview": "result"');
     expect(container.textContent).toContain('"originalBytes": 100');
   });
+
+  it("opens evaluation capture from the trajectory header", async () => {
+    await act(async () =>
+      root.render(<TrajectoryInspector trajectory={trajectory("completed")} />)
+    );
+    const save = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Save as evaluation"
+    );
+    await act(async () => save!.click());
+
+    expect(container.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(container.textContent).toContain("Portable data excludes trajectory IDs");
+  });
 });

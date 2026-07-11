@@ -127,7 +127,8 @@ Every batch must preserve these properties:
 
 ### A05 — Execution inspector UI
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#110](https://github.com/luka-zivkovic/chvor/pull/110)
 - **Dependencies:** A04
 - **Outcome:** Turn execution history into a useful per-step debugger.
 - **Acceptance criteria:**
@@ -139,7 +140,7 @@ Every batch must preserve these properties:
 
 ### A06 — Save trajectory as evaluation case
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** A05
 - **Outcome:** Convert a production trajectory into a versioned local regression case.
 - **Acceptance criteria:**

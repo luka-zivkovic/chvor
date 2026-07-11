@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
 import { migrateTrajectoryPersistenceV31 } from "./migrations/trajectory-v31.ts";
 import { migrateTrajectoryQueryIndexV32 } from "./migrations/trajectory-query-v32.ts";
+import { migrateEvaluationCasesV33 } from "./migrations/evaluation-cases-v33.ts";
 
 interface MigrationMessage {
   id: string;
@@ -973,5 +974,10 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
   if (currentVersion < 32) {
     migrateTrajectoryQueryIndexV32(db);
     console.log("[db] migration v32 applied: trajectory chronological query index");
+  }
+
+  if (currentVersion < 33) {
+    migrateEvaluationCasesV33(db);
+    console.log("[db] migration v33 applied: versioned evaluation cases");
   }
 }

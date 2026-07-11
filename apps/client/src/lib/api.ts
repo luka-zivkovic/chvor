@@ -85,6 +85,8 @@ import type {
   TrajectoryStepStatus,
   TrajectoryToolCall,
 } from "@chvor/shared";
+import { createEvaluationCasesApi } from "./evaluation-cases-api";
+import { responseErrorMessage } from "./http-error";
 
 export interface ProvidersResponse {
   llm: LLMProviderDef[];
@@ -219,6 +221,7 @@ export interface TrajectoryDetail {
   error?: TrajectoryError;
   labels: string[];
   attributes: unknown | TrajectoryPayloadPreview;
+  payloadTruncation?: { input: boolean; output: boolean };
   [key: string]: unknown;
 }
 
@@ -258,11 +261,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+    throw new Error(responseErrorMessage(body, `HTTP ${res.status}`));
   }
 
   const json = (await res.json()) as { data: T };
   return json.data;
+}
+
+async function requestText(path: string): Promise<string> {
+  const res = await fetch(`${BASE}${path}`, { credentials: "same-origin" });
+  if (res.status === 401) {
+    const { useSessionStore } = await import("../stores/session-store");
+    useSessionStore.getState().setAuthenticated(false);
+    throw new Error("Session expired");
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    try {
+      throw new Error(responseErrorMessage(JSON.parse(body) as unknown, `HTTP ${res.status}`));
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error(body || `HTTP ${res.status}`);
+      throw error;
+    }
+  }
+  return res.text();
 }
 
 export const api = {
@@ -566,6 +588,8 @@ export const api = {
         ({ trajectory }) => trajectory
       ),
   },
+
+  evaluationCases: createEvaluationCasesApi(request, requestText),
 
   retention: {
     get: () => request<RetentionConfig>("/config/retention"),

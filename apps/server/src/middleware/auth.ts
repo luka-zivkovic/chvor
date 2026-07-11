@@ -98,6 +98,12 @@ export function requiredScopeFor(method: string, path: string): string | null {
     return "trajectory:read";
   }
 
+  // Portable evaluation cases are sensitive regression fixtures with their
+  // own read/write scope boundary, separate from generic API access.
+  if (p === "/api/evaluation-cases" || p.startsWith("/api/evaluation-cases/")) {
+    return method === "GET" || method === "HEAD" ? "evaluation:read" : "evaluation:write";
+  }
+
   // Session credential pins — credential-domain decision, not tool execution.
   // Match before the broader `/api/sessions` POST rule so pinning routes to
   // the credential scope grammar.

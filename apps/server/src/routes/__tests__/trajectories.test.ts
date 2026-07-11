@@ -47,6 +47,7 @@ interface DetailResponseBody {
       artifacts: Array<Record<string, unknown>>;
       input?: unknown;
       output?: unknown;
+      payloadTruncation: { input: boolean; output: boolean };
     };
   };
 }
@@ -348,7 +349,23 @@ describe("trajectory query API", () => {
     ]);
     expect(body.data.trajectory.input).toMatchObject({ truncated: true });
     expect(body.data.trajectory.output).toMatchObject({ truncated: true });
+    expect(body.data.trajectory.payloadTruncation).toEqual({ input: true, output: true });
     expect(JSON.stringify(body)).not.toContain(secret);
+
+    const source = await json<{
+      data: {
+        source: {
+          input: { password: string; body: string };
+          output: { apiToken: string; body: string };
+          outputOmitted: boolean;
+        };
+      };
+    }>("/api/trajectories/run-web-z/evaluation-source");
+    expect(source.response.status).toBe(200);
+    expect(source.body.data.source.input.body).toHaveLength(30_000);
+    expect(source.body.data.source.output.body).toHaveLength(30_000);
+    expect(source.body.data.source.outputOmitted).toBe(false);
+    expect(JSON.stringify(source.body)).not.toContain(secret);
 
     const list = await json<ListResponseBody>("/api/trajectories?sessionId=sess-web");
     expect(list.body.data.records[0].input).toMatchObject({ truncated: true });
