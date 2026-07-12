@@ -57,18 +57,23 @@ Step by step:
 7. After the final `text-delta`, orchestrator writes the assistant message to the session store, runs the **emotion parser** (`emotion-parser.ts`) on the reply text, fires `chat.streamEnd`, and flushes any pending `memory.write` extractions.
 8. The browser renders the streamed message in `ChatPanel`, the canvas continues showing tool node animations until each tool's `completed` event lands.
 
+B11 does not change this message flow. Structured memory blocks are persisted and
+managed through an authenticated HTTP API, but the orchestrator does not retrieve
+or inject them. Runtime context assembly belongs to B12, and the inspector UI
+belongs to B13.
+
 **Key file paths:**
 
-| Step | File |
-|---|---|
-| WS dispatch | `apps/server/src/gateway/ws.ts` |
-| Event routing | `apps/server/src/gateway/gateway.ts` |
-| Orchestration | `apps/server/src/lib/orchestrator.ts` |
-| Tool registry | `apps/server/src/lib/tool-builder.ts` |
-| Native tools | `apps/server/src/lib/native-tools/` |
-| Stream → canvas | `apps/client/src/hooks/use-execution.ts` |
-| Canvas state | `apps/client/src/stores/canvas-store.ts` |
-| Render | `apps/client/src/components/canvas/BrainCanvas.tsx` |
+| Step            | File                                                |
+| --------------- | --------------------------------------------------- |
+| WS dispatch     | `apps/server/src/gateway/ws.ts`                     |
+| Event routing   | `apps/server/src/gateway/gateway.ts`                |
+| Orchestration   | `apps/server/src/lib/orchestrator.ts`               |
+| Tool registry   | `apps/server/src/lib/tool-builder.ts`               |
+| Native tools    | `apps/server/src/lib/native-tools/`                 |
+| Stream → canvas | `apps/client/src/hooks/use-execution.ts`            |
+| Canvas state    | `apps/client/src/stores/canvas-store.ts`            |
+| Render          | `apps/client/src/components/canvas/BrainCanvas.tsx` |
 
 ---
 
@@ -110,6 +115,9 @@ src/
 ├── db/
 │   ├── database.ts             Migrations + pragma + connection
 │   ├── crypto.ts               AES-256-GCM (envelope-encrypted credentials)
+│   ├── memory-block-store.ts    Bounded snapshots, revisions, restore, concurrency
+│   ├── migrations/
+│   │   └── memory-blocks-v35.ts Structured-block tables and invariants
 │   ├── config-store.ts         Re-export shim → config/
 │   ├── config/                 14 split config domains (persona, models, brain, …)
 │   └── *-store.ts              26 stores (memory, schedule, webhook, …)
@@ -156,25 +164,34 @@ src/
 
 SQLite is the single source of truth on disk. It lives at `~/.chvor/chvor.db` (override with `CHVOR_DATA_DIR`).
 
-| Store | Purpose | Encrypted? |
-|---|---|---|
-| `auth-store` | Session cookies, password hash | password hashed |
-| `api-key-store` | Server API keys (Bearer) | hashed |
-| `credential-store` | All third-party creds | yes (AES-256-GCM) |
-| `synthesized-store` | Tier-3 spec cache + approval state | no (only metadata) |
-| `memory-store` | Graph nodes + edges (semantic memory) | no |
-| `emotion-store` + `emotion-residue-store` | VAD scores per turn | no |
-| `relationship-store` | People-mention frequency / sentiment | no |
-| `session-store` | Conversations + messages | no |
-| `schedule-store` | Cron + interval triggers | no |
-| `webhook-store` | Inbound webhook secrets | secrets hashed |
-| `knowledge-store` | Ingested documents + chunks + embeddings | no |
-| `activity-store` | Audit trail (every tool call, every webhook) | no |
-| `daemon-store` | Daemon presence + tasks | no |
-| `workspace-store` | React Flow node/edge JSON + viewport | no |
-| `a2ui-store` | Server-pushed UI surfaces | no |
-| `job-store` | Background job queue | no |
-| `config/*` | Per-domain config (persona, models, brain, channels, …) | no |
+| Store                                     | Purpose                                                                       | Encrypted?         |
+| ----------------------------------------- | ----------------------------------------------------------------------------- | ------------------ |
+| `auth-store`                              | Session cookies, password hash                                                | password hashed    |
+| `api-key-store`                           | Server API keys (Bearer)                                                      | hashed             |
+| `credential-store`                        | All third-party creds                                                         | yes (AES-256-GCM)  |
+| `synthesized-store`                       | Tier-3 spec cache + approval state                                            | no (only metadata) |
+| `memory-store`                            | Graph nodes + edges (semantic memory)                                         | no                 |
+| `memory-block-store`                      | Stable identity/human/procedural blocks and immutable full-snapshot revisions | no                 |
+| `emotion-store` + `emotion-residue-store` | VAD scores per turn                                                           | no                 |
+| `relationship-store`                      | People-mention frequency / sentiment                                          | no                 |
+| `session-store`                           | Conversations + messages                                                      | no                 |
+| `schedule-store`                          | Cron + interval triggers                                                      | no                 |
+| `webhook-store`                           | Inbound webhook secrets                                                       | secrets hashed     |
+| `knowledge-store`                         | Ingested documents + chunks + embeddings                                      | no                 |
+| `activity-store`                          | Audit trail (every tool call, every webhook)                                  | no                 |
+| `daemon-store`                            | Daemon presence + tasks                                                       | no                 |
+| `workspace-store`                         | React Flow node/edge JSON + viewport                                          | no                 |
+| `a2ui-store`                              | Server-pushed UI surfaces                                                     | no                 |
+| `job-store`                               | Background job queue                                                          | no                 |
+| `config/*`                                | Per-domain config (persona, models, brain, channels, …)                       | no                 |
+
+Graph memory and structured blocks are separate persistence models. Migration v35
+creates `memory_blocks` and `memory_block_revisions`, advances `user_version` only
+after its schema transaction succeeds, and performs no graph-memory backfill. The
+store enforces Unicode code-point limits, immutable layer/manager identity,
+full-snapshot revisions, restore provenance, read-only agent guards, and optimistic
+`expectedRevision` writes. See
+[`structured-memory-blocks.md`](structured-memory-blocks.md) for the full contract.
 
 The crypto envelope: `db/crypto.ts` derives a per-install master key from `~/.chvor/master.key` (created on first boot). Each ciphertext stores `iv || authTag || ciphertext`. Decryption is lazy — the credential blob is only decrypted at use time, never broadcast.
 
@@ -194,11 +211,11 @@ To add a new config domain: create `db/config/<domain>.ts`, add the typed getter
 
 There are **three tiers** of tools the LLM can call:
 
-| Tier | Where | Examples | When to use |
-|---|---|---|---|
-| 1. Native | `lib/native-tools/<domain>.ts` | `web_request`, `shell_execute`, `recall_detail`, `create_skill` | Built-in capabilities Chvor ships with |
-| 2. MCP | External MCP servers | Anything an MCP server exposes | Trusted, vetted tooling |
-| 3. Synthesized (OpenAPI) | `lib/synthesized-caller.ts` + `synthesized-store` | Any REST API discovered via OpenAPI | "Pull my QuickBooks invoice" — discovered on demand |
+| Tier                     | Where                                             | Examples                                                        | When to use                                         |
+| ------------------------ | ------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------- |
+| 1. Native                | `lib/native-tools/<domain>.ts`                    | `web_request`, `shell_execute`, `recall_detail`, `create_skill` | Built-in capabilities Chvor ships with              |
+| 2. MCP                   | External MCP servers                              | Anything an MCP server exposes                                  | Trusted, vetted tooling                             |
+| 3. Synthesized (OpenAPI) | `lib/synthesized-caller.ts` + `synthesized-store` | Any REST API discovered via OpenAPI                             | "Pull my QuickBooks invoice" — discovered on demand |
 
 All three tiers funnel through `tool-builder.ts`, which assembles the AI SDK `tools` map for the orchestrator.
 
@@ -255,12 +272,11 @@ Skills are bundled YAML/Markdown files under `apps/server/src/skills/` (and user
 id: your-skill
 name: Your Skill
 description: One-line user-facing pitch
-icon: spark        # any lucide-react icon name
+icon: spark # any lucide-react icon name
 trigger: "When the user wants to do X..."
-category: general  # general | productivity | knowledge | …
+category: general # general | productivity | knowledge | …
 tags: [foo, bar]
 ---
-
 # Skill body (system prompt)
 You are a Y. When invoked, do Z.
 ```
@@ -344,31 +360,31 @@ Every client ↔ server message is one of these typed shapes (defined in `packag
 
 **Client → server:**
 
-| type | data | When |
-|---|---|---|
-| `session.init` | `{ sessionId }` | First message after connect |
-| `chat.send` | `{ text, workspaceId, media?, messageId? }` | User submits a message |
-| `chat.stop` | `{}` | User clicks "Stop generating" |
-| `command.respond` | `{ requestId, approved }` | Approval modal response (shell) |
-| `credential.respond` | `{ requestId, cancelled, data? }` | Credential modal response |
-| `synthesized.respond` | `{ requestId, decision }` | OpenAPI call approval |
-| `oauth.synthesized.respond` | `{ requestId, cancelled, connected? }` | OAuth wizard response |
-| `canvas.subscribe` | `{ workspaceId }` | Re-subscribe after panel switch |
-| `heartbeat` | `{}` | Liveness ping (15s interval) |
+| type                        | data                                        | When                            |
+| --------------------------- | ------------------------------------------- | ------------------------------- |
+| `session.init`              | `{ sessionId }`                             | First message after connect     |
+| `chat.send`                 | `{ text, workspaceId, media?, messageId? }` | User submits a message          |
+| `chat.stop`                 | `{}`                                        | User clicks "Stop generating"   |
+| `command.respond`           | `{ requestId, approved }`                   | Approval modal response (shell) |
+| `credential.respond`        | `{ requestId, cancelled, data? }`           | Credential modal response       |
+| `synthesized.respond`       | `{ requestId, decision }`                   | OpenAPI call approval           |
+| `oauth.synthesized.respond` | `{ requestId, cancelled, connected? }`      | OAuth wizard response           |
+| `canvas.subscribe`          | `{ workspaceId }`                           | Re-subscribe after panel switch |
+| `heartbeat`                 | `{}`                                        | Liveness ping (15s interval)    |
 
 **Server → client** (highlights):
 
-| type | When |
-|---|---|
-| `chat.chunk` / `chat.streamEnd` | Streaming response chunk + final marker |
-| `chat.message` | Final assistant message (durable) |
-| `execution.event` | Tool call started/completed/failed → animates canvas |
-| `command.confirm` / `credential.request` / `synthesized.confirm` / `oauth.synthesized.wizard` | Server-triggered modals |
-| `activity.new` | Audit log entry — appended to Activity panel |
-| `a2ui.surface` / `a2ui.data` / `a2ui.delete` | Server-driven UI updates |
-| `webhook.received` | Inbound webhook fired |
-| `pc.connected` / `pc.frame` | PC-control daemon lifecycle |
-| `heartbeat` | Server liveness ping |
+| type                                                                                          | When                                                 |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `chat.chunk` / `chat.streamEnd`                                                               | Streaming response chunk + final marker              |
+| `chat.message`                                                                                | Final assistant message (durable)                    |
+| `execution.event`                                                                             | Tool call started/completed/failed → animates canvas |
+| `command.confirm` / `credential.request` / `synthesized.confirm` / `oauth.synthesized.wizard` | Server-triggered modals                              |
+| `activity.new`                                                                                | Audit log entry — appended to Activity panel         |
+| `a2ui.surface` / `a2ui.data` / `a2ui.delete`                                                  | Server-driven UI updates                             |
+| `webhook.received`                                                                            | Inbound webhook fired                                |
+| `pc.connected` / `pc.frame`                                                                   | PC-control daemon lifecycle                          |
+| `heartbeat`                                                                                   | Server liveness ping                                 |
 
 The protocol is intentionally narrow — this is one of the few hard rules. New event types must add a discriminated case to both `GatewayClientEvent` / `GatewayServerEvent` unions in `packages/shared/src/types/api.ts`, and update the `VALID_CLIENT_EVENT_TYPES` allowlist + validator in `gateway/ws.ts`.
 
@@ -376,20 +392,21 @@ The protocol is intentionally narrow — this is one of the few hard rules. New 
 
 ## 9. Security — what's enforced where
 
-| Concern | Enforcement | File |
-|---|---|---|
-| Auth (cookie + API key) | `chvorAuth` middleware | `middleware/auth.ts` |
-| Brute-force protection | per-IP lockout on auth | `middleware/auth.ts` |
-| Rate limiting | token bucket per session | `middleware/rate-limit.ts` |
-| Request logging | pino, with secret redaction | `middleware/request-logger.ts`, `lib/logger.ts` |
-| SSRF (synthesized calls) | DNS-pinned HTTPS, no private IPs | `lib/synthesized-caller.ts`, `lib/url-safety.ts` |
-| SSRF (web fetch) | same gates via `validateFetchUrl` | `lib/native-tools/security.ts` |
-| Credential at rest | AES-256-GCM envelope encryption | `db/crypto.ts` |
-| Shell command approval | per-command approval gate | `lib/native-tools/shell.ts` |
-| Synthesized call approval | per-call approval (allow once / session) | `lib/approval-gate.ts` |
-| YAML parsing (OpenAPI) | billion-laughs guarded (`maxAliasCount: 0`) | `lib/spec-fetcher.ts` |
-| A2UI action targets | allowlisted parser, raw URLs rejected | `packages/shared/src/lib/a2ui-action.ts` |
-| Error responses | structured serializer, no stack in prod | `lib/errors.ts` + `app.onError` |
+| Concern                   | Enforcement                                                                                                                                                       | File                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Auth (cookie + API key)   | `chvorAuth` middleware                                                                                                                                            | `middleware/auth.ts`                                                        |
+| Brute-force protection    | per-IP lockout on auth                                                                                                                                            | `middleware/auth.ts`                                                        |
+| Rate limiting             | token bucket per session                                                                                                                                          | `middleware/rate-limit.ts`                                                  |
+| Request logging           | pino, with secret redaction                                                                                                                                       | `middleware/request-logger.ts`, `lib/logger.ts`                             |
+| SSRF (synthesized calls)  | DNS-pinned HTTPS, no private IPs                                                                                                                                  | `lib/synthesized-caller.ts`, `lib/url-safety.ts`                            |
+| SSRF (web fetch)          | same gates via `validateFetchUrl`                                                                                                                                 | `lib/native-tools/security.ts`                                              |
+| Credential at rest        | AES-256-GCM envelope encryption                                                                                                                                   | `db/crypto.ts`                                                              |
+| Shell command approval    | per-command approval gate                                                                                                                                         | `lib/native-tools/shell.ts`                                                 |
+| Synthesized call approval | per-call approval (allow once / session)                                                                                                                          | `lib/approval-gate.ts`                                                      |
+| YAML parsing (OpenAPI)    | billion-laughs guarded (`maxAliasCount: 0`)                                                                                                                       | `lib/spec-fetcher.ts`                                                       |
+| A2UI action targets       | allowlisted parser, raw URLs rejected                                                                                                                             | `packages/shared/src/lib/a2ui-action.ts`                                    |
+| Structured memory blocks  | dedicated `memory-block:read`/`memory-block:write` scopes, no-store responses, strict body/snapshot bounds, optimistic revisions, metadata-only operational audit | `routes/memory-blocks.ts`, `middleware/auth.ts`, `db/memory-block-store.ts` |
+| Error responses           | structured serializer, no stack in prod                                                                                                                           | `lib/errors.ts` + `app.onError`                                             |
 
 ---
 
@@ -406,23 +423,23 @@ When adding a feature: write the test first if it has any non-obvious branch, ed
 
 ## 11. Where to look when something breaks
 
-| Symptom | Look here first |
-|---|---|
-| WS won't connect | `gateway/ws.ts`, browser console for `[ws]` lines |
-| LLM call hangs | `lib/orchestrator.ts` (fallback chain), provider-side rate limits |
-| Tool didn't fire | `lib/native-tools/index.ts` (is it registered?), `tool-builder.ts` (is it enabled?) |
-| Credential modal didn't open | `lib/native-tools/credential.ts` (request flow), client `credential-store.ts` |
-| Canvas didn't animate | `hooks/use-execution.ts`, `stores/canvas-store.ts`, the matching `execution.event` in WS frames |
-| Memory recall returns nothing | `db/memory-store.ts`, embedder availability (`lib/embedder.ts` lazy-loads) |
-| Channel didn't deliver | The channel adapter file (`channels/<name>.ts`) and its env vars |
-| Tier-3 tool failed | Activity log entry → `lib/synthesized-caller.ts` for the request, `lib/spec-fetcher.ts` for the spec |
+| Symptom                       | Look here first                                                                                      |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| WS won't connect              | `gateway/ws.ts`, browser console for `[ws]` lines                                                    |
+| LLM call hangs                | `lib/orchestrator.ts` (fallback chain), provider-side rate limits                                    |
+| Tool didn't fire              | `lib/native-tools/index.ts` (is it registered?), `tool-builder.ts` (is it enabled?)                  |
+| Credential modal didn't open  | `lib/native-tools/credential.ts` (request flow), client `credential-store.ts`                        |
+| Canvas didn't animate         | `hooks/use-execution.ts`, `stores/canvas-store.ts`, the matching `execution.event` in WS frames      |
+| Memory recall returns nothing | `db/memory-store.ts`, embedder availability (`lib/embedder.ts` lazy-loads)                           |
+| Channel didn't deliver        | The channel adapter file (`channels/<name>.ts`) and its env vars                                     |
+| Tier-3 tool failed            | Activity log entry → `lib/synthesized-caller.ts` for the request, `lib/spec-fetcher.ts` for the spec |
 
 ---
 
 ## 12. Conventions worth knowing
 
 - **No emojis in code or docs** unless explicitly requested.
-- **No comments explaining what code does** — the function names should. Comments are for *why* (a hidden constraint, a workaround, an invariant). See per-project rules in CLAUDE.md.
+- **No comments explaining what code does** — the function names should. Comments are for _why_ (a hidden constraint, a workaround, an invariant). See per-project rules in CLAUDE.md.
 - **`.ts` extensions on all relative imports** — the project uses NodeNext-style ESM.
 - **Shared types live in `packages/shared/src/types/`** and are imported via `@chvor/shared` everywhere. Don't duplicate type definitions in `apps/`.
 - **Env vars are read at boot only**, never per-request. `apps/server/src/index.ts` is the single entry point for `process.env.*` reads.
@@ -435,7 +452,8 @@ When adding a feature: write the test first if it has any non-obvious branch, ed
 
 - [`SKILLS-AND-TOOLS.md`](SKILLS-AND-TOOLS.md) — skill/tool authoring
 - [`CHANNELS.md`](CHANNELS.md) — multi-channel setup (Telegram, Discord, …)
-- [`MEMORY.md`](MEMORY.md) — graph memory model, retrieval, decay
+- [`MEMORY.md`](MEMORY.md) — graph memory plus its relationship to stable structured blocks
+- [`structured-memory-blocks.md`](structured-memory-blocks.md) — authoritative B11 schema, API, revisions, security, audit, and migration contract
 - [`CONTEXT.md`](CONTEXT.md) — authoritative six-layer context hierarchy and context assembly policy
 - [`EMOTIONS.md`](EMOTIONS.md) — VAD engine + canvas color mapping
 - [`CANVAS.md`](CANVAS.md) — node types, layout, status transitions

@@ -168,7 +168,8 @@ Every batch must preserve these properties:
 
 ### B10 — Context hierarchy contract
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#113](https://github.com/luka-zivkovic/chvor/pull/113)
 - **Dependencies:** A03
 - **Outcome:** Define explicit identity, human, working, procedural, episodic, and knowledge context layers.
 - **Acceptance criteria:**
@@ -179,7 +180,7 @@ Every batch must preserve these properties:
 
 ### B11 — Structured memory blocks and revisions
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** B10
 - **Outcome:** Persist bounded, versioned, user- or agent-managed memory blocks.
 - **Acceptance criteria:**

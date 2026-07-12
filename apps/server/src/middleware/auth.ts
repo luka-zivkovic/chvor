@@ -111,6 +111,12 @@ export function requiredScopeFor(method: string, path: string): string | null {
     return method === "GET" || method === "HEAD" ? "evaluation:read" : "evaluation:run";
   }
 
+  // Structured stable memory blocks have a dedicated boundary. Generic memory
+  // and API scopes must not grant access to identity/human/procedural snapshots.
+  if (p === "/api/memory-blocks" || p.startsWith("/api/memory-blocks/")) {
+    return method === "GET" || method === "HEAD" ? "memory-block:read" : "memory-block:write";
+  }
+
   // Session credential pins — credential-domain decision, not tool execution.
   // Match before the broader `/api/sessions` POST rule so pinning routes to
   // the credential scope grammar.
@@ -168,6 +174,13 @@ export function requiredScopesFor(method: string, path: string): string[] {
 
 export const chvorAuth = createMiddleware<AuthEnv>(async (c, next) => {
   const path = new URL(c.req.url).pathname;
+
+  // These records can contain stable identity and human data. Prevent caching
+  // even when authentication rejects the request before route middleware runs.
+  const normalizedPath = normalizeScopePath(path);
+  if (normalizedPath === "/api/memory-blocks" || normalizedPath.startsWith("/api/memory-blocks/")) {
+    c.header("Cache-Control", "no-store");
+  }
 
   // Webhook receiver endpoints have their own signature verification
   if (path.match(/^\/api\/webhooks\/[^/]+\/receive$/)) return next();
