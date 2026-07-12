@@ -38,11 +38,13 @@ export * from "./types/trajectory.js";
 export * from "./types/evaluation-case.js";
 export * from "./types/evaluation-run.js";
 export * from "./types/context.js";
+export * from "./types/context-assembly.js";
 export * from "./types/memory-block.js";
 
 // Lib
 export * from "./lib/validate-skill.js";
 export * from "./lib/a2ui-action.js";
+export * from "./lib/context-assembly.js";
 
 // Constants
 export * from "./constants/categories.js";

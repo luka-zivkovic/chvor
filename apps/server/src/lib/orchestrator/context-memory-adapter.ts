@@ -1,6 +1,6 @@
 import {
-  contextAssemblyItemSchema,
-  type ContextAssemblyItem,
+  contextAssemblyCandidateSchema,
+  type ContextAssemblyCandidate,
   type EdgeRelation,
   type Memory,
 } from "@chvor/shared";
@@ -10,9 +10,8 @@ export type GraphMemoryContextLayer = "episodic" | "knowledge";
 
 const retrievalBase = {
   rank: z.number().int().nonnegative().optional(),
-  score: z.number().finite().optional(),
+  normalizedScore: z.number().finite().optional(),
   categoryMatched: z.boolean().default(false),
-  sourceTokens: z.number().int().nonnegative(),
 };
 
 const graphMemoryRetrievalSchema = z.discriminatedUnion("source", [
@@ -36,17 +35,15 @@ const graphMemoryRetrievalSchema = z.discriminatedUnion("source", [
   z.object({ source: z.literal("fallback"), ...retrievalBase }).strict(),
 ]);
 
-export type GraphMemoryRetrieval = z.input<typeof graphMemoryRetrievalSchema>;
-
-export interface GraphMemoryContextCandidate {
-  layer: GraphMemoryContextLayer;
-  item: ContextAssemblyItem;
+export interface GraphMemoryRetrieval {
+  source: "direct" | "associated" | "predicted" | "fallback";
+  relation?: EdgeRelation;
+  rank?: number;
+  normalizedScore?: number;
+  categoryMatched?: boolean;
 }
 
-/**
- * Project existing graph-memory provenance into the B10 hierarchy without
- * rewriting the node or using its category as a classification shortcut.
- */
+/** Apply the B10 migration-free graph-memory classification predicate exactly. */
 export function contextLayerForGraphMemory(memory: Memory): GraphMemoryContextLayer {
   return memory.sourceResourceId !== null ||
     memory.provenance === "resource" ||
@@ -60,7 +57,7 @@ function retrievalReasons(
   retrieval: z.output<typeof graphMemoryRetrievalSchema>
 ) {
   const shared = {
-    ...(retrieval.score === undefined ? {} : { score: retrieval.score }),
+    ...(retrieval.normalizedScore === undefined ? {} : { score: retrieval.normalizedScore }),
     ...(retrieval.rank === undefined ? {} : { rank: retrieval.rank }),
   };
   const reasons: Array<{
@@ -96,7 +93,6 @@ function retrievalReasons(
       reasons.push({ kind: "recent", code: "recency-fallback", ...shared });
       break;
   }
-
   if (retrieval.categoryMatched) {
     reasons.push({ kind: "retrieved", code: "category-match", ...shared });
   }
@@ -106,18 +102,22 @@ function retrievalReasons(
   return reasons;
 }
 
-/** Build a policy-compatible, lossless candidate while leaving persistence untouched. */
+/**
+ * Adapt a retrieved graph row without exposing its larger tiers or inventing
+ * assembly rank/token accounting. The stored L0 abstract is the complete source form.
+ */
 export function mapGraphMemoryToContextCandidate(
   memory: Memory,
   retrievalInput: GraphMemoryRetrieval
-): GraphMemoryContextCandidate {
+): ContextAssemblyCandidate {
   const retrieval = graphMemoryRetrievalSchema.parse(retrievalInput);
   const layer = contextLayerForGraphMemory(memory);
   const owner = memory.space === "user" ? "user" : "agent";
   const mutability = memory.space === "user" ? "user-editable" : "agent-editable";
-  const content = structuredClone(memory);
-  const item = contextAssemblyItemSchema.parse({
-    id: `graph-memory:${memory.id}`,
+
+  return contextAssemblyCandidateSchema.parse({
+    id: `graph-memory:${memory.id}:${memory.updatedAt}`,
+    layer,
     owner,
     mutability,
     modelVisibility: "retrieval-only",
@@ -132,23 +132,18 @@ export function mapGraphMemoryToContextCandidate(
       id: memory.id,
       revision: memory.updatedAt,
     },
-    representation: {
-      kind: "full",
-      id: "graph-memory.full",
-      version: "1",
-    },
     ordering: {
-      canonicalRank: 1,
-      retrievalScore: retrieval.score ?? null,
+      retrievalScore: retrieval.normalizedScore ?? null,
       eventTime: memory.updatedAt,
     },
     inclusionReasons: retrievalReasons(layer, retrieval),
-    accounting: {
-      sourceTokens: retrieval.sourceTokens,
-      includedTokens: retrieval.sourceTokens,
-      truncatedTokens: 0,
-    },
-    content,
+    representations: [
+      {
+        kind: "full",
+        id: "graph-memory.l0",
+        version: "1",
+        content: memory.abstract,
+      },
+    ],
   });
-  return { layer, item };
 }

@@ -6,6 +6,8 @@ import type {
   CanonicalTrajectoryStepV1,
   CanonicalTrajectoryV1,
   ChatMessage,
+  ContextAssemblyTraceV1,
+  ContextAssemblyV1,
   ExecutionEvent,
   TrajectoryActor,
   TrajectoryError,
@@ -14,6 +16,7 @@ import type {
   TrajectoryOrigin,
   TrajectoryToolCall,
 } from "@chvor/shared";
+import { projectContextAssemblyTrace, safeParseContextAssemblyTrace } from "@chvor/shared";
 import {
   appendTrajectoryStep,
   createTrajectory,
@@ -225,6 +228,7 @@ interface CapturedStepInput {
   modelUsage?: TrajectoryModelUsage;
   toolCall?: TrajectoryToolCall;
   approval?: CanonicalTrajectoryStepV1["approval"];
+  contextAssembly?: ContextAssemblyTraceV1;
   error?: TrajectoryError;
 }
 
@@ -810,6 +814,34 @@ export function getActiveTrajectoryId(): string | null {
 export function getActiveTrajectoryOrigin(): TrajectoryOrigin | null {
   const origin = activeRuns.getStore()?.origin;
   return origin ? { ...origin } : null;
+}
+
+/** Record the validated, content-free trace for one runtime context assembly. */
+export function recordTrajectoryContextAssembled(
+  input: ContextAssemblyV1 | ContextAssemblyTraceV1
+): string | null {
+  const run = activeRuns.getStore();
+  if (!run || run.disabled) return null;
+  try {
+    const parsedTrace = safeParseContextAssemblyTrace(input);
+    const contextAssembly = parsedTrace.success
+      ? parsedTrace.data
+      : projectContextAssemblyTrace(input);
+    const completedAt = instant(undefined, run);
+    return appendStep(run, "record context assembly", {
+      kind: "context.assembled",
+      status: "completed",
+      name: "Context assembled",
+      startedAt: completedAt,
+      completedAt,
+      durationMs: 0,
+      contextAssembly,
+      attributes: {},
+    });
+  } catch (error) {
+    warnAndDisable(run, "record context assembly", error);
+    return null;
+  }
 }
 
 /** Register exact secret values that must be scrubbed for the rest of this run. */

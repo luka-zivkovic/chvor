@@ -21,6 +21,10 @@ export type {
 } from "@chvor/shared";
 export const MEMORY_BLOCK_PAGE_DEFAULT = 20;
 export const MEMORY_BLOCK_PAGE_MAX = 100;
+// Leave aggregate room for the independently bounded working (500) and graph
+// (30) sources under the 2,000-candidate runtime boundary.
+export const MEMORY_BLOCK_ASSEMBLY_MAX = 1_000;
+export const MEMORY_BLOCK_ASSEMBLY_MAX_BYTES = 64 * 1024 * 1024;
 export const MEMORY_BLOCK_CONTENT_MAX_CHARACTERS = 1_000_000;
 
 export interface MemoryBlockListCursor {
@@ -366,6 +370,51 @@ export function listMemoryBlocks(
     nextCursor:
       rows.length > boundedLimit && last ? { updatedAt: last.updated_at, id: last.id } : null,
   };
+}
+
+/**
+ * Read current stable blocks for context assembly without retrieval or pagination order.
+ * Source-specific count and byte bounds leave room for working and graph candidates.
+ */
+export function listMemoryBlocksForAssembly(
+  limit: number = MEMORY_BLOCK_ASSEMBLY_MAX
+): MemoryBlockRecord[] {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MEMORY_BLOCK_ASSEMBLY_MAX) {
+    throw new RangeError(`limit must be between 1 and ${MEMORY_BLOCK_ASSEMBLY_MAX}`);
+  }
+  const orderedCurrent = `${CURRENT_SELECT}
+    ORDER BY CASE b.layer
+      WHEN 'identity' THEN 0
+      WHEN 'human' THEN 1
+      WHEN 'procedural' THEN 2
+      ELSE 3
+    END ASC,
+    CAST(json_extract(r.snapshot, '$.declaredOrder') AS INTEGER) ASC,
+    b.id ASC`;
+  return getDb().transaction(() => {
+    // Count and sum inside SQLite before ordering parses snapshots or any body
+    // enters the JS heap. This protects even callers requesting a small subset.
+    const probe = getDb()
+      .prepare(
+        `SELECT COUNT(*) AS row_count,
+                COALESCE(SUM(length(CAST(r.snapshot AS BLOB))), 0) AS snapshot_bytes
+         FROM memory_blocks b JOIN memory_block_revisions r
+           ON r.block_id = b.id AND r.revision = b.current_revision`
+      )
+      .get() as { row_count: number; snapshot_bytes: number };
+    if (probe.row_count > MEMORY_BLOCK_ASSEMBLY_MAX) {
+      throw new RangeError(
+        `stable context exceeds the ${MEMORY_BLOCK_ASSEMBLY_MAX}-block assembly boundary`
+      );
+    }
+    if (probe.snapshot_bytes > MEMORY_BLOCK_ASSEMBLY_MAX_BYTES) {
+      throw new RangeError(
+        `stable context exceeds the ${MEMORY_BLOCK_ASSEMBLY_MAX_BYTES}-byte assembly boundary`
+      );
+    }
+    const rows = getDb().prepare(`${orderedCurrent} LIMIT ?`).all(limit) as MemoryBlockRow[];
+    return rows.map(recordFromRow);
+  })();
 }
 
 export function listMemoryBlockRevisions(

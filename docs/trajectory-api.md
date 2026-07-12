@@ -5,11 +5,38 @@ provide mutation, replay, evaluation, or UI behavior.
 
 ## Context inclusion traces
 
-B10 defines the contract for future context inclusion traces. Each trace must be content-free: it
-may contain a stable item reference, layer, inclusion reason, and applicable budget or
-ordering metadata, but never context bodies or sensitive excerpts. The existing trajectory API does
-not expose or claim B12 context assembly runtime integration. See [`CONTEXT.md`](CONTEXT.md) for the
-authoritative hierarchy and trace policy.
+B12 records one completed `context.assembled` step after a successful server
+assembly. The step's `contextAssembly` field is the validated, content-free
+projection of the runtime assembly. It includes configuration and aggregate
+accounting, all six layer policies and budgets, opaque item/source references,
+inclusion reasons, selected representation metadata, canonical ordering inputs, and
+per-item accounting. It never includes an item's `content` or a prompt fragment.
+
+For the dedicated B12 form, the canonical step contract also rejects generic
+`input` and `output`, requires empty `attributes`, and rejects extension payload
+fields. This prevents context bodies from being attached through a secondary
+trajectory field. Detail queries return this field with the rest of the ordered
+steps, subject to the same trajectory authorization boundary.
+
+The dedicated form is further restricted to the completed runtime shape: fixed
+name, zero duration, no actor/model/tool/approval/error payloads, and no artifacts.
+
+Schema-v1 readers remain compatible with generic `context.assembled` rows that may
+have been persisted by a B10-era producer before the dedicated field existed. B12
+never writes that legacy form. The stricter no-body rules apply whenever the
+`contextAssembly` field is present, and every runtime B12 step includes it.
+
+The shared pure assembler separately returns exclusion diagnostics with opaque
+references and token counts. Those diagnostics are not persisted in the current
+`context.assembled` step and have no dedicated query endpoint. At the server
+boundary, any critical identity or human exclusion fails closed with
+`ContextStableOverflowError`; its message includes only canonical opaque references,
+not context bodies. Because assembly did not succeed, the orchestrator does not
+record a successful `context.assembled` step for that attempt.
+
+See [`CONTEXT.md`](CONTEXT.md) for the hierarchy and trace policy and
+[`context-assembly-runtime.md`](context-assembly-runtime.md) for B12 runtime
+behavior.
 
 ## Authorization
 

@@ -51,16 +51,18 @@ Step by step:
 1. **Client** (`hooks/use-gateway.ts`) opens `wss://host/ws`, sends `session.init` with a stable per-browser UUID, then a `chat.send`.
 2. **`gateway/ws.ts`** validates the event against `VALID_CLIENT_EVENT_TYPES`, dispatches to a registered handler.
 3. **`gateway/gateway.ts`** routes `chat.send` to the orchestrator with the client ID + session ID context.
-4. **`lib/orchestrator.ts`** — the heart of the system. Loads enabled skills + tools (`tool-builder.ts`), composes a system prompt (`getCoreIdentity` + persona + memory snippets), and calls the AI SDK's `streamText` with `tools` enabled.
+4. **`lib/orchestrator.ts`** — the heart of the system. Loads enabled skills + tools (`tool-builder.ts`), retrieves context candidates, runs the deterministic context assembler against the smallest model fallback window, and calls the AI SDK's `streamText` with `tools` enabled.
 5. The AI SDK streams chunks. Each `text-delta` becomes a `chat.chunk` WS message. Tool calls become `execution.event`s with `phase: "running" → "completed" | "failed"`, which animate the matching canvas node.
 6. When the model emits a `tool-call`, the orchestrator looks it up in `getNativeToolDefinitions()` (or the registered MCP/skill tool), runs the handler, and feeds the result back to the model in the next round-trip. Up to N tool rounds per message (configured in orchestrator).
 7. After the final `text-delta`, orchestrator writes the assistant message to the session store, runs the **emotion parser** (`emotion-parser.ts`) on the reply text, fires `chat.streamEnd`, and flushes any pending `memory.write` extractions.
 8. The browser renders the streamed message in `ChatPanel`, the canvas continues showing tool node animations until each tool's `completed` event lands.
 
-B11 does not change this message flow. Structured memory blocks are persisted and
-managed through an authenticated HTTP API, but the orchestrator does not retrieve
-or inject them. Runtime context assembly belongs to B12, and the inspector UI
-belongs to B13.
+B12 assembles the model context before the model attempt. Interactive turns directly
+read canonical stable blocks, adapt the rolling summary and messages before the
+current request, and project retrieved graph-memory L0 abstracts. The current
+request remains a native user message outside the hierarchy. Stable blocks and
+graph memory are disabled by default for scheduler, pulse, webhook, and daemon
+turns. The inspector UI still belongs to B13.
 
 **Key file paths:**
 
@@ -69,6 +71,8 @@ belongs to B13.
 | WS dispatch     | `apps/server/src/gateway/ws.ts`                     |
 | Event routing   | `apps/server/src/gateway/gateway.ts`                |
 | Orchestration   | `apps/server/src/lib/orchestrator.ts`               |
+| Context runtime | `apps/server/src/lib/orchestrator/context-*.ts`     |
+| Shared assembly | `packages/shared/src/lib/context-assembly.ts`       |
 | Tool registry   | `apps/server/src/lib/tool-builder.ts`               |
 | Native tools    | `apps/server/src/lib/native-tools/`                 |
 | Stream → canvas | `apps/client/src/hooks/use-execution.ts`            |
@@ -123,6 +127,12 @@ src/
 │   └── *-store.ts              26 stores (memory, schedule, webhook, …)
 └── lib/
     ├── orchestrator.ts         Tool loop, fallback chain, emotion parse, memory write
+    ├── orchestrator/
+    │   ├── context-assembler.ts       Window reservation, caps + stable overflow
+    │   ├── context-tokenizer.ts       Versioned UTF-8-byte upper-bound profile
+    │   ├── context-block-adapter.ts   Stable block candidates
+    │   ├── context-working-adapter.ts Working history + rolling summary
+    │   └── context-memory-adapter.ts  Graph-memory L0 candidates
     ├── native-tools.ts         Re-export shim → native-tools/
     ├── native-tools/           21 split tool modules
     ├── synthesized-caller.ts   Tier-3 OpenAPI tool execution + safety gates
@@ -192,6 +202,14 @@ store enforces Unicode code-point limits, immutable layer/manager identity,
 full-snapshot revisions, restore provenance, read-only agent guards, and optimistic
 `expectedRevision` writes. See
 [`structured-memory-blocks.md`](structured-memory-blocks.md) for the full contract.
+
+Context assembly does not add another persistence model. Interactive turns read
+the current stable snapshots directly and combine them with ephemeral working
+state and retrieved graph candidates in memory. The pure shared assembler allocates
+the hierarchy budget `20/20/25/15/10/10`, flows unused capacity forward, and renders
+each selected item as typed JSON data. The orchestrator persists only the
+content-free projection in a `context.assembled` trajectory step. See
+[`context-assembly-runtime.md`](context-assembly-runtime.md).
 
 The crypto envelope: `db/crypto.ts` derives a per-install master key from `~/.chvor/master.key` (created on first boot). Each ciphertext stores `iv || authTag || ciphertext`. Decryption is lazy — the credential blob is only decrypted at use time, never broadcast.
 
@@ -392,21 +410,22 @@ The protocol is intentionally narrow — this is one of the few hard rules. New 
 
 ## 9. Security — what's enforced where
 
-| Concern                   | Enforcement                                                                                                                                                       | File                                                                        |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Auth (cookie + API key)   | `chvorAuth` middleware                                                                                                                                            | `middleware/auth.ts`                                                        |
-| Brute-force protection    | per-IP lockout on auth                                                                                                                                            | `middleware/auth.ts`                                                        |
-| Rate limiting             | token bucket per session                                                                                                                                          | `middleware/rate-limit.ts`                                                  |
-| Request logging           | pino, with secret redaction                                                                                                                                       | `middleware/request-logger.ts`, `lib/logger.ts`                             |
-| SSRF (synthesized calls)  | DNS-pinned HTTPS, no private IPs                                                                                                                                  | `lib/synthesized-caller.ts`, `lib/url-safety.ts`                            |
-| SSRF (web fetch)          | same gates via `validateFetchUrl`                                                                                                                                 | `lib/native-tools/security.ts`                                              |
-| Credential at rest        | AES-256-GCM envelope encryption                                                                                                                                   | `db/crypto.ts`                                                              |
-| Shell command approval    | per-command approval gate                                                                                                                                         | `lib/native-tools/shell.ts`                                                 |
-| Synthesized call approval | per-call approval (allow once / session)                                                                                                                          | `lib/approval-gate.ts`                                                      |
-| YAML parsing (OpenAPI)    | billion-laughs guarded (`maxAliasCount: 0`)                                                                                                                       | `lib/spec-fetcher.ts`                                                       |
-| A2UI action targets       | allowlisted parser, raw URLs rejected                                                                                                                             | `packages/shared/src/lib/a2ui-action.ts`                                    |
-| Structured memory blocks  | dedicated `memory-block:read`/`memory-block:write` scopes, no-store responses, strict body/snapshot bounds, optimistic revisions, metadata-only operational audit | `routes/memory-blocks.ts`, `middleware/auth.ts`, `db/memory-block-store.ts` |
-| Error responses           | structured serializer, no stack in prod                                                                                                                           | `lib/errors.ts` + `app.onError`                                             |
+| Concern                   | Enforcement                                                                                                                                                       | File                                                                           |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Auth (cookie + API key)   | `chvorAuth` middleware                                                                                                                                            | `middleware/auth.ts`                                                           |
+| Brute-force protection    | per-IP lockout on auth                                                                                                                                            | `middleware/auth.ts`                                                           |
+| Rate limiting             | token bucket per session                                                                                                                                          | `middleware/rate-limit.ts`                                                     |
+| Request logging           | pino, with secret redaction                                                                                                                                       | `middleware/request-logger.ts`, `lib/logger.ts`                                |
+| SSRF (synthesized calls)  | DNS-pinned HTTPS, no private IPs                                                                                                                                  | `lib/synthesized-caller.ts`, `lib/url-safety.ts`                               |
+| SSRF (web fetch)          | same gates via `validateFetchUrl`                                                                                                                                 | `lib/native-tools/security.ts`                                                 |
+| Credential at rest        | AES-256-GCM envelope encryption                                                                                                                                   | `db/crypto.ts`                                                                 |
+| Shell command approval    | per-command approval gate                                                                                                                                         | `lib/native-tools/shell.ts`                                                    |
+| Synthesized call approval | per-call approval (allow once / session)                                                                                                                          | `lib/approval-gate.ts`                                                         |
+| YAML parsing (OpenAPI)    | billion-laughs guarded (`maxAliasCount: 0`)                                                                                                                       | `lib/spec-fetcher.ts`                                                          |
+| A2UI action targets       | allowlisted parser, raw URLs rejected                                                                                                                             | `packages/shared/src/lib/a2ui-action.ts`                                       |
+| Structured memory blocks  | dedicated `memory-block:read`/`memory-block:write` scopes, no-store responses, strict body/snapshot bounds, optimistic revisions, metadata-only operational audit | `routes/memory-blocks.ts`, `middleware/auth.ts`, `db/memory-block-store.ts`    |
+| Assembled context         | strict typed candidates, JSON data boundaries, conservative byte accounting, fail-closed stable overflow, content-free trajectory projection                      | `lib/orchestrator/context-*.ts`, `packages/shared/src/lib/context-assembly.ts` |
+| Error responses           | structured serializer, no stack in prod                                                                                                                           | `lib/errors.ts` + `app.onError`                                                |
 
 ---
 
@@ -423,16 +442,17 @@ When adding a feature: write the test first if it has any non-obvious branch, ed
 
 ## 11. Where to look when something breaks
 
-| Symptom                       | Look here first                                                                                      |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
-| WS won't connect              | `gateway/ws.ts`, browser console for `[ws]` lines                                                    |
-| LLM call hangs                | `lib/orchestrator.ts` (fallback chain), provider-side rate limits                                    |
-| Tool didn't fire              | `lib/native-tools/index.ts` (is it registered?), `tool-builder.ts` (is it enabled?)                  |
-| Credential modal didn't open  | `lib/native-tools/credential.ts` (request flow), client `credential-store.ts`                        |
-| Canvas didn't animate         | `hooks/use-execution.ts`, `stores/canvas-store.ts`, the matching `execution.event` in WS frames      |
-| Memory recall returns nothing | `db/memory-store.ts`, embedder availability (`lib/embedder.ts` lazy-loads)                           |
-| Channel didn't deliver        | The channel adapter file (`channels/<name>.ts`) and its env vars                                     |
-| Tier-3 tool failed            | Activity log entry → `lib/synthesized-caller.ts` for the request, `lib/spec-fetcher.ts` for the spec |
+| Symptom                       | Look here first                                                                                                                    |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| WS won't connect              | `gateway/ws.ts`, browser console for `[ws]` lines                                                                                  |
+| LLM call hangs                | `lib/orchestrator.ts` (fallback chain), provider-side rate limits                                                                  |
+| Tool didn't fire              | `lib/native-tools/index.ts` (is it registered?), `tool-builder.ts` (is it enabled?)                                                |
+| Credential modal didn't open  | `lib/native-tools/credential.ts` (request flow), client `credential-store.ts`                                                      |
+| Canvas didn't animate         | `hooks/use-execution.ts`, `stores/canvas-store.ts`, the matching `execution.event` in WS frames                                    |
+| Memory recall returns nothing | `db/memory-store.ts`, embedder availability (`lib/embedder.ts` lazy-loads)                                                         |
+| Context assembly fails        | `lib/orchestrator/context-assembler.ts`; check outside-window reservations or the opaque reference in `ContextStableOverflowError` |
+| Channel didn't deliver        | The channel adapter file (`channels/<name>.ts`) and its env vars                                                                   |
+| Tier-3 tool failed            | Activity log entry → `lib/synthesized-caller.ts` for the request, `lib/spec-fetcher.ts` for the spec                               |
 
 ---
 
@@ -455,6 +475,7 @@ When adding a feature: write the test first if it has any non-obvious branch, ed
 - [`MEMORY.md`](MEMORY.md) — graph memory plus its relationship to stable structured blocks
 - [`structured-memory-blocks.md`](structured-memory-blocks.md) — authoritative B11 schema, API, revisions, security, audit, and migration contract
 - [`CONTEXT.md`](CONTEXT.md) — authoritative six-layer context hierarchy and context assembly policy
+- [`context-assembly-runtime.md`](context-assembly-runtime.md) — B12 candidate sources, budgeting, rendering, diagnostics, and limits
 - [`EMOTIONS.md`](EMOTIONS.md) — VAD engine + canvas color mapping
 - [`CANVAS.md`](CANVAS.md) — node types, layout, status transitions
 - [`A2UI.md`](A2UI.md) — server-driven UI protocol

@@ -5,10 +5,10 @@ decaying, emotionally-aware, self-organizing, and retrieval-driven. Structured
 memory blocks are bounded stable records with explicit metadata and immutable
 revision history.
 
-The graph remains the cognitive memory system described below. B11 adds persistence
-and authenticated management for structured blocks, but it does not inject those
-blocks into model prompts. B12 owns token-budgeted context assembly, and B13 owns
-the future memory inspector and correction UI.
+The graph remains the cognitive memory system described below. Structured blocks
+provide a separate stable store. B12 now projects both stores into one
+token-budgeted context assembly for interactive conversations; B13 owns the future
+memory inspector and correction UI.
 
 ---
 
@@ -19,7 +19,8 @@ When you talk to Chvor, the system:
 1. **Extracts** facts from the conversation (your name, projects, preferences)
 2. **Stores** them as tiered memory nodes with strength, confidence, and category
 3. **Links** related memories with typed edges (temporal, causal, entity, etc.)
-4. **Retrieves** relevant memories using vector similarity + composite scoring
+4. **Retrieves** relevant memories using vector similarity + composite scoring and
+   offers their L0 abstracts to the context assembler
 5. **Strengthens** memories each time they're accessed (spaced repetition)
 6. **Decays** unused memories over time (exponential forgetting curve)
 7. **Consolidates** related fragments into coherent narratives during idle periods
@@ -40,8 +41,10 @@ Every memory is a **node** in a graph with three content tiers:
 | L1   | `overview` | Paragraph with context | ~1000 chars |
 | L2   | `detail`   | Full narrative         | ~5000 chars |
 
-By default, only L0 abstracts are injected into the system prompt. L1/L2
-content is loaded on demand when deeper context is needed.
+Retrieved graph memories contribute only their L0 abstracts as context candidates.
+The assembler may include those candidates under the episodic or knowledge budget;
+L1/L2 content is not copied into the assembled prompt and remains available through
+the existing on-demand recall path.
 
 ### Categories
 
@@ -72,11 +75,27 @@ Every memory also carries:
 
 ## Context hierarchy projection
 
-Graph memories are projected into the context hierarchy without migration. A memory is classified
-as knowledge when `sourceResourceId` is non-null, `provenance` is `resource`, or `sourceChannel` is
-`knowledge`; all other graph memories are episodic. The graph remains the source persistence, so no
-row rewrite, duplication, or schema migration is required. See [`CONTEXT.md`](CONTEXT.md) for
-precedence, authority, budgeting, and trace rules.
+Graph memories are projected into the context hierarchy without migration. A memory
+is classified as knowledge when `sourceResourceId` is non-null, `provenance` is
+`resource`, or `sourceChannel` is `knowledge`; all other graph memories are
+episodic. The graph remains the source persistence, so no row rewrite, duplication,
+or schema migration is required.
+
+The graph adapter exposes only `abstract` as the full `graph-memory.l0`
+representation. Retrieval source, normalized score, rank, category match, graph
+relation, and opaque source references remain typed metadata used for ordering and
+the content-free trace.
+
+Stable blocks follow a different path. The orchestrator reads current block
+snapshots directly in canonical layer/order/ID order, without similarity retrieval,
+then adapts persisted `content` as the model representation. Labels, descriptions,
+confidence, provenance details, and revision actor metadata are not copied into
+model content.
+
+Historical chat messages and an existing rolling session summary form the working
+layer. The current request stays outside the hierarchy in its native user role.
+See [`CONTEXT.md`](CONTEXT.md) for policy and
+[`context-assembly-runtime.md`](context-assembly-runtime.md) for the execution path.
 
 ---
 
@@ -93,8 +112,8 @@ time.
 A block's character budget is a persistence bound. Every create, update, and
 restore must satisfy it before a revision is committed, using a deterministic count
 of Unicode code points. It is not a token estimate and is independent of the model
-tokenizer. B12 will decide whether a block is eligible for a particular model input
-and account for the selected representation in model tokens.
+tokenizer. B12 accounts for the selected rendered representation separately using
+its conservative, versioned UTF-8-byte upper-bound profile.
 
 Creating a block establishes revision 1. Updates and restores append immutable full
 snapshots and atomically advance the current revision. Both require the caller's
@@ -110,10 +129,27 @@ full-snapshot writes, revision history, and restore. It uses dedicated
 supplementary operational audit log. Trusted actor metadata is stored with every
 revision; request bodies cannot choose their actor identity.
 
-B11 does not modify graph retrieval, the orchestrator prompt path, autonomous
-editing policy, context-assembly trajectories, or client UI. The complete schema,
-Unicode budget, API, security, audit, migration, and batch-boundary contract is in
+The B11 API does not define autonomous editing policy or a client UI. B12 only reads
+the current canonical snapshots for context assembly; it does not write, restore,
+or otherwise mutate blocks. The complete schema, Unicode budget, API, security,
+audit, migration, and batch-boundary contract is in
 [`structured-memory-blocks.md`](structured-memory-blocks.md).
+
+### Runtime defaults and limits
+
+Persistent context is enabled by default for interactive requests. Stable blocks
+and graph-memory candidates are not supplied to `scheduler`, `pulse`, `webhook`, or
+`daemon` turns, so B12 does not autonomously delegate persistent memory to those
+background paths. Working candidates can still be built from messages explicitly
+supplied to the turn.
+
+B12 uses a rolling summary only when the gateway already supplies one. It does not
+ask a model to create a summary during assembly, and the current block, working,
+and graph adapters expose full forms only. There is no memory/context inspector UI
+in B12. If any identity or human candidate is excluded, the server fails closed
+with `ContextStableOverflowError`; the error contains only the candidate's opaque
+canonical reference, while the shared pure assembler retains the full exclusion
+diagnostic for direct callers.
 
 ---
 
@@ -282,6 +318,12 @@ memories are tagged and included with lower priority.
 Based on topic transition patterns from the access log, the system predicts
 which topics will come up next and preloads relevant memories.
 
+The resulting direct, associated, and predicted rows are capped before assembly
+and mapped to typed L0 candidates. Context assembly then reorders them by normalized
+retrieval score, event time, and canonical reference and applies the episodic or
+knowledge budget. The retrieval pipeline does not directly interpolate memory
+bodies into the legacy prompt.
+
 ---
 
 ## Consolidation ("sleep" cycles)
@@ -383,19 +425,24 @@ and database constraints reinforce the B11 application-level validation.
 
 ## File map
 
-| File                                                 | Role                                                                                |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `apps/server/src/db/memory-store.ts`                 | CRUD, vector search, dedup, clustering, decay                                       |
-| `apps/server/src/lib/memory-extractor.ts`            | LLM-based fact extraction from conversations                                        |
-| `apps/server/src/lib/memory-decay.ts`                | Periodic decay engine, initial strength calc                                        |
-| `apps/server/src/lib/memory-graph.ts`                | Spreading activation, edge boosting, entity linking                                 |
-| `apps/server/src/lib/memory-projections.ts`          | Composite scoring, channel-aware category weights                                   |
-| `apps/server/src/lib/memory-consolidation.ts`        | Fragment merging, insight synthesis, narrative weaving                              |
-| `apps/server/src/lib/memory-preloader.ts`            | Topic transitions, predictive memory loading                                        |
-| `apps/server/src/db/config-store.ts`                 | Config getters/setters for memory settings                                          |
-| `apps/server/src/db/migrations.ts`                   | Ordered SQLite migrations, including graph v11 and structured-block v35             |
-| `apps/server/src/db/memory-block-store.ts`           | Structured-block snapshots, revisions, restore, budgets, and optimistic concurrency |
-| `apps/server/src/db/migrations/memory-blocks-v35.ts` | Structured-block tables, constraints, indexes, and immutability triggers            |
-| `apps/server/src/routes/memory-blocks.ts`            | Authenticated, bounded structured-block HTTP API                                    |
-| `apps/server/src/middleware/auth.ts`                 | Dedicated structured-block API-key scope boundary                                   |
-| `packages/shared/src/types/memory.ts`                | TypeScript types for Memory, MemoryEdge, etc.                                       |
+| File                                                          | Role                                                                                |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `apps/server/src/db/memory-store.ts`                          | CRUD, vector search, dedup, clustering, decay                                       |
+| `apps/server/src/lib/memory-extractor.ts`                     | LLM-based fact extraction from conversations                                        |
+| `apps/server/src/lib/memory-decay.ts`                         | Periodic decay engine, initial strength calc                                        |
+| `apps/server/src/lib/memory-graph.ts`                         | Spreading activation, edge boosting, entity linking                                 |
+| `apps/server/src/lib/memory-projections.ts`                   | Composite scoring, channel-aware category weights                                   |
+| `apps/server/src/lib/memory-consolidation.ts`                 | Fragment merging, insight synthesis, narrative weaving                              |
+| `apps/server/src/lib/memory-preloader.ts`                     | Topic transitions, predictive memory loading                                        |
+| `apps/server/src/db/config-store.ts`                          | Config getters/setters for memory settings                                          |
+| `apps/server/src/db/migrations.ts`                            | Ordered SQLite migrations, including graph v11 and structured-block v35             |
+| `apps/server/src/db/memory-block-store.ts`                    | Structured-block snapshots, revisions, restore, budgets, and optimistic concurrency |
+| `apps/server/src/db/migrations/memory-blocks-v35.ts`          | Structured-block tables, constraints, indexes, and immutability triggers            |
+| `apps/server/src/routes/memory-blocks.ts`                     | Authenticated, bounded structured-block HTTP API                                    |
+| `apps/server/src/middleware/auth.ts`                          | Dedicated structured-block API-key scope boundary                                   |
+| `apps/server/src/lib/orchestrator/context-block-adapter.ts`   | Current stable-block candidates                                                     |
+| `apps/server/src/lib/orchestrator/context-memory-adapter.ts`  | Graph L0 candidates and episodic/knowledge mapping                                  |
+| `apps/server/src/lib/orchestrator/context-working-adapter.ts` | Rolling-summary and historical-message candidates                                   |
+| `apps/server/src/lib/orchestrator/context-assembler.ts`       | Window reservation, layer-cap allocation, and fail-closed stable overflow           |
+| `packages/shared/src/lib/context-assembly.ts`                 | Pure deterministic selection, rendering, trace, and exclusion diagnostics           |
+| `packages/shared/src/types/memory.ts`                         | TypeScript types for Memory, MemoryEdge, etc.                                       |
