@@ -192,7 +192,8 @@ Every batch must preserve these properties:
 
 ### B12 — Context assembly integration
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#115](https://github.com/luka-zivkovic/chvor/pull/115)
 - **Dependencies:** B11
 - **Outcome:** Assemble stable blocks, retrieved memories, history, and working state under an explicit token budget.
 - **Acceptance criteria:**
