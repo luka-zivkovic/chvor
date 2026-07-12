@@ -1,6 +1,9 @@
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { isMemoryBlockTimestamp } from "@chvor/shared";
+import {
+  isMemoryBlockTimestamp,
+  MEMORY_BLOCK_REQUEST_MAX_BYTES as SHARED_MEMORY_BLOCK_REQUEST_MAX_BYTES,
+} from "@chvor/shared";
 import * as defaultMemoryBlockStore from "../db/memory-block-store.ts";
 import {
   MEMORY_BLOCK_PAGE_MAX,
@@ -18,7 +21,7 @@ import type { AuthEnv } from "../middleware/auth.ts";
 
 const memoryBlocks = new Hono<AuthEnv>();
 
-export const MEMORY_BLOCK_REQUEST_MAX_BYTES = 512 * 1024;
+export const MEMORY_BLOCK_REQUEST_MAX_BYTES = SHARED_MEMORY_BLOCK_REQUEST_MAX_BYTES;
 const DEFAULT_PAGE_LIMIT = 20;
 
 type JsonObject = Record<string, unknown>;

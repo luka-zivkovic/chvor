@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const MEMORY_BLOCK_SCHEMA_VERSION = 1 as const;
+export const MEMORY_BLOCK_REQUEST_MAX_BYTES = 524_288 as const;
+export const MEMORY_BLOCK_MUTATION_REQUEST_MAX_BYTES = MEMORY_BLOCK_REQUEST_MAX_BYTES;
 
 export const MEMORY_BLOCK_LIMITS = {
   labelCodePoints: 256,
@@ -267,6 +269,28 @@ export type MemoryBlockProvenance = z.infer<typeof memoryBlockProvenanceSchema>;
 export type MemoryBlockDocumentV1 = z.infer<typeof memoryBlockDocumentV1Schema>;
 export type MemoryBlockActor = z.infer<typeof memoryBlockActorSchema>;
 export type MemoryBlockRecord = z.infer<typeof memoryBlockRecordSchema>;
+export type MemoryBlockCreate = z.infer<typeof memoryBlockCreateSchema>;
+export type MemoryBlockUpdate = z.infer<typeof memoryBlockUpdateSchema>;
+export type MemoryBlockRestore = z.infer<typeof memoryBlockRestoreSchema>;
+
+export type MemoryBlockCreateRequest = MemoryBlockCreate;
+export type MemoryBlockUpdateRequest = MemoryBlockUpdate;
+export type MemoryBlockRestoreRequest = MemoryBlockRestore;
+
+export interface MemoryBlockPage {
+  records: MemoryBlockRecord[];
+  nextCursor: string | null;
+}
+
+export interface MemoryBlockRevisionPage {
+  revisions: MemoryBlockRecord[];
+  nextCursor: string | null;
+}
+
+export interface MemoryBlockRevisionConflict {
+  expectedRevision: number;
+  actualRevision: number;
+}
 
 export function memoryBlockCharacterCount(value: string): number {
   return codePoints(value);

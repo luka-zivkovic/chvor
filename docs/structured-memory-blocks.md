@@ -13,12 +13,13 @@ by RFC 2119.
 B11 persists only the stable `identity`, `human`, and `procedural` context layers.
 `working`, `episodic`, and `knowledge` are not valid structured-block layers.
 Graph memories remain separate episodic/knowledge persistence; B11 does not copy,
-reclassify, or migrate graph-memory rows.
+reclassify, or migrate graph-memory rows. The user-facing behavior built on this
+contract is documented in [`memory-inspector.md`](memory-inspector.md).
 
 "Stable" means directly addressable, bounded, and revisioned. It does not mean that
 a block is automatically included in every model request. B11 provides persistence
 and management only. B12 owns runtime eligibility, prompt assembly, and model-token
-budgeting; B13 owns the future inspector and correction UI.
+budgeting; B13 owns the inspector and correction UI.
 
 ## Strict v1 document
 
