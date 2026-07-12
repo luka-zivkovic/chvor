@@ -19,9 +19,14 @@ export type ContextLayer = (typeof CONTEXT_LAYER_ORDER)[number];
 export const CONTEXT_PAYLOAD_LIMITS = {
   maxDepth: 32,
   maxNodesPerContent: 10_000,
-  maxContentCharacters: 250_000,
-  maxAssemblyCharacters: 1_000_000,
-  maxItems: 1_000,
+  // B11 accepts a 1,000,000-code-point block inside a document bounded to
+  // 4 MiB. JSON escaping can expand that content, so the runtime boundary must
+  // accept every already-valid persisted block before budgeting it.
+  maxContentCharacters: 8_000_000,
+  maxAssemblyCharacters: 4_000_000,
+  // The server source caps are 1,000 stable blocks, 500 working items, and 30
+  // graph rows. Keep the aggregate boundary above that combined maximum.
+  maxItems: 2_000,
   maxReasonsPerItem: 16,
   maxStringLength: 4_096,
   maxTokens: 10_000_000,

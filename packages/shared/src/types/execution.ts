@@ -277,4 +277,8 @@ export interface TokenBudgetInfo {
   messageBudget: number;
   messagesTotal: number;
   messagesTruncated: number;
+  contextAssemblyId?: string;
+  hierarchyBudget?: number;
+  hierarchyIncluded?: number;
+  contextItemsExcluded?: number;
 }

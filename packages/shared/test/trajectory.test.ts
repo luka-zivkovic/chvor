@@ -9,9 +9,16 @@ import {
   sanitizeTrajectoryValue,
   trajectoryErrorSchema,
 } from "../src/types/trajectory.js";
+import {
+  CONTEXT_LAYER_ORDER,
+  CONTEXT_LAYER_POLICIES,
+  parseContextAssembly,
+  projectContextAssemblyTrace,
+} from "../src/types/context.js";
 
 const startedAt = "2026-07-10T09:00:00.000Z";
 const completedAt = "2026-07-10T09:00:02.000Z";
+const PRIVATE_CONTEXT_BODY = "PRIVATE_CONTEXT_BODY_trajectory_schema_7f41e9";
 
 function expectRoundTrip(input: unknown) {
   const parsed = parseCanonicalTrajectory(input);
@@ -94,6 +101,71 @@ function completedChatTrajectory() {
   } as const;
 }
 
+function contextAssembly(content: string = PRIVATE_CONTEXT_BODY) {
+  const layers = CONTEXT_LAYER_ORDER.map((layer, index) => {
+    const policy = structuredClone(CONTEXT_LAYER_POLICIES[index]);
+    const included = index === 0 ? 5 : 0;
+    return {
+      layer,
+      policy,
+      tokenBudget: index === 0 ? 20 : 0,
+      items:
+        index === 0
+          ? [
+              {
+                id: "context-item-identity",
+                owner: "system",
+                mutability: "immutable",
+                modelVisibility: "always",
+                authority: "system",
+                reference: { namespace: "context", id: "identity-1", revision: "1" },
+                source: { kind: "block", id: "block-1", revision: "1" },
+                representation: { kind: "full", id: "identity.full", version: "1" },
+                ordering: { canonicalRank: 1, declaredOrder: 0 },
+                inclusionReasons: [{ kind: "required", code: "contract-required" }],
+                accounting: {
+                  sourceTokens: included,
+                  includedTokens: included,
+                  truncatedTokens: 0,
+                },
+                content,
+              },
+            ]
+          : [],
+      accounting: {
+        sourceTokens: included,
+        includedTokens: included,
+        truncatedTokens: 0,
+        overflowTokens: 0,
+      },
+    };
+  });
+  return parseContextAssembly({
+    schemaVersion: 1,
+    id: "assembly-trajectory-schema",
+    createdAt: startedAt,
+    configuration: {
+      tokenizer: { id: "test-tokenizer", version: "1" },
+      retrievalScoring: { id: "test-scoring", version: "1" },
+      contextWindowTokens: 100,
+      systemInstructionTokens: 20,
+      developerInstructionTokens: 10,
+      currentRequestTokens: 10,
+      otherPromptTokens: 10,
+      responseReserveTokens: 20,
+      toolDefinitionTokens: 10,
+      hierarchyBudgetTokens: 20,
+    },
+    layers,
+    accounting: {
+      sourceTokens: 5,
+      includedTokens: 5,
+      truncatedTokens: 0,
+      overflowTokens: 0,
+    },
+  });
+}
+
 describe("canonical trajectory v1", () => {
   it("round-trips a representative chat/tool/approval trajectory", () => {
     const parsed = expectRoundTrip(completedChatTrajectory());
@@ -104,6 +176,122 @@ describe("canonical trajectory v1", () => {
       credentialId: "cred-1",
       credentialType: "github",
     });
+  });
+
+  it("validates content-free B12 traces while retaining legacy v1 read compatibility", () => {
+    const runtimeAssembly = contextAssembly();
+    const trace = projectContextAssemblyTrace(runtimeAssembly);
+    const contextStep = {
+      id: "step-context",
+      trajectoryId: "traj-chat-1",
+      sequence: 0,
+      kind: "context.assembled",
+      status: "completed",
+      name: "Context assembled",
+      startedAt,
+      completedAt: startedAt,
+      durationMs: 0,
+      contextAssembly: trace,
+    } as const;
+
+    const parsed = parseCanonicalTrajectory({
+      ...completedChatTrajectory(),
+      steps: [contextStep],
+    });
+    expect(parsed.steps[0].contextAssembly).toEqual(trace);
+    expect(JSON.stringify(parsed.steps[0])).not.toContain(PRIVATE_CONTEXT_BODY);
+    expect(JSON.stringify(parsed.steps[0])).not.toContain('"content"');
+
+    expect(
+      safeParseCanonicalTrajectory({
+        ...completedChatTrajectory(),
+        steps: [
+          {
+            ...contextStep,
+            contextAssembly: undefined,
+            input: { legacy: true },
+            attributes: { legacyProducer: true },
+          },
+        ],
+      }).success
+    ).toBe(true);
+    expect(
+      safeParseCanonicalTrajectory({
+        ...completedChatTrajectory(),
+        steps: [{ ...contextStep, contextAssembly: runtimeAssembly }],
+      }).success
+    ).toBe(false);
+
+    const malformedTrace = structuredClone(trace);
+    malformedTrace.layers[0].items[0].inclusionReasons = [];
+    expect(
+      safeParseCanonicalTrajectory({
+        ...completedChatTrajectory(),
+        steps: [{ ...contextStep, contextAssembly: malformedTrace }],
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects generic or extension payloads on context.assembled steps", () => {
+    const contextStep = {
+      id: "step-context-exclusive",
+      trajectoryId: "traj-chat-1",
+      sequence: 0,
+      kind: "context.assembled",
+      status: "completed",
+      name: "Context assembled",
+      startedAt,
+      completedAt: startedAt,
+      durationMs: 0,
+      contextAssembly: projectContextAssemblyTrace(contextAssembly()),
+    } as const;
+
+    for (const extraPayload of [
+      { input: { content: PRIVATE_CONTEXT_BODY } },
+      { output: { content: PRIVATE_CONTEXT_BODY } },
+      { attributes: { content: PRIVATE_CONTEXT_BODY } },
+      { privateContextBody: PRIVATE_CONTEXT_BODY },
+      { actor: { type: "test", id: "test", privateContextBody: PRIVATE_CONTEXT_BODY } },
+      {
+        modelUsage: {
+          providerId: "test",
+          modelId: "test",
+          privateContextBody: PRIVATE_CONTEXT_BODY,
+        },
+      },
+      {
+        toolCall: {
+          toolCallId: "test",
+          toolName: "test",
+          toolKind: "system",
+          privateContextBody: PRIVATE_CONTEXT_BODY,
+        },
+      },
+      {
+        error: {
+          code: "test",
+          category: "test",
+          message: "test",
+          details: { privateContextBody: PRIVATE_CONTEXT_BODY },
+        },
+      },
+      {
+        artifacts: [
+          {
+            artifactId: "test",
+            kind: "trace",
+            locator: PRIVATE_CONTEXT_BODY,
+          },
+        ],
+      },
+    ]) {
+      expect(
+        safeParseCanonicalTrajectory({
+          ...completedChatTrajectory(),
+          steps: [{ ...contextStep, ...extraPayload }],
+        }).success
+      ).toBe(false);
+    }
   });
 
   it("represents scheduled failures and channel waits", () => {

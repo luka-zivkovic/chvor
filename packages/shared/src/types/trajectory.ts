@@ -1,4 +1,11 @@
 import { z } from "zod";
+import { contextAssemblyTraceSchema, type ContextAssemblyTraceV1 } from "./context.js";
+
+// Keep the context contract behind a named type boundary so trajectory's
+// generated declarations reference ContextAssemblyTraceV1 instead of expanding
+// the complete nested context schema into every trajectory inference site.
+const trajectoryContextAssemblyTraceSchema: z.ZodType<ContextAssemblyTraceV1> =
+  contextAssemblyTraceSchema;
 
 /** Current persisted/interchange version of the canonical trajectory contract. */
 export const CANONICAL_TRAJECTORY_SCHEMA_VERSION = 1 as const;
@@ -370,6 +377,29 @@ export const trajectoryArtifactRefSchema = z
   .catchall(trajectoryValueSchema);
 
 const terminalStepStatuses = new Set(["completed", "failed", "skipped", "aborted"]);
+const canonicalTrajectoryStepKeys = new Set([
+  "id",
+  "trajectoryId",
+  "sequence",
+  "parentStepId",
+  "kind",
+  "customType",
+  "status",
+  "name",
+  "actor",
+  "startedAt",
+  "completedAt",
+  "durationMs",
+  "input",
+  "output",
+  "modelUsage",
+  "toolCall",
+  "approval",
+  "contextAssembly",
+  "error",
+  "artifacts",
+  "attributes",
+]);
 
 export const canonicalTrajectoryStepV1Schema = z
   .object({
@@ -390,6 +420,7 @@ export const canonicalTrajectoryStepV1Schema = z
     modelUsage: trajectoryModelUsageSchema.optional(),
     toolCall: trajectoryToolCallSchema.optional(),
     approval: trajectoryApprovalRefSchema.optional(),
+    contextAssembly: trajectoryContextAssemblyTraceSchema.optional(),
     error: trajectoryErrorSchema.optional(),
     artifacts: z.array(trajectoryArtifactRefSchema).default([]),
     attributes: trajectoryValueSchema.default({}),
@@ -431,6 +462,71 @@ export const canonicalTrajectoryStepV1Schema = z
         message: `${step.kind} requires model usage`,
       });
     }
+    // B10 already admitted generic context.assembled steps under schema v1.
+    // Preserve those persisted rows for reads, but apply the body-free B12
+    // restrictions whenever the dedicated trace field is present. The B12
+    // runtime producer always supplies contextAssembly.
+    if (step.kind === "context.assembled" && step.contextAssembly) {
+      for (const field of ["input", "output"] as const) {
+        if (step[field] !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [field],
+            message: `context.assembled does not allow a generic ${field} payload`,
+          });
+        }
+      }
+      if (!isPlainObject(step.attributes) || Object.keys(step.attributes).length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["attributes"],
+          message: "context.assembled requires empty attributes",
+        });
+      }
+      if (
+        step.status !== "completed" ||
+        step.name !== "Context assembled" ||
+        step.completedAt === undefined ||
+        step.durationMs !== 0
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "traced context.assembled requires the canonical completed runtime shape",
+        });
+      }
+      for (const field of [
+        "customType",
+        "actor",
+        "modelUsage",
+        "toolCall",
+        "approval",
+        "error",
+      ] as const) {
+        if (step[field] !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [field],
+            message: `traced context.assembled does not allow ${field}`,
+          });
+        }
+      }
+      if (step.artifacts.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["artifacts"],
+          message: "traced context.assembled requires empty artifacts",
+        });
+      }
+      for (const key of Object.keys(step)) {
+        if (!canonicalTrajectoryStepKeys.has(key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: "context.assembled does not allow extension payload fields",
+          });
+        }
+      }
+    }
     if (step.kind === "custom" && !step.customType) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -446,6 +542,16 @@ export const canonicalTrajectoryStepV1Schema = z
       });
     }
   });
+
+export type CanonicalTrajectoryStepV1 = z.infer<typeof canonicalTrajectoryStepV1Schema>;
+
+// As with the context trace itself, keep the nested step array behind a named
+// output type so declaration generation does not recursively inline the trace.
+const trajectoryStepForEnvelopeSchema = canonicalTrajectoryStepV1Schema as z.ZodType<
+  CanonicalTrajectoryStepV1,
+  z.ZodTypeDef,
+  unknown
+>;
 
 const terminalTrajectoryStatuses = new Set(["completed", "failed", "aborted", "round-limited"]);
 
@@ -464,7 +570,7 @@ export const canonicalTrajectoryV1Schema = z
     input: optionalPayloadSchema,
     output: optionalPayloadSchema,
     modelUsage: z.array(trajectoryModelUsageSchema).default([]),
-    steps: z.array(canonicalTrajectoryStepV1Schema),
+    steps: z.array(trajectoryStepForEnvelopeSchema),
     artifacts: z.array(trajectoryArtifactRefSchema).default([]),
     error: trajectoryErrorSchema.optional(),
     labels: z.array(redactedTextSchema(128).pipe(z.string().min(1))).default([]),
@@ -547,9 +653,12 @@ export type TrajectoryToolCall = z.infer<typeof trajectoryToolCallSchema>;
 export type TrajectoryApprovalRef = z.infer<typeof trajectoryApprovalRefSchema>;
 export type TrajectoryError = z.infer<typeof trajectoryErrorSchema>;
 export type TrajectoryArtifactRef = z.infer<typeof trajectoryArtifactRefSchema>;
-export type CanonicalTrajectoryStepV1 = z.infer<typeof canonicalTrajectoryStepV1Schema>;
 export type CanonicalTrajectoryV1 = z.infer<typeof canonicalTrajectoryV1Schema>;
-export const canonicalTrajectorySchema = canonicalTrajectoryV1Schema;
+export const canonicalTrajectorySchema = canonicalTrajectoryV1Schema as z.ZodType<
+  CanonicalTrajectoryV1,
+  z.ZodTypeDef,
+  unknown
+>;
 export type CanonicalTrajectory = CanonicalTrajectoryV1;
 
 /** Parse and sanitize a version-1 trajectory. Unsupported versions fail closed. */

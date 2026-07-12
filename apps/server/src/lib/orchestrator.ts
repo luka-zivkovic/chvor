@@ -1,32 +1,104 @@
 import { streamText } from "ai";
 import type { CoreMessage } from "ai";
-import type { ChatMessage, ExecutionEvent, ToolActionSummary, EmotionState, EmotionSnapshot, MediaArtifact, ModelUsedInfo, Memory } from "@chvor/shared";
+import { randomUUID } from "node:crypto";
+import type {
+  ChatMessage,
+  ContextAssemblyCandidate,
+  ExecutionEvent,
+  ToolActionSummary,
+  EmotionState,
+  EmotionSnapshot,
+  MediaArtifact,
+  ModelUsedInfo,
+  Memory,
+} from "@chvor/shared";
 import { logError } from "./error-logger.ts";
 import { LLMError } from "./errors.ts";
 import { createEmotionParser, stripEmotionMarker } from "./emotion-parser.ts";
-import { createEmotionEngine, userSentimentSignal, toolOutcomeSignal, conversationPaceSignal, llmSelfReportSignal } from "./emotion-engine.ts";
+import {
+  createEmotionEngine,
+  userSentimentSignal,
+  toolOutcomeSignal,
+  conversationPaceSignal,
+  llmSelfReportSignal,
+} from "./emotion-engine.ts";
 import type { EmotionEngine } from "./emotion-engine.ts";
 import { AdvancedEmotionEngine } from "./advanced-emotion-engine.ts";
 import { buildAdvancedEmotionContext } from "./advanced-emotion-modulation.ts";
-import { insertEmotionSnapshot, getSessionEmotionArc, getLatestEmotion } from "../db/emotion-store.ts";
+import {
+  insertEmotionSnapshot,
+  getSessionEmotionArc,
+  getLatestEmotion,
+} from "../db/emotion-store.ts";
 import { getUnresolvedResidues } from "../db/emotion-residue-store.ts";
-import { getRelationshipState, updateRelationshipAfterTurn, incrementRelationshipSession } from "../db/relationship-store.ts";
-import { createModel, getContextWindow, getMaxTokens, resolveRoleConfig, resolveRoleChain, resolveMediaConfig, isFallbackEligible } from "./llm-router.ts";
+import {
+  getRelationshipState,
+  updateRelationshipAfterTurn,
+  incrementRelationshipSession,
+} from "../db/relationship-store.ts";
+import {
+  createModel,
+  getContextWindow,
+  getMaxTokens,
+  resolveRoleConfig,
+  resolveRoleChain,
+  resolveMediaConfig,
+  isFallbackEligible,
+} from "./llm-router.ts";
 import type { ResolvedConfig } from "./llm-router.ts";
-import { estimateTokens, fitMessagesToBudget } from "./token-counter.ts";
+import { estimateMediaTokens } from "./token-counter.ts";
 import { buildToolDefinitions, snapshotActiveMcpSecrets } from "./tool-builder.ts";
 import { loadSkills, loadTools } from "./capability-loader.ts";
-import { getRelevantMemories, getRelevantMemoriesWithScores, getRelevantMemoriesByCategoryTiers, getMemory } from "../db/memory-store.ts";
-import { rerankMemories, classifyQueryCategories, computeCompositeScoreDetailed } from "./memory-projections.ts";
+import {
+  getRelevantMemoriesWithScores,
+  getRelevantMemoriesByCategoryTiers,
+  getMemory,
+} from "../db/memory-store.ts";
+import {
+  rerankMemories,
+  classifyQueryCategories,
+  computeCompositeScoreDetailed,
+} from "./memory-projections.ts";
 import type { ScoreBreakdown } from "./memory-projections.ts";
 import { spreadActivation, strengthenCoAccessedEdges } from "./memory-graph.ts";
-import { computeTopicHash, updateAccessLogTopics, predictNextMemories } from "./memory-preloader.ts";
+import {
+  computeTopicHash,
+  updateAccessLogTopics,
+  predictNextMemories,
+} from "./memory-preloader.ts";
 import { getCognitiveMemoryConfig } from "../db/config-store.ts";
-import { getPersona, isCapabilityEnabled, getExtendedThinking, getBrainConfig } from "../db/config-store.ts";
+import {
+  getPersona,
+  isCapabilityEnabled,
+  getExtendedThinking,
+  getBrainConfig,
+} from "../db/config-store.ts";
 import { buildSystemPrompt } from "./orchestrator/system-prompt.ts";
-import { publicMedia, sanitizeResultForLLM, sanitizeResultForTrajectory, summarizeToolResult, toolResultContentForLLM } from "./orchestrator/tool-result.ts";
+import {
+  assertContextAttemptFits,
+  assembleTurnContext,
+  ContextStableSourceError,
+  projectToolDefinitionsForContext,
+  selectConservativeContextProfile,
+  type ContextToolDefinition,
+} from "./orchestrator/context-assembler.ts";
+import { mapMemoryBlocksToContextCandidates } from "./orchestrator/context-block-adapter.ts";
+import { mapGraphMemoryToContextCandidate } from "./orchestrator/context-memory-adapter.ts";
+import { mapWorkingContextCandidates } from "./orchestrator/context-working-adapter.ts";
+import { listMemoryBlocksForAssembly } from "../db/memory-block-store.ts";
+import {
+  publicMedia,
+  sanitizeResultForLLM,
+  sanitizeResultForTrajectory,
+  summarizeToolResult,
+  toolResultContentForLLM,
+} from "./orchestrator/tool-result.ts";
 import type { ActorType } from "@chvor/shared";
-import { resolveSkillBag, summarizeScope, filterTools as filterToolsByScope } from "./tool-groups.ts";
+import {
+  resolveSkillBag,
+  summarizeScope,
+  filterTools as filterToolsByScope,
+} from "./tool-groups.ts";
 import { snapshotRound } from "./checkpoint-manager.ts";
 import { applyEmotionGate, getSessionVAD, isEmotionGateEnabled } from "./emotion-gate.ts";
 import {
@@ -40,7 +112,15 @@ import { runToolCalls } from "./orchestrator/tool-call-runner.ts";
 import { isWorkflowRelevant } from "./orchestrator/skill-relevance.ts";
 import { readTrackedModelMetadata, runTrackedModelSetup } from "./orchestrator/model-trajectory.ts";
 import { ignoreAfterAbort } from "./orchestrator/abort.ts";
-import { recordTrajectoryModelFailed, recordTrajectoryModelFinished, recordTrajectoryModelStarted, recordTrajectoryToolRound, runWithTrajectoryCapture, type TrajectoryRunContext } from "./orchestrator/trajectory-adapter.ts";
+import {
+  recordTrajectoryContextAssembled,
+  recordTrajectoryModelFailed,
+  recordTrajectoryModelFinished,
+  recordTrajectoryModelStarted,
+  recordTrajectoryToolRound,
+  runWithTrajectoryCapture,
+  type TrajectoryRunContext,
+} from "./orchestrator/trajectory-adapter.ts";
 export type EventEmitter = (event: ExecutionEvent) => void;
 export function resolveConfig(): ResolvedConfig {
   return resolveRoleConfig("primary");
@@ -96,7 +176,8 @@ export async function executeConversation(
   return runWithTrajectoryCapture({
     messages,
     emit,
-    execute: (trackedEmit) => executeConversationCore(messages, trackedEmit, guardedChunk, guardedStreamReset, options),
+    execute: (trackedEmit) =>
+      executeConversationCore(messages, trackedEmit, guardedChunk, guardedStreamReset, options),
     context: options?.trajectory,
     sessionId: options?.sessionId,
     channelType: options?.channelType,
@@ -129,21 +210,33 @@ async function executeConversationCore(
       const mediaConfig = resolveMediaConfig("video-understanding");
       // Prepend to chain so it's tried first
       configChain.unshift(mediaConfig);
-      console.log(`[orchestrator] video detected → routing to ${mediaConfig.providerId}/${mediaConfig.model}`);
-    } catch { /* fall through to primary */ }
+      console.log(
+        `[orchestrator] video detected → routing to ${mediaConfig.providerId}/${mediaConfig.model}`
+      );
+    } catch {
+      /* fall through to primary */
+    }
   } else if (hasImage) {
     try {
       const mediaConfig = resolveMediaConfig("image-understanding");
       configChain.unshift(mediaConfig);
-      console.log(`[orchestrator] image detected → routing to ${mediaConfig.providerId}/${mediaConfig.model}`);
-    } catch { /* fall through to primary */ }
+      console.log(
+        `[orchestrator] image detected → routing to ${mediaConfig.providerId}/${mediaConfig.model}`
+      );
+    } catch {
+      /* fall through to primary */
+    }
   }
 
   const config = configChain[0];
-  console.log(`[orchestrator] using ${config.providerId}/${config.model}${configChain.length > 1 ? ` (+${configChain.length - 1} fallback${configChain.length > 2 ? "s" : ""})` : ""}`);
+  console.log(
+    `[orchestrator] using ${config.providerId}/${config.model}${configChain.length > 1 ? ` (+${configChain.length - 1} fallback${configChain.length > 2 ? "s" : ""})` : ""}`
+  );
 
   const allSkills = loadSkills();
-  const enabledSkills = allSkills.filter((s) => isCapabilityEnabled("skill", s.id, s.metadata.defaultEnabled));
+  const enabledSkills = allSkills.filter((s) =>
+    isCapabilityEnabled("skill", s.id, s.metadata.defaultEnabled)
+  );
 
   // Prompt-type skills are always included (lightweight behavioral presets).
   // Workflow skills are only included when the user's message is relevant.
@@ -154,7 +247,9 @@ async function executeConversationCore(
   });
 
   const allTools = loadTools();
-  const enabledTools = allTools.filter((t) => isCapabilityEnabled("tool", t.id, t.metadata.defaultEnabled));
+  const enabledTools = allTools.filter((t) =>
+    isCapabilityEnabled("tool", t.id, t.metadata.defaultEnabled)
+  );
 
   // Skill-scoped tool-bag floor (Phase C): only tools the active skills' groups
   // include make it into the bag. Skills with no declarations trigger a
@@ -201,7 +296,9 @@ async function executeConversationCore(
   const toolCount = Object.keys(toolDefs).length;
   console.log(
     `[orchestrator] ${toolCount} tools available — bag: ${
-      bagScope.isPermissive ? `permissive (${bagScope.permissiveReason ?? "no scope"})` : `scoped via skills [${bagScope.contributingSkills.join(",")}]`
+      bagScope.isPermissive
+        ? `permissive (${bagScope.permissiveReason ?? "no scope"})`
+        : `scoped via skills [${bagScope.contributingSkills.join(",")}]`
     }`
   );
 
@@ -224,6 +321,7 @@ async function executeConversationCore(
   let memoryFacts: string[] = [];
   let retrievedMemoryIds: string[] = [];
   let retrievedMemorySources: Array<"direct" | "associated" | "predicted"> = [];
+  let retrievedContextCandidates: ContextAssemblyCandidate[] = [];
   const retrievalScores: Map<string, ScoreBreakdown> = new Map();
   let detectedCategories: string[] = [];
   const retrievalStartMs = Date.now();
@@ -238,12 +336,20 @@ async function executeConversationCore(
     let scoredMemories: Array<{ memory: Memory; vectorSimilarity: number }>;
     if (categoryClass.primary.length > 0) {
       const tiered = await getRelevantMemoriesByCategoryTiers(
-        query, categoryClass.primary, memConfig.maxRetrievalCount, memConfig.strengthThreshold,
+        query,
+        categoryClass.primary,
+        memConfig.maxRetrievalCount,
+        memConfig.strengthThreshold
       );
-      scoredMemories = tiered.map((r) => ({ memory: r.memory, vectorSimilarity: r.vectorSimilarity }));
+      scoredMemories = tiered.map((r) => ({
+        memory: r.memory,
+        vectorSimilarity: r.vectorSimilarity,
+      }));
     } else {
       scoredMemories = await getRelevantMemoriesWithScores(
-        query, memConfig.maxRetrievalCount, memConfig.strengthThreshold,
+        query,
+        memConfig.maxRetrievalCount,
+        memConfig.strengthThreshold
       );
     }
 
@@ -265,7 +371,10 @@ async function executeConversationCore(
 
     // Compute detailed scores for observability
     for (const { memory, vectorSimilarity } of scoredMemories) {
-      retrievalScores.set(memory.id, computeCompositeScoreDetailed(memory, vectorSimilarity, scoringCtx));
+      retrievalScores.set(
+        memory.id,
+        computeCompositeScoreDetailed(memory, vectorSimilarity, scoringCtx)
+      );
     }
 
     // Spread activation through the memory graph
@@ -273,8 +382,19 @@ async function executeConversationCore(
       reranked.map((r) => r.memory),
       10,
       options?.sessionId,
-      query,
+      query
     );
+
+    retrievedContextCandidates = activated.map((activatedMemory, index) => {
+      const score = retrievalScores.get(activatedMemory.memory.id)?.composite;
+      return mapGraphMemoryToContextCandidate(activatedMemory.memory, {
+        source: activatedMemory.source,
+        ...(activatedMemory.relation === undefined ? {} : { relation: activatedMemory.relation }),
+        rank: index,
+        normalizedScore: score ?? activatedMemory.activationScore,
+        categoryMatched: detectedCategories.includes(activatedMemory.memory.category),
+      });
+    });
 
     // Inject L0 abstracts with memory ID prefix (for recall_detail tool)
     memoryFacts = activated.map((a) => {
@@ -283,19 +403,41 @@ async function executeConversationCore(
     });
     retrievedMemoryIds = activated.map((a) => a.memory.id);
     retrievedMemorySources = activated.map((a) => a.source);
-
-    // Strengthen edges between co-accessed memories (Hebbian learning)
-    if (retrievedMemoryIds.length > 1) {
-      strengthenCoAccessedEdges(retrievedMemoryIds);
-    }
   } catch (err) {
-    console.warn("[orchestrator] memory retrieval failed, falling back to basic:", (err as Error).message);
+    console.warn(
+      "[orchestrator] memory retrieval failed, falling back to basic:",
+      (err as Error).message
+    );
     try {
-      memoryFacts = await getRelevantMemories(lastUserMsg?.content ?? "", 15);
-    } catch { /* double fallback: no memories */ }
+      const fallback = await getRelevantMemoriesWithScores(
+        lastUserMsg?.content ?? "",
+        Math.min(15, memConfig.maxRetrievalCount),
+        memConfig.strengthThreshold
+      );
+      retrievedContextCandidates = fallback.map(({ memory, vectorSimilarity }, index) =>
+        mapGraphMemoryToContextCandidate(memory, {
+          source: "fallback",
+          rank: index,
+          normalizedScore: vectorSimilarity,
+          categoryMatched: detectedCategories.includes(memory.category),
+        })
+      );
+      memoryFacts = fallback.map(
+        ({ memory }) => `[mid:${memory.id.slice(0, 8)}] [fallback] ${memory.abstract}`
+      );
+      retrievedMemoryIds = fallback.map(({ memory }) => memory.id);
+      retrievedMemorySources = fallback.map(() => "direct");
+    } catch (fallbackError) {
+      console.warn(
+        "[orchestrator] basic memory fallback failed:",
+        fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+      );
+    }
   }
   if (memoryFacts.length > 0) {
-    console.log(`[orchestrator] injecting ${memoryFacts.length} memory fact(s) (${retrievedMemoryIds.length} with graph activation)`);
+    console.log(
+      `[orchestrator] injecting ${memoryFacts.length} memory fact(s) (${retrievedMemoryIds.length} with graph activation)`
+    );
 
     // Update topic hashes for predictive preloading
     try {
@@ -319,12 +461,24 @@ async function executeConversationCore(
               memoryFacts.push(`[mid:${pid.slice(0, 8)}] [predicted] ${predicted.abstract}`);
               retrievedMemoryIds.push(pid);
               retrievedMemorySources.push("predicted");
+              retrievedContextCandidates.push(
+                mapGraphMemoryToContextCandidate(predicted, {
+                  source: "predicted",
+                  rank: retrievedContextCandidates.length,
+                  normalizedScore: predicted.strength,
+                  categoryMatched: detectedCategories.includes(predicted.category),
+                })
+              );
               seenIds.add(pid);
             }
           }
-        } catch { /* predictive preloading is non-critical */ }
+        } catch {
+          /* predictive preloading is non-critical */
+        }
       }
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical */
+    }
 
     // Hard cap on injected memory facts to prevent token budget explosion
     const MAX_INJECTED_MEMORIES = 30;
@@ -332,22 +486,34 @@ async function executeConversationCore(
       memoryFacts = memoryFacts.slice(0, MAX_INJECTED_MEMORIES);
       retrievedMemoryIds = retrievedMemoryIds.slice(0, MAX_INJECTED_MEMORIES);
       retrievedMemorySources = retrievedMemorySources.slice(0, MAX_INJECTED_MEMORIES);
+      retrievedContextCandidates = retrievedContextCandidates.slice(0, MAX_INJECTED_MEMORIES);
     }
 
     // Emit retrieval trace for observability (replaces per-memory events)
     try {
-      const traceEntries = retrievedMemoryIds.map((id, i) => {
-        const mem = getMemory(id);
-        const scores = retrievalScores.get(id);
-        return mem ? {
-          memoryId: id,
-          abstract: mem.abstract,
-          category: mem.category,
-          scores: scores ?? { vector: 0, strength: mem.strength, recency: 0, categoryRelevance: 1, emotionalResonance: null, composite: 0 },
-          source: retrievedMemorySources[i] ?? "direct",
-          rank: i + 1,
-        } : null;
-      }).filter(Boolean);
+      const traceEntries = retrievedMemoryIds
+        .map((id, i) => {
+          const mem = getMemory(id);
+          const scores = retrievalScores.get(id);
+          return mem
+            ? {
+                memoryId: id,
+                abstract: mem.abstract,
+                category: mem.category,
+                scores: scores ?? {
+                  vector: 0,
+                  strength: mem.strength,
+                  recency: 0,
+                  categoryRelevance: 1,
+                  emotionalResonance: null,
+                  composite: 0,
+                },
+                source: retrievedMemorySources[i] ?? "direct",
+                rank: i + 1,
+              }
+            : null;
+        })
+        .filter(Boolean);
       // Note: queryText is omitted from broadcast to prevent leaking user messages
       // to all connected WebSocket clients. Abstracts are less sensitive (already stored).
       emit({
@@ -359,7 +525,9 @@ async function executeConversationCore(
           durationMs: Date.now() - retrievalStartMs,
         },
       });
-    } catch { /* observability is non-critical */ }
+    } catch {
+      /* observability is non-critical */
+    }
   }
   const personaCfg = getPersona();
   const sessionSummary = options?.sessionSummary ?? null;
@@ -376,7 +544,8 @@ async function executeConversationCore(
   if (personaCfg.emotionsEnabled) {
     emotionEngine = createEmotionEngine(presetId);
     // Restore from last snapshot if exists
-    const lastSnapshot = emotionHistory.length > 0 ? emotionHistory[emotionHistory.length - 1] : null;
+    const lastSnapshot =
+      emotionHistory.length > 0 ? emotionHistory[emotionHistory.length - 1] : null;
     if (lastSnapshot) emotionEngine.restoreFromSnapshot(lastSnapshot);
     emotionEngine.recordMessageTimestamp();
   }
@@ -387,14 +556,19 @@ async function executeConversationCore(
     advancedEngine = new AdvancedEmotionEngine(emotionEngine, presetId ?? "companion");
     advancedEngine.setSessionId(options.sessionId);
     // Restore mood from last snapshot's advanced state
-    const lastSnapshot = emotionHistory.length > 0 ? emotionHistory[emotionHistory.length - 1] : null;
+    const lastSnapshot =
+      emotionHistory.length > 0 ? emotionHistory[emotionHistory.length - 1] : null;
     if (lastSnapshot) advancedEngine.restoreState(lastSnapshot);
     // Load unresolved residues + relationship state from DB
     advancedEngine.loadResidues(getUnresolvedResidues(5));
     advancedEngine.loadRelationship(getRelationshipState());
     // Increment session count once per conversation (only on first message — no prior emotion history)
     if (emotionHistory.length === 0) {
-      try { incrementRelationshipSession(); } catch (err) { console.warn("[orchestrator] failed to increment session:", (err as Error).message); }
+      try {
+        incrementRelationshipSession();
+      } catch (err) {
+        console.warn("[orchestrator] failed to increment session:", (err as Error).message);
+      }
     }
   }
 
@@ -454,7 +628,18 @@ async function executeConversationCore(
     );
   }
 
-  const { stable: stablePrompt, volatile: volatilePrompt } = buildSystemPrompt(skills, promptVisibleTools, memoryFacts, personaCfg, sessionSummary, options?.voiceContext, emotionHistory, options?.channelType);
+  // B12 owns memory and rolling-history injection. Keep those bodies out of the
+  // legacy prompt builder so every persistent item passes through one budget.
+  const { stable: stablePrompt, volatile: volatilePrompt } = buildSystemPrompt(
+    skills,
+    promptVisibleTools,
+    [],
+    personaCfg,
+    null,
+    options?.voiceContext,
+    emotionHistory,
+    options?.channelType
+  );
 
   // Append advanced emotion context to volatile prompt if enabled
   let fullVolatilePrompt = volatilePrompt;
@@ -464,7 +649,7 @@ async function executeConversationCore(
       advancedEngine.getEmbodiment(),
       advancedEngine.getUnresolvedResidues(),
       advancedEngine.getRelationship(),
-      false, // no regulation on first turn
+      false // no regulation on first turn
     );
     fullVolatilePrompt += "\n\n" + advCtx;
   }
@@ -472,7 +657,9 @@ async function executeConversationCore(
   try {
     const multiMind = await runParallelMultiMind({
       userText: lastUserMsg?.content ?? "",
-      memoryFacts,
+      // Retrieved bodies are already represented in the typed B12 candidate
+      // pool; do not create an unbudgeted model-generated memory digest.
+      memoryFacts: [],
       channelType: options?.channelType,
       loopId: options?.loopId,
       abortSignal: options?.abortSignal,
@@ -482,46 +669,161 @@ async function executeConversationCore(
       fullVolatilePrompt += `\n\n${multiMind.digest}`;
     }
   } catch (err) {
-    console.warn("[orchestrator] multi-mind deliberation skipped:", err instanceof Error ? err.message : String(err));
+    console.warn(
+      "[orchestrator] multi-mind deliberation skipped:",
+      err instanceof Error ? err.message : String(err)
+    );
   }
 
-  const fullSystemPrompt = stablePrompt + "\n\n" + fullVolatilePrompt;
-
-  // Token budget calculation
-  const contextWindow = getContextWindow(config.model);
-  const systemTokens = estimateTokens(fullSystemPrompt);
-  const toolTokens = estimateTokens(JSON.stringify(toolDefs));
-  const reservedForResponse = Math.min(getMaxTokens(config.model), Math.floor(contextWindow * 0.5));
-  const messageBudget = contextWindow - systemTokens - toolTokens - reservedForResponse;
-
-  const budgetedMessages = fitMessagesToBudget(
-    messages.map((m) => ({ ...m, tokenCount: estimateTokens(m.content) })),
-    messageBudget
+  const persistentContextAllowed = !new Set(["scheduler", "pulse", "webhook", "daemon"]).has(
+    options?.channelType ?? "web"
   );
+  let blockCandidates: ContextAssemblyCandidate[] = [];
+  if (persistentContextAllowed) {
+    try {
+      blockCandidates = mapMemoryBlocksToContextCandidates(listMemoryBlocksForAssembly());
+    } catch {
+      throw new ContextStableSourceError(
+        "stable context could not be read and validated; refusing an ungrounded turn"
+      );
+    }
+  }
+  const workingCandidates = lastUserMsg
+    ? mapWorkingContextCandidates({
+        messages,
+        currentRequestId: lastUserMsg.id,
+        ...(sessionSummary && options?.sessionId
+          ? {
+              rollingSummary: {
+                sessionId: options.sessionId,
+                revision: `messages-${messages.length}`,
+                content: sessionSummary,
+                eventTime: null,
+              },
+            }
+          : {}),
+      })
+    : [];
+  const contextCandidates = [
+    ...blockCandidates,
+    ...workingCandidates,
+    ...(persistentContextAllowed ? retrievedContextCandidates : []),
+  ];
 
-  const messagesTruncated = messages.length - budgetedMessages.length;
+  // Assemble against the smallest configured fallback window. A later fallback
+  // can therefore reuse this selection without receiving an oversized prompt.
+  const budgetConfig = selectConservativeContextProfile(
+    configChain.map((candidate) => {
+      const contextWindowTokens = getContextWindow(candidate.model);
+      return {
+        ...candidate,
+        contextWindowTokens,
+        responseReserveTokens: Math.min(
+          getMaxTokens(candidate.model),
+          Math.floor(contextWindowTokens * 0.5)
+        ),
+      };
+    })
+  );
+  const contextWindow = budgetConfig.contextWindowTokens;
+  const reservedForResponse = budgetConfig.responseReserveTokens;
+  const outsideSystemPrompt = stablePrompt + "\n\n" + fullVolatilePrompt;
+  const projectedToolDefinitions = projectToolDefinitionsForContext(
+    toolDefs as Record<string, ContextToolDefinition>
+  );
+  const contextResult = assembleTurnContext({
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    providerId: budgetConfig.providerId,
+    modelId: budgetConfig.model,
+    contextWindowTokens: contextWindow,
+    responseReserveTokens: reservedForResponse,
+    systemInstructions: outsideSystemPrompt,
+    currentRequest: lastUserMsg?.content ?? "",
+    currentRequestMediaTokens: estimateMediaTokens(lastUserMsg?.media),
+    toolDefinitions: projectedToolDefinitions,
+    candidates: contextCandidates,
+  });
+  recordTrajectoryContextAssembled(contextResult.assembly);
+
+  const selectedMemoryIds = contextResult.assembly.layers
+    .slice(4)
+    .flatMap((layer) => layer.items)
+    .filter(({ source }) => source.kind === "memory")
+    .map(({ source }) => source.id);
+  if (selectedMemoryIds.length > 1) strengthenCoAccessedEdges(selectedMemoryIds);
+
+  // Historical messages are rendered as typed working-layer data. The current
+  // request stays in its native user role outside the hierarchy.
+  const budgetedMessages = lastUserMsg ? [lastUserMsg] : messages.slice(-1);
+  const selectedWorkingMessageIds = new Set(
+    contextResult.assembly.layers[2].items
+      .filter(({ source }) => source.kind === "message")
+      .map(({ source }) => source.id)
+  );
+  const firstSelectedWorkingIndex = messages.findIndex(({ id }) =>
+    selectedWorkingMessageIds.has(id)
+  );
+  // Gateway summarization expects a contiguous fitted tail. If assembly skipped
+  // a large recent item but retained an older one, keep the entire intervening
+  // tail out of the summarization input rather than summarizing included content.
+  const fittedMessageCountForSummary =
+    firstSelectedWorkingIndex === -1
+      ? budgetedMessages.length
+      : messages.length - firstSelectedWorkingIndex;
+  const systemTokens =
+    contextResult.assembly.configuration.systemInstructionTokens +
+    contextResult.assembly.configuration.otherPromptTokens +
+    contextResult.assembly.accounting.includedTokens;
+  const toolTokens = contextResult.assembly.configuration.toolDefinitionTokens;
+  const messageBudget = contextResult.assembly.layers[2].tokenBudget;
+
+  const messagesTruncated = messages.length - fittedMessageCountForSummary;
   if (messagesTruncated > 0) {
     console.log(
-      `[orchestrator] token budget: truncated ${messagesTruncated} messages (budget: ${messageBudget}, context: ${contextWindow}, system: ${systemTokens} [stable: ${estimateTokens(stablePrompt)}], tools: ${toolTokens})`
+      `[orchestrator] context assembly ${contextResult.assembly.id}: moved ${messagesTruncated} historical messages into bounded working context (budget: ${messageBudget}, context: ${contextWindow}, system+context: ${systemTokens}, tools: ${toolTokens})`
     );
   } else {
     console.log(
-      `[orchestrator] token budget: all ${messages.length} messages fit (budget: ${messageBudget})`
+      `[orchestrator] context assembly ${contextResult.assembly.id}: current request only (working budget: ${messageBudget})`
     );
   }
 
   emit({
     type: "execution.tokenBudget",
-    data: { contextWindow, systemTokens, toolTokens, messageBudget, messagesTotal: messages.length, messagesTruncated },
+    data: {
+      contextWindow,
+      systemTokens,
+      toolTokens,
+      messageBudget,
+      messagesTotal: messages.length,
+      messagesTruncated,
+      contextAssemblyId: contextResult.assembly.id,
+      hierarchyBudget: contextResult.assembly.configuration.hierarchyBudgetTokens,
+      hierarchyIncluded: contextResult.assembly.accounting.includedTokens,
+      contextItemsExcluded: contextResult.exclusions.length,
+    },
   });
 
   let currentMessages: CoreMessage[] = sessionToMessages(budgetedMessages as ChatMessage[]);
+  const contextDataMessage = {
+    role: "user" as const,
+    content: contextResult.prompt,
+  } as CoreMessage;
 
   emit({ type: "brain.thinking", data: { thought: "Processing..." } });
 
   // Tool severity mapping for emotion signals
-  const HIGH_SEVERITY_TOOLS = new Set(["native__sandbox_execute", "native__shell_execute", "native__web_search"]);
-  const LOW_SEVERITY_TOOLS = new Set(["native__read_file", "native__memory_query", "native__memory_store"]);
+  const HIGH_SEVERITY_TOOLS = new Set([
+    "native__sandbox_execute",
+    "native__shell_execute",
+    "native__web_search",
+  ]);
+  const LOW_SEVERITY_TOOLS = new Set([
+    "native__read_file",
+    "native__memory_query",
+    "native__memory_store",
+  ]);
   function toolSeverity(toolName: string): "low" | "medium" | "high" {
     if (HIGH_SEVERITY_TOOLS.has(toolName)) return "high";
     if (LOW_SEVERITY_TOOLS.has(toolName)) return "low";
@@ -567,45 +869,80 @@ async function executeConversationCore(
       } as CoreMessage,
       { role: "system" as const, content: fullVolatilePrompt } as CoreMessage,
     ];
+    const attemptMessages: CoreMessage[] = [
+      ...systemMessages,
+      contextDataMessage,
+      ...currentMessages,
+    ];
 
     // Consume the stream: collect text + tool calls
     let fullText = "";
-    const toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }> = [];
+    const toolCalls: Array<{
+      toolCallId: string;
+      toolName: string;
+      args: Record<string, unknown>;
+    }> = [];
     const emotionParser = emotionsEnabled ? createEmotionParser() : null;
 
     // ── Fallback loop: try each config in the chain ──
     let streamSucceeded = false;
     for (let cfgIdx = activeConfigIndex; cfgIdx < configChain.length; cfgIdx++) {
       const currentConfig = configChain[cfgIdx];
+      const currentContextWindow = getContextWindow(currentConfig.model);
+      assertContextAttemptFits({
+        providerId: currentConfig.providerId,
+        modelId: currentConfig.model,
+        contextWindowTokens: currentContextWindow,
+        responseReserveTokens: Math.min(
+          getMaxTokens(currentConfig.model),
+          Math.floor(currentContextWindow * 0.5)
+        ),
+        messages: attemptMessages,
+        toolDefinitions: toolDefs as Record<string, ContextToolDefinition>,
+      });
       const modelRequestStepId = recordTrajectoryModelStarted({
-        providerId: currentConfig.providerId, modelId: currentConfig.model, role: "primary",
-        wasFallback: cfgIdx > 0, round: round + 1,
+        providerId: currentConfig.providerId,
+        modelId: currentConfig.model,
+        role: "primary",
+        wasFallback: cfgIdx > 0,
+        round: round + 1,
       });
       const currentModel = runTrackedModelSetup({
-        requestStepId: modelRequestStepId, config: currentConfig, wasFallback: cfgIdx > 0,
+        requestStepId: modelRequestStepId,
+        config: currentConfig,
+        wasFallback: cfgIdx > 0,
         operation: () => createModel(currentConfig),
       });
 
       // Extended thinking only applies to Anthropic models
-      const providerOptions = (thinkingConfig.enabled && currentConfig.providerId === "anthropic")
-        ? {
-            "@ai-sdk/anthropic": {
-              thinking: { type: "enabled" as const, budgetTokens: thinkingConfig.budgetTokens },
-            },
-          }
-        : undefined;
+      const providerOptions =
+        thinkingConfig.enabled && currentConfig.providerId === "anthropic"
+          ? {
+              "@ai-sdk/anthropic": {
+                thinking: { type: "enabled" as const, budgetTokens: thinkingConfig.budgetTokens },
+              },
+            }
+          : undefined;
 
       if (providerOptions && cfgIdx === activeConfigIndex) {
-        console.log(`[orchestrator] extended thinking enabled (budget: ${thinkingConfig.budgetTokens})`);
+        console.log(
+          `[orchestrator] extended thinking enabled (budget: ${thinkingConfig.budgetTokens})`
+        );
       }
 
       const result = runTrackedModelSetup({
-        requestStepId: modelRequestStepId, config: currentConfig, wasFallback: cfgIdx > 0,
-        operation: () => streamText({
-          model: currentModel, messages: [...systemMessages, ...currentMessages], tools: toolDefs,
-          maxSteps: 1, abortSignal: options?.abortSignal,
-          ...(providerOptions ? { providerOptions } : {}),
-        }),
+        requestStepId: modelRequestStepId,
+        config: currentConfig,
+        wasFallback: cfgIdx > 0,
+        operation: () =>
+          streamText({
+            model: currentModel,
+            messages: attemptMessages,
+            tools: toolDefs,
+            maxSteps: 1,
+            abortSignal: options?.abortSignal,
+            ...(providerOptions ? { providerOptions } : {}),
+          }),
       });
 
       try {
@@ -629,19 +966,29 @@ async function executeConversationCore(
               args: part.args as Record<string, unknown>,
             });
           } else if (part.type === "error") {
-            console.error(`[orchestrator] stream error:`, (part as unknown as { error: unknown }).error);
+            console.error(
+              `[orchestrator] stream error:`,
+              (part as unknown as { error: unknown }).error
+            );
           }
         }
-        let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
+        let usage:
+          | { promptTokens: number; completionTokens: number; totalTokens: number }
+          | undefined;
         let finishReason: string | undefined;
         const metadata = await readTrackedModelMetadata(result.usage, result.finishReason);
         if (metadata) [usage, finishReason] = metadata;
         else console.warn("[orchestrator] model metadata unavailable");
         recordTrajectoryModelFinished({
-          requestStepId: modelRequestStepId, providerId: currentConfig.providerId,
-          modelId: currentConfig.model, role: "primary", wasFallback: cfgIdx > 0,
-          output: { text: fullText, toolCallCount: toolCalls.length }, finishReason,
-          inputTokens: usage?.promptTokens, outputTokens: usage?.completionTokens,
+          requestStepId: modelRequestStepId,
+          providerId: currentConfig.providerId,
+          modelId: currentConfig.model,
+          role: "primary",
+          wasFallback: cfgIdx > 0,
+          output: { text: fullText, toolCallCount: toolCalls.length },
+          finishReason,
+          inputTokens: usage?.promptTokens,
+          outputTokens: usage?.completionTokens,
           totalTokens: usage?.totalTokens,
         });
         // Stream succeeded — stick with this config for future rounds
@@ -652,18 +999,35 @@ async function executeConversationCore(
         // Check if a fallback is available and the error is transient
         const willFallback = cfgIdx < configChain.length - 1 && isFallbackEligible(streamErr);
         recordTrajectoryModelFailed({
-          requestStepId: modelRequestStepId, providerId: currentConfig.providerId,
-          modelId: currentConfig.model, role: "primary", wasFallback: cfgIdx > 0,
-          error: streamErr, retryable: willFallback,
+          requestStepId: modelRequestStepId,
+          providerId: currentConfig.providerId,
+          modelId: currentConfig.model,
+          role: "primary",
+          wasFallback: cfgIdx > 0,
+          error: streamErr,
+          retryable: willFallback,
         });
         if (willFallback) {
-          console.warn(`[orchestrator] ${currentConfig.providerId}/${currentConfig.model} failed (${(streamErr as Error).message}), trying fallback ${cfgIdx + 1}...`);
-          logError("llm_fallback", streamErr, { round: round + 1, configIndex: cfgIdx, failedModel: `${currentConfig.providerId}/${currentConfig.model}`, nextModel: `${configChain[cfgIdx + 1].providerId}/${configChain[cfgIdx + 1].model}`, sessionId: options?.sessionId });
+          console.warn(
+            `[orchestrator] ${currentConfig.providerId}/${currentConfig.model} failed (${(streamErr as Error).message}), trying fallback ${cfgIdx + 1}...`
+          );
+          logError("llm_fallback", streamErr, {
+            round: round + 1,
+            configIndex: cfgIdx,
+            failedModel: `${currentConfig.providerId}/${currentConfig.model}`,
+            nextModel: `${configChain[cfgIdx + 1].providerId}/${configChain[cfgIdx + 1].model}`,
+            sessionId: options?.sessionId,
+          });
           // Reset partial state for next attempt
           fullText = "";
           toolCalls.length = 0;
           onStreamReset?.();
-          emit({ type: "brain.thinking", data: { thought: `Switching to fallback model (${configChain[cfgIdx + 1].providerId}/${configChain[cfgIdx + 1].model})...` } });
+          emit({
+            type: "brain.thinking",
+            data: {
+              thought: `Switching to fallback model (${configChain[cfgIdx + 1].providerId}/${configChain[cfgIdx + 1].model})...`,
+            },
+          });
           continue;
         }
         // No more fallbacks or non-transient error
@@ -684,7 +1048,11 @@ async function executeConversationCore(
 
     // Finalize emotion parser — flush remainder and strip marker from fullText
     if (emotionParser) {
-      const { emotion: roundEmotion, snapshot: roundSnapshot, remainder } = emotionParser.finalize();
+      const {
+        emotion: roundEmotion,
+        snapshot: roundSnapshot,
+        remainder,
+      } = emotionParser.finalize();
       if (remainder && onChunk) onChunk(remainder);
       const { strippedText } = stripEmotionMarker(fullText);
       fullText = strippedText;
@@ -693,7 +1061,9 @@ async function executeConversationCore(
     }
     lastFullText = fullText;
 
-    console.log(`[orchestrator] round ${round + 1} done — text: ${fullText.length} chars, tool calls: ${toolCalls.length}`);
+    console.log(
+      `[orchestrator] round ${round + 1} done — text: ${fullText.length} chars, tool calls: ${toolCalls.length}`
+    );
     if (toolCalls.length > 0) {
       console.log(`[orchestrator] tools: ${toolCalls.map((tc) => tc.toolName).join(", ")}`);
     }
@@ -720,8 +1090,8 @@ async function executeConversationCore(
           ranking: snapshotRanking,
           toolOutcomes: outcomes,
           recentTools: snapshotRecentTools,
-          messages: { total: messages.length, fitted: budgetedMessages.length },
-          memoryIds: retrievedMemoryIds,
+          messages: { total: messages.length, fitted: fittedMessageCountForSummary },
+          memoryIds: selectedMemoryIds,
         });
       } catch (err) {
         console.warn(
@@ -747,11 +1117,15 @@ async function executeConversationCore(
         const lastUser = messages.findLast((m) => m.role === "user");
         if (lastUser) {
           const rawContent = lastUser.content;
-          const text = typeof rawContent === "string"
-            ? rawContent
-            : Array.isArray(rawContent)
-              ? (rawContent as Array<{ type: string; text?: string }>).filter((p) => p.type === "text" && p.text).map((p) => p.text).join(" ")
-              : "";
+          const text =
+            typeof rawContent === "string"
+              ? rawContent
+              : Array.isArray(rawContent)
+                ? (rawContent as Array<{ type: string; text?: string }>)
+                    .filter((p) => p.type === "text" && p.text)
+                    .map((p) => p.text)
+                    .join(" ")
+                : "";
           if (text) signals.push(userSentimentSignal(text));
         }
 
@@ -782,9 +1156,13 @@ async function executeConversationCore(
         emit({ type: "brain.emotion", data: finalSnapshot });
         if (finalSnapshot.advancedState) {
           const adv = finalSnapshot.advancedState;
-          console.log(`[orchestrator] emotion: ${finalSnapshot.displayLabel} (${finalSnapshot.blend.intensity.toFixed(2)}) VAD[${finalSnapshot.vad.valence.toFixed(2)},${finalSnapshot.vad.arousal.toFixed(2)},${finalSnapshot.vad.dominance.toFixed(2)}] mood:${adv.mood.octant} energy:${Math.round(adv.embodiment.energyLevel * 100)}%${adv.regulationActive ? ` reg:${adv.regulationStrategy}` : ""}`);
+          console.log(
+            `[orchestrator] emotion: ${finalSnapshot.displayLabel} (${finalSnapshot.blend.intensity.toFixed(2)}) VAD[${finalSnapshot.vad.valence.toFixed(2)},${finalSnapshot.vad.arousal.toFixed(2)},${finalSnapshot.vad.dominance.toFixed(2)}] mood:${adv.mood.octant} energy:${Math.round(adv.embodiment.energyLevel * 100)}%${adv.regulationActive ? ` reg:${adv.regulationStrategy}` : ""}`
+          );
         } else {
-          console.log(`[orchestrator] emotion: ${finalSnapshot.displayLabel} (${finalSnapshot.blend.intensity.toFixed(2)}) VAD[${finalSnapshot.vad.valence.toFixed(2)},${finalSnapshot.vad.arousal.toFixed(2)},${finalSnapshot.vad.dominance.toFixed(2)}]`);
+          console.log(
+            `[orchestrator] emotion: ${finalSnapshot.displayLabel} (${finalSnapshot.blend.intensity.toFixed(2)}) VAD[${finalSnapshot.vad.valence.toFixed(2)},${finalSnapshot.vad.arousal.toFixed(2)},${finalSnapshot.vad.dominance.toFixed(2)}]`
+          );
         }
 
         // Update relationship metrics (per-turn: message count + emotional depth)
@@ -798,7 +1176,9 @@ async function executeConversationCore(
       } else if (detectedEmotion) {
         // Fallback: no engine, but we have a legacy emotion
         emit({ type: "brain.emotion", data: detectedEmotion });
-        console.log(`[orchestrator] emotion (legacy): ${detectedEmotion.emotion} (${detectedEmotion.intensity})`);
+        console.log(
+          `[orchestrator] emotion (legacy): ${detectedEmotion.emotion} (${detectedEmotion.intensity})`
+        );
       }
       const allMedia = allActions.flatMap((a) => a.media ?? []);
       const activeConfig = configChain[activeConfigIndex];
@@ -808,10 +1188,14 @@ async function executeConversationCore(
         text: fullText,
         actions: allActions,
         totalMessages: messages.length,
-        fittedMessages: budgetedMessages.length,
+        fittedMessages: fittedMessageCountForSummary,
         emotion: detectedEmotion ?? undefined,
         emotionSnapshot: finalSnapshot,
-        modelUsed: { providerId: activeConfig.providerId, model: activeConfig.model, wasFallback: activeConfigIndex > 0 },
+        modelUsed: {
+          providerId: activeConfig.providerId,
+          model: activeConfig.model,
+          wasFallback: activeConfigIndex > 0,
+        },
         ...(allMedia.length > 0 ? { media: allMedia } : {}),
       };
     }
@@ -834,7 +1218,8 @@ async function executeConversationCore(
     });
     recordTrajectoryToolRound({
       round: round + 1,
-      calls: toolCalls.map((call) => ({ ...call,
+      calls: toolCalls.map((call) => ({
+        ...call,
         toolKind: toolResults.find((result) => result.toolCallId === call.toolCallId)?.toolKind,
       })),
       results: toolResults.map((result) => ({
@@ -846,9 +1231,10 @@ async function executeConversationCore(
 
     // Accumulate tool action summaries
     for (const tr of toolResults) {
-      const actionResult = tr.toolName === "native__use_credential"
-        ? { content: [{ type: "text", text: "Credential retrieved." }] }
-        : sanitizeResultForLLM(tr.result, tr.media);
+      const actionResult =
+        tr.toolName === "native__use_credential"
+          ? { content: [{ type: "text", text: "Credential retrieved." }] }
+          : sanitizeResultForLLM(tr.result, tr.media);
       const actionMedia = publicMedia(tr.media);
       allActions.push({
         tool: tr.toolName,
@@ -866,12 +1252,19 @@ async function executeConversationCore(
       "native__synthesize_tool",
       "native__repair_synthesized_tool",
     ]);
-    const credentialChanged = toolResults.some((tr) =>
-      CREDENTIAL_MUTATING_TOOLS.has(tr.toolName) &&
-      !(tr.result && typeof tr.result === "object" && "error" in (tr.result as Record<string, unknown>))
+    const credentialChanged = toolResults.some(
+      (tr) =>
+        CREDENTIAL_MUTATING_TOOLS.has(tr.toolName) &&
+        !(
+          tr.result &&
+          typeof tr.result === "object" &&
+          "error" in (tr.result as Record<string, unknown>)
+        )
     );
     if (credentialChanged) {
-      const refreshed = loadTools().filter((t) => isCapabilityEnabled("tool", t.id, t.metadata.defaultEnabled));
+      const refreshed = loadTools().filter((t) =>
+        isCapabilityEnabled("tool", t.id, t.metadata.defaultEnabled)
+      );
       // Reuse the same skill-scoped bag for the rebuild so newly-credentialed
       // tools land in the same scope as the original turn.
       let newDefs = await buildToolDefinitions(refreshed, bagScope);
@@ -887,14 +1280,21 @@ async function executeConversationCore(
       if (options?.excludeTools) {
         for (const name of options.excludeTools) delete toolDefs[name];
       }
-      console.log(`[orchestrator] rebuilt tool defs after credential change — ${Object.keys(toolDefs).length} tools`);
+      console.log(
+        `[orchestrator] rebuilt tool defs after credential change — ${Object.keys(toolDefs).length} tools`
+      );
     }
 
     // Auth-failure early-out: if every tool call failed with the same auth_failed cause, bail with the hint.
     const authDiagnoses = toolResults
-      .map((tr) => (tr.result && typeof tr.result === "object" && "diagnosis" in (tr.result as Record<string, unknown>))
-        ? (tr.result as { diagnosis?: { likelyCause?: string; userFacingHint?: string } }).diagnosis
-        : undefined)
+      .map((tr) =>
+        tr.result &&
+        typeof tr.result === "object" &&
+        "diagnosis" in (tr.result as Record<string, unknown>)
+          ? (tr.result as { diagnosis?: { likelyCause?: string; userFacingHint?: string } })
+              .diagnosis
+          : undefined
+      )
       .filter((d): d is { likelyCause?: string; userFacingHint?: string } => !!d);
     if (authDiagnoses.length > 0 && authDiagnoses.length === toolResults.length) {
       const causes = new Set(authDiagnoses.map((d) => d.likelyCause));
@@ -907,9 +1307,13 @@ async function executeConversationCore(
           text: lastFullText.trim() ? lastFullText + "\n\n" + hint : hint,
           actions: allActions,
           totalMessages: messages.length,
-          fittedMessages: budgetedMessages.length,
+          fittedMessages: fittedMessageCountForSummary,
           emotion: detectedEmotion ?? undefined,
-          modelUsed: { providerId: activeConfig.providerId, model: activeConfig.model, wasFallback: activeConfigIndex > 0 },
+          modelUsed: {
+            providerId: activeConfig.providerId,
+            model: activeConfig.model,
+            wasFallback: activeConfigIndex > 0,
+          },
         };
       }
     }
@@ -922,8 +1326,11 @@ async function executeConversationCore(
     if (fullText.length === 0 && allToolsFailed) {
       noProgressRounds++;
       if (noProgressRounds >= NO_PROGRESS_THRESHOLD) {
-        console.warn(`[orchestrator] breaking early — ${NO_PROGRESS_THRESHOLD} consecutive rounds with no progress`);
-        const bailText = "I'm having trouble completing this task — my tool calls keep failing. Let me know how you'd like to proceed.";
+        console.warn(
+          `[orchestrator] breaking early — ${NO_PROGRESS_THRESHOLD} consecutive rounds with no progress`
+        );
+        const bailText =
+          "I'm having trouble completing this task — my tool calls keep failing. Let me know how you'd like to proceed.";
         if (onChunk) onChunk(bailText);
         const allMedia = allActions.flatMap((a) => a.media ?? []);
         const activeConfig = configChain[activeConfigIndex];
@@ -932,9 +1339,13 @@ async function executeConversationCore(
           text: lastFullText.trim() ? lastFullText + "\n\n" + bailText : bailText,
           actions: allActions,
           totalMessages: messages.length,
-          fittedMessages: budgetedMessages.length,
+          fittedMessages: fittedMessageCountForSummary,
           emotion: detectedEmotion ?? undefined,
-          modelUsed: { providerId: activeConfig.providerId, model: activeConfig.model, wasFallback: activeConfigIndex > 0 },
+          modelUsed: {
+            providerId: activeConfig.providerId,
+            model: activeConfig.model,
+            wasFallback: activeConfigIndex > 0,
+          },
           ...(allMedia.length > 0 ? { media: allMedia } : {}),
         };
       }
@@ -991,10 +1402,14 @@ async function executeConversationCore(
     text: finalText,
     actions: allActions,
     totalMessages: messages.length,
-    fittedMessages: budgetedMessages.length,
+    fittedMessages: fittedMessageCountForSummary,
     emotion: detectedEmotion ?? undefined,
     hitRoundLimit: true,
-    modelUsed: { providerId: activeConfig.providerId, model: activeConfig.model, wasFallback: activeConfigIndex > 0 },
+    modelUsed: {
+      providerId: activeConfig.providerId,
+      model: activeConfig.model,
+      wasFallback: activeConfigIndex > 0,
+    },
     ...(allMedia.length > 0 ? { media: allMedia } : {}),
   };
 }

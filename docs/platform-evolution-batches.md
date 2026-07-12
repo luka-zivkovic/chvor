@@ -180,7 +180,8 @@ Every batch must preserve these properties:
 
 ### B11 — Structured memory blocks and revisions
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#114](https://github.com/luka-zivkovic/chvor/pull/114)
 - **Dependencies:** B10
 - **Outcome:** Persist bounded, versioned, user- or agent-managed memory blocks.
 - **Acceptance criteria:**
@@ -191,7 +192,7 @@ Every batch must preserve these properties:
 
 ### B12 — Context assembly integration
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** B11
 - **Outcome:** Assemble stable blocks, retrieved memories, history, and working state under an explicit token budget.
 - **Acceptance criteria:**

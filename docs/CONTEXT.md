@@ -1,8 +1,9 @@
-# Context hierarchy contract (B10)
+# Context hierarchy and assembly
 
 This document is the authoritative B10 contract for classifying and ordering
-context. It defines policy, not current runtime behavior. Implementations delivered
-in later batches MUST conform to this contract.
+context and records how the B12 runtime implements its deterministic selection and
+trace boundaries. The detailed execution path is in
+[`context-assembly-runtime.md`](context-assembly-runtime.md).
 
 The hierarchy has exactly six context layers, in assembly order:
 `identity`, `human`, `working`, `procedural`, `episodic`, and `knowledge`.
@@ -33,16 +34,20 @@ cannot masquerade as a different layer.
 
 ## Shared contract artifacts
 
-The executable v1 schemas live in `packages/shared/src/types/context.ts`. A runtime
-assembly records an opaque ID and timestamp, tokenizer and retrieval-scoring
-versions, explicit reservations for system instructions, developer instructions,
-the current request, other outside-hierarchy prompt input, tool definitions, and
-the response, the exact six ordered layer policies, included item references and
-reasons, selected representation metadata, canonical ordering inputs, per-item
-token accounting, and the runtime content used to construct the model input.
-`projectContextAssemblyTrace()`
-produces the corresponding content-free trace and validates the same accounting.
-Unknown fields, enum values, or schema versions are rejected rather than guessed.
+The executable v1 assembly and trace schemas live in
+`packages/shared/src/types/context.ts`; candidate, tokenizer, layer-cap, and
+exclusion schemas live in `packages/shared/src/types/context-assembly.ts`. The pure
+runtime is `packages/shared/src/lib/context-assembly.ts`.
+
+A runtime assembly records an opaque ID and timestamp, tokenizer and
+retrieval-scoring versions, explicit reservations for system instructions,
+developer instructions, the current request, other outside-hierarchy prompt input,
+tool definitions, and the response, the exact six ordered layer policies, included
+item references and reasons, selected representation metadata, canonical ordering
+inputs, per-item token accounting, and the runtime content used to construct the
+model input. `projectContextAssemblyTrace()` produces the corresponding
+content-free trace and validates the same accounting. Unknown fields, enum values,
+or schema versions are rejected rather than guessed.
 
 ## Authority is independent of precedence
 
@@ -110,6 +115,14 @@ genuinely incomparable, it MUST be represented as an unresolved conflict and
 ordered by the rule-5 reference comparison; it MUST NOT be silently merged into a
 new fact.
 
+The current B12 selection core starts after those upstream decisions. It does not
+perform retrieval, authorization, lifecycle filtering, relevance filtering, or
+claim conflict resolution itself. Candidate producers pass strict typed candidates;
+the core normalizes scores and reasons, orders them, rejects duplicate canonical
+references, selects approved representations under budget, and validates the final
+assembly. This separation keeps the assembler pure and deterministic without
+claiming that ordering is an authorization boundary.
+
 After conflict resolution, items within each layer MUST be ordered by the following
 layer-specific key:
 
@@ -127,7 +140,7 @@ layer-specific key:
 Floating-point scores MUST be normalized to the configured finite precision before
 comparison. NaN and missing scores rank below every valid score.
 
-### B11 persistence budgets are not model budgets
+### Persistence budgets are not model budgets
 
 B11 persists structured blocks only for the stable `identity`, `human`, and
 `procedural` layers. A block's `{ unit: "characters", limit }` budget is a
@@ -135,10 +148,10 @@ validation bound on one stored full snapshot, measured in Unicode code points. I
 is not part of context-window accounting and MUST NOT be treated as an estimate of
 model tokens.
 
-B12 remains responsible for deciding whether a stored block is eligible for a
-particular request and for measuring the selected representation with the fixed,
-model-specific tokenizer below. Passing the B11 character limit does not guarantee
-inclusion under the B12 hierarchy or layer token budgets. See
+B12 directly adapts current stored blocks when persistent context is enabled and
+measures each rendered representation with the fixed tokenizer profile below.
+Passing the B11 character limit does not guarantee inclusion under the B12
+hierarchy or layer token budgets. See
 [`structured-memory-blocks.md`](structured-memory-blocks.md) for the persistence
 contract.
 
@@ -173,10 +186,46 @@ truncate, splice, or substitute lower-layer content. Implementations MAY fail cl
 or use an explicitly configured safe fallback, but the choice MUST be deterministic
 and traced.
 
+The shared B12 assembler returns critical diagnostics for every excluded identity
+or human candidate. The server's `assembleTurnContext()` adapter fails closed when
+any such diagnostic exists by throwing `ContextStableOverflowError` (a
+`ContextWindowOverflowError` subtype). Its message contains only canonical opaque
+references in `namespace:id@revision` form. No partial prompt is returned to the
+orchestrator and no successful `context.assembled` step is recorded for that
+failed assembly.
+
+The server's implemented base allocation is `20% / 20% / 25% / 15% / 10% /
+10%` for identity, human, working, procedural, episodic, and knowledge. The first
+five shares are floored and knowledge receives the integer remainder. After a layer
+is selected, its unused capacity flows only to the next layer and can continue
+forward through later empty layers.
+
+The orchestrator reserves system instructions, the current request (including its
+media estimate), provider-facing JSON Schema tool definitions, renderer overhead, the response
+reserve, and the currently zero developer-instruction count before deriving the
+hierarchy budget. Provider-facing JSON Schemas are used for tool accounting. It
+assembles against the fallback profile with the least usable prompt headroom and
+rechecks the full framed request before every model attempt. The current tokenizer
+profile is version 1 of a conservative UTF-8
+byte upper bound: each UTF-8 byte is charged as one token and the profile identity
+includes the selected fallback provider/model.
+
+The runtime renders each item as a JSON-encoded typed data value under an explicit
+layer heading. It tries full content first, then only predeclared compact forms no
+larger than full, largest fitting form first. Current stable-block, working, and
+graph-memory adapters provide only full forms; the assembler does not generate
+summaries, excerpts, or compact forms. See
+[`context-assembly-runtime.md`](context-assembly-runtime.md#window-reservation-and-layer-budgets)
+for exact accounting behavior.
+
+The completed fragment is passed as a dedicated user-role data message, not as a
+system message. This keeps untrusted historical and graph content below the static
+system boundary while retaining typed owner and authority metadata.
+
 ## Content-free assembly trace
 
-Every included assembly item MUST produce a trace record. B12 may define separate
-content-free exclusion diagnostics, but they are not part of the B10 v1 trace.
+Every included assembly item MUST produce a trace record. B12 returns separate
+content-free exclusion diagnostics, but they are not part of the v1 trace.
 Traces MUST contain references, reason codes, and allowlisted metadata only. They
 MUST NEVER contain context bodies, prompt fragments, generated summaries,
 embeddings, retrieval queries, sensitive excerpts, secrets, credentials, or
@@ -210,6 +259,16 @@ Logs, metrics, exceptions, and trajectory payloads MUST obey the same content-fr
 rule. The trajectory API's payload redaction and truncation behavior is documented
 separately in [trajectory-api.md](./trajectory-api.md); it does not permit context
 bodies to be copied into an assembly trace.
+
+The orchestrator records the projection in one completed `context.assembled`
+trajectory step under its `contextAssembly` field. That step requires empty
+`attributes`, rejects generic `input` and `output`, and rejects extension payload
+fields. Exclusion diagnostics contain layer, opaque reference, per-layer candidate
+rank, reason, minimum required tokens, available tokens, and a critical flag;
+identity and human exclusions are critical. They are returned to the runtime caller
+by the pure assembler but are not currently persisted in the trajectory or exposed
+by a dedicated API. The server adapter converts any critical diagnostic into the
+content-free `ContextStableOverflowError` described above.
 
 ## Migration-free graph-memory mapping
 
@@ -258,11 +317,12 @@ owned by the existing memory behavior described in [MEMORY.md](./MEMORY.md) and
 - Privacy deletion, consent withdrawal, and access revocation MUST take effect
   before the next assembly and MUST dominate cached retrieval results.
 
-## Batch boundary
+## Runtime status and batch boundary
 
-This B10 document defines classification, ownership, mutability, visibility,
-retention, authority, conflict, ordering, budget, trace, privacy, and legacy mapping
-semantics. It creates no persistence schema, API, UI, or runtime integration.
+The B10 portions of this document define classification, ownership, mutability,
+visibility, retention, authority, conflict, ordering, budget, trace, privacy, and
+legacy mapping semantics. B11 provides stable persistence and B12 now provides the
+runtime integration described above.
 
 - **B11 — structured memory blocks and revisions** persists only stable identity,
   human, and procedural blocks. It owns the strict document schema, Unicode
@@ -272,13 +332,20 @@ semantics. It creates no persistence schema, API, UI, or runtime integration.
   contract's layer meanings and authority separation and does not select blocks for
   a prompt. See
   [`structured-memory-blocks.md`](structured-memory-blocks.md).
-- **B12 — context assembly integration** owns runtime retrieval, token accounting,
-  prompt construction, trajectory integration, reason-code emission, tests, and
-  evaluation of the deterministic rules in this document. B12 MUST record only the
-  content-free references and metadata defined here, not context bodies.
+- **B12 — context assembly integration** is implemented for conversational turns.
+  Interactive requests directly read canonical stable blocks, adapt historical
+  messages and an existing rolling summary, project graph-memory L0 abstracts,
+  reserve the smallest fallback window, render JSON-encoded context data, and
+  record a content-free trajectory step. Stable blocks and graph memory are omitted
+  by default for `scheduler`, `pulse`, `webhook`, and `daemon` channel types.
 - **B13 — memory inspector and correction UI** owns end-user inspection, editing,
   locking, verification, revision comparison, and restore workflows. B11 provides
-  no client UI.
+  the API, but B12 provides no client UI.
+
+B12 does not autonomously delegate persistent context to background executions and
+does not request opportunistic summaries. It consumes an existing gateway-supplied
+rolling summary when present and only uses compact representations explicitly
+provided by candidate producers.
 
 Batch status and acceptance criteria remain authoritative in
 [platform-evolution-batches.md](./platform-evolution-batches.md#b10--context-hierarchy-contract).

@@ -478,6 +478,46 @@ describe("memory-block store", () => {
     expect(() => store.listMemoryBlockRevisions(first.id, 1, 0)).toThrow(RangeError);
   });
 
+  it("reads current stable blocks in bounded canonical assembly order", () => {
+    const procedural = store.createMemoryBlock(
+      document("Procedure", {
+        layer: "procedural",
+        managedBy: "agent",
+        declaredOrder: 0,
+        proceduralPriority: "required",
+      }),
+      AGENT
+    );
+    const humanLater = store.createMemoryBlock(
+      document("Human later", { declaredOrder: 20 }),
+      USER
+    );
+    const identity = store.createMemoryBlock(
+      document("Identity", { layer: "identity", declaredOrder: 99 }),
+      USER
+    );
+    const humanTieA = store.createMemoryBlock(document("Human tie A", { declaredOrder: 10 }), USER);
+    const humanTieB = store.createMemoryBlock(document("Human tie B", { declaredOrder: 10 }), USER);
+    const tiedHumans = [humanTieA, humanTieB].sort((left, right) =>
+      left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+    );
+
+    expect(store.listMemoryBlocksForAssembly().map(({ id }) => id)).toEqual([
+      identity.id,
+      ...tiedHumans.map(({ id }) => id),
+      humanLater.id,
+      procedural.id,
+    ]);
+    expect(store.listMemoryBlocksForAssembly(2).map(({ id }) => id)).toEqual([
+      identity.id,
+      tiedHumans[0].id,
+    ]);
+    expect(() => store.listMemoryBlocksForAssembly(0)).toThrow(RangeError);
+    expect(() => store.listMemoryBlocksForAssembly(store.MEMORY_BLOCK_ASSEMBLY_MAX + 1)).toThrow(
+      RangeError
+    );
+  });
+
   it("detects corrupt stored snapshots at the read boundary", () => {
     const created = store.createMemoryBlock(document("Corruption"), USER);
     const db = getDb();

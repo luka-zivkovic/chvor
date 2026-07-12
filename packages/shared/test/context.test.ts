@@ -390,7 +390,7 @@ describe("shared context hierarchy v1", () => {
       item.reference.id = `z-large-reference-${index}`;
       item.source.id = `large-source-${index}`;
       item.ordering.canonicalRank = index + 2;
-      item.content = "x".repeat(200_000) as unknown as typeof item.content;
+      item.content = "x".repeat(800_000) as unknown as typeof item.content;
       item.accounting = { sourceTokens: 1, includedTokens: 1, truncatedTokens: 0 };
       layer.items.push(item);
     }
