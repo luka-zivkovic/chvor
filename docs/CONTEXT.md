@@ -127,6 +127,21 @@ layer-specific key:
 Floating-point scores MUST be normalized to the configured finite precision before
 comparison. NaN and missing scores rank below every valid score.
 
+### B11 persistence budgets are not model budgets
+
+B11 persists structured blocks only for the stable `identity`, `human`, and
+`procedural` layers. A block's `{ unit: "characters", limit }` budget is a
+validation bound on one stored full snapshot, measured in Unicode code points. It
+is not part of context-window accounting and MUST NOT be treated as an estimate of
+model tokens.
+
+B12 remains responsible for deciding whether a stored block is eligible for a
+particular request and for measuring the selected representation with the fixed,
+model-specific tokenizer below. Passing the B11 character limit does not guarantee
+inclusion under the B12 hierarchy or layer token budgets. See
+[`structured-memory-blocks.md`](structured-memory-blocks.md) for the persistence
+contract.
+
 ## Deterministic budget pressure
 
 The assembler MUST calculate one context budget after reserving space for runtime
@@ -249,18 +264,25 @@ This B10 document defines classification, ownership, mutability, visibility,
 retention, authority, conflict, ordering, budget, trace, privacy, and legacy mapping
 semantics. It creates no persistence schema, API, UI, or runtime integration.
 
-- **B11 — structured memory blocks and revisions** owns persisted block schemas,
-  labels, descriptions, configurable budgets, read-only state, confidence,
-  provenance, verification timestamps, revision history, audit, restore behavior,
-  migrations, and concurrent-write semantics. B11 MUST preserve this contract's
-  layer meanings and authority separation.
+- **B11 — structured memory blocks and revisions** persists only stable identity,
+  human, and procedural blocks. It owns the strict document schema, Unicode
+  character budgets, read-only state, confidence, provenance, verification time,
+  immutable full-snapshot revisions, trusted actor metadata, restore, audit,
+  migration v35, authorization, and optimistic concurrency. It MUST preserve this
+  contract's layer meanings and authority separation and does not select blocks for
+  a prompt. See
+  [`structured-memory-blocks.md`](structured-memory-blocks.md).
 - **B12 — context assembly integration** owns runtime retrieval, token accounting,
   prompt construction, trajectory integration, reason-code emission, tests, and
   evaluation of the deterministic rules in this document. B12 MUST record only the
   content-free references and metadata defined here, not context bodies.
+- **B13 — memory inspector and correction UI** owns end-user inspection, editing,
+  locking, verification, revision comparison, and restore workflows. B11 provides
+  no client UI.
 
 Batch status and acceptance criteria remain authoritative in
 [platform-evolution-batches.md](./platform-evolution-batches.md#b10--context-hierarchy-contract).
 For surrounding runtime and persistence concepts, see
 [ARCHITECTURE.md](./ARCHITECTURE.md), [MEMORY.md](./MEMORY.md),
+[structured-memory-blocks.md](./structured-memory-blocks.md),
 [KNOWLEDGE.md](./KNOWLEDGE.md), and [trajectory-api.md](./trajectory-api.md).

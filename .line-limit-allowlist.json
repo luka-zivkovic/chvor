@@ -22,5 +22,9 @@
   {
     "path": "apps/server/src/lib/orchestrator/trajectory-adapter.ts",
     "reason": "Single AsyncLocal trajectory state machine whose capture hooks share ordering, parentage, redaction, and a per-run failure circuit; splitting the mutable state across modules would weaken those invariants."
+  },
+  {
+    "path": "apps/server/src/db/migrations.ts",
+    "reason": "Historical sequential migration registry for schema versions 1-35; older inline migrations must remain byte-stable while new migrations are already split into dedicated modules."
   }
 ]

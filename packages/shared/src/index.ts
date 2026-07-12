@@ -38,6 +38,7 @@ export * from "./types/trajectory.js";
 export * from "./types/evaluation-case.js";
 export * from "./types/evaluation-run.js";
 export * from "./types/context.js";
+export * from "./types/memory-block.js";
 
 // Lib
 export * from "./lib/validate-skill.js";

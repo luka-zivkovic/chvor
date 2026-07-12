@@ -79,6 +79,7 @@ import approvalsRoute from "./routes/approvals.ts";
 import trajectoriesRoute from "./routes/trajectories.ts";
 import evaluationCasesRoute from "./routes/evaluation-cases.ts";
 import evaluationRunsRoute from "./routes/evaluation-runs.ts";
+import memoryBlocksRoute from "./routes/memory-blocks.ts";
 import resumeRoute from "./routes/orchestrator-resume.ts";
 import sessionPinsRoute from "./routes/session-pins.ts";
 import adminRoute, { registerShutdownHandler } from "./routes/admin.ts";
@@ -464,6 +465,7 @@ app.route("/api/approvals", approvalsRoute);
 app.route("/api/trajectories", trajectoriesRoute);
 app.route("/api/evaluation-cases", evaluationCasesRoute);
 app.route("/api/evaluation-runs", evaluationRunsRoute);
+app.route("/api/memory-blocks", memoryBlocksRoute);
 app.route("/api/orchestrator/resume", resumeRoute);
 app.route("/api/admin", adminRoute);
 

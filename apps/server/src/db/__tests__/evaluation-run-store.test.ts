@@ -121,7 +121,7 @@ afterAll(() => {
 describe("evaluation-run migration v34", () => {
   it("creates normalized run/case storage, indexes, and immutable triggers on fresh databases", () => {
     const db = getDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(34);
+    expect(db.pragma("user_version", { simple: true })).toBe(35);
     const tables = db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'evaluation_run%' ORDER BY name"
@@ -153,7 +153,7 @@ describe("evaluation-run migration v34", () => {
       db.pragma("foreign_keys = ON");
       db.pragma("user_version = 33");
       runMigrations(db, false);
-      expect(db.pragma("user_version", { simple: true })).toBe(34);
+      expect(db.pragma("user_version", { simple: true })).toBe(35);
       expect(
         db
           .prepare(

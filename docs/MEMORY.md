@@ -1,10 +1,14 @@
 # Cognitive Memory System
 
-Chvor's memory system is a graph-based cognitive architecture inspired by how
-human memory works: associative, decaying, emotionally-aware, self-organizing,
-and context-adaptive. It replaces a flat key-value store with a living network
-of interconnected facts that strengthens with use, fades with neglect, and
-periodically reorganizes itself during idle "sleep" cycles.
+Chvor has two complementary persistent memory forms. Graph memory is associative,
+decaying, emotionally-aware, self-organizing, and retrieval-driven. Structured
+memory blocks are bounded stable records with explicit metadata and immutable
+revision history.
+
+The graph remains the cognitive memory system described below. B11 adds persistence
+and authenticated management for structured blocks, but it does not inject those
+blocks into model prompts. B12 owns token-budgeted context assembly, and B13 owns
+the future memory inspector and correction UI.
 
 ---
 
@@ -30,11 +34,11 @@ ones fade away. Related memories cluster together. The system learns what matter
 
 Every memory is a **node** in a graph with three content tiers:
 
-| Tier | Field | Purpose | Size |
-|------|-------|---------|------|
-| L0 | `abstract` | One-line summary | ~120 chars |
-| L1 | `overview` | Paragraph with context | ~1000 chars |
-| L2 | `detail` | Full narrative | ~5000 chars |
+| Tier | Field      | Purpose                | Size        |
+| ---- | ---------- | ---------------------- | ----------- |
+| L0   | `abstract` | One-line summary       | ~120 chars  |
+| L1   | `overview` | Paragraph with context | ~1000 chars |
+| L2   | `detail`   | Full narrative         | ~5000 chars |
 
 By default, only L0 abstracts are injected into the system prompt. L1/L2
 content is loaded on demand when deeper context is needed.
@@ -43,14 +47,14 @@ content is loaded on demand when deeper context is needed.
 
 Each memory is classified into one of six categories:
 
-| Category | What it captures | Example |
-|----------|-----------------|---------|
-| `profile` | Name, age, location, job | "User is a backend engineer in Berlin" |
-| `preference` | Likes, dislikes, style | "User prefers concise answers" |
-| `entity` | Projects, people, tools | "User's main project is called Atlas" |
-| `event` | Decisions, milestones | "User migrated from Postgres to Redis" |
-| `pattern` | Recurring behaviors | "User debugs by reading logs first" |
-| `case` | Problems + solutions | "Fixed OOM by switching to streaming" |
+| Category     | What it captures         | Example                                |
+| ------------ | ------------------------ | -------------------------------------- |
+| `profile`    | Name, age, location, job | "User is a backend engineer in Berlin" |
+| `preference` | Likes, dislikes, style   | "User prefers concise answers"         |
+| `entity`     | Projects, people, tools  | "User's main project is called Atlas"  |
+| `event`      | Decisions, milestones    | "User migrated from Postgres to Redis" |
+| `pattern`    | Recurring behaviors      | "User debugs by reading logs first"    |
+| `case`       | Problems + solutions     | "Fixed OOM by switching to streaming"  |
 
 ### Metadata
 
@@ -76,20 +80,57 @@ precedence, authority, budgeting, and trace rules.
 
 ---
 
+## Structured memory blocks (B11)
+
+Structured blocks are persisted separately from graph-memory nodes. B11 accepts
+only stable `identity`, `human`, and `procedural` blocks. Identity and human blocks
+are user-managed; procedural blocks may be user- or agent-managed. Each strict v1
+document carries its schema version, layer, manager, label, nullable description,
+content, character budget, declared order, layer-specific procedural priority,
+read-only state, confidence, structured provenance, and nullable verification
+time.
+
+A block's character budget is a persistence bound. Every create, update, and
+restore must satisfy it before a revision is committed, using a deterministic count
+of Unicode code points. It is not a token estimate and is independent of the model
+tokenizer. B12 will decide whether a block is eligible for a particular model input
+and account for the selected representation in model tokens.
+
+Creating a block establishes revision 1. Updates and restores append immutable full
+snapshots and atomically advance the current revision. Both require the caller's
+expected current revision; a stale value is rejected rather than merged. Restore
+copies a historical snapshot into a new revision instead of changing or deleting
+history. The block's layer and manager cannot change after creation, and an agent
+cannot alter a currently read-only block.
+
+The authenticated `/api/memory-blocks` API provides bounded current-state reads,
+full-snapshot writes, revision history, and restore. It uses dedicated
+`memory-block:read` and `memory-block:write` API-key scopes, sends
+`Cache-Control: no-store`, and keeps content out of validation errors and the
+supplementary operational audit log. Trusted actor metadata is stored with every
+revision; request bodies cannot choose their actor identity.
+
+B11 does not modify graph retrieval, the orchestrator prompt path, autonomous
+editing policy, context-assembly trajectories, or client UI. The complete schema,
+Unicode budget, API, security, audit, migration, and batch-boundary contract is in
+[`structured-memory-blocks.md`](structured-memory-blocks.md).
+
+---
+
 ## Memory graph
 
 Memories don't exist in isolation. They're connected by **edges** that capture
 relationships:
 
-| Relation | Meaning | Default weight |
-|----------|---------|----------------|
-| `temporal` | Happened around the same time | 0.3 |
-| `causal` | A led to B | 0.5 |
-| `semantic` | Topically similar | 0.5 |
-| `entity` | Share a named entity (person, project) | 0.6 |
-| `contradiction` | A conflicts with B | 0.5 |
-| `supersedes` | A replaces B (belief revision) | 0.5 |
-| `narrative` | Part of the same story arc | 0.7-0.8 |
+| Relation        | Meaning                                | Default weight |
+| --------------- | -------------------------------------- | -------------- |
+| `temporal`      | Happened around the same time          | 0.3            |
+| `causal`        | A led to B                             | 0.5            |
+| `semantic`      | Topically similar                      | 0.5            |
+| `entity`        | Share a named entity (person, project) | 0.6            |
+| `contradiction` | A conflicts with B                     | 0.5            |
+| `supersedes`    | A replaces B (belief revision)         | 0.5            |
+| `narrative`     | Part of the same story arc             | 0.7-0.8        |
 
 Edge weights range from 0.0 to 1.0 and strengthen when two memories are
 co-accessed in the same session (Hebbian learning: "fire together, wire
@@ -105,15 +146,15 @@ neighbor_score = edge_weight x neighbor_strength x relation_bonus
 
 Relation bonuses amplify certain edge types during activation:
 
-| Relation | Bonus |
-|----------|-------|
-| causal | 1.5x |
-| entity | 1.2x |
-| narrative | 1.2x |
-| supersedes | 1.1x |
-| temporal | 1.0x |
-| semantic | 0.8x |
-| contradiction | 0.3x |
+| Relation      | Bonus |
+| ------------- | ----- |
+| causal        | 1.5x  |
+| entity        | 1.2x  |
+| narrative     | 1.2x  |
+| supersedes    | 1.1x  |
+| temporal      | 1.0x  |
+| semantic      | 0.8x  |
+| contradiction | 0.3x  |
 
 High-scoring neighbors are included in retrieval results, surfacing related
 context that vector similarity alone would miss.
@@ -130,13 +171,13 @@ strength(t) = strength_0 x e^(-decay_rate x days_since_last_access)
 
 ### How strength changes
 
-| Event | Effect |
-|-------|--------|
-| **Created** | Starts at 0.8 (or 0.6-1.0 based on emotional intensity) |
-| **Accessed** | +0.15 strength (capped at 1.0), decay_rate x 0.8 (min 0.02) |
-| **Time passes** | Decays exponentially every 6 hours |
-| **Consolidated** | Originals drop below 0.05 (invisible) |
-| **Below 0.05** | Still in DB but invisible to retrieval |
+| Event            | Effect                                                      |
+| ---------------- | ----------------------------------------------------------- |
+| **Created**      | Starts at 0.8 (or 0.6-1.0 based on emotional intensity)     |
+| **Accessed**     | +0.15 strength (capped at 1.0), decay_rate x 0.8 (min 0.02) |
+| **Time passes**  | Decays exponentially every 6 hours                          |
+| **Consolidated** | Originals drop below 0.05 (invisible)                       |
+| **Below 0.05**   | Still in DB but invisible to retrieval                      |
 
 The spaced repetition effect means memories accessed repeatedly over longer
 intervals become nearly permanent (decay rate approaches 0.02), while memories
@@ -200,6 +241,7 @@ top N memories (default 15) above the strength threshold (0.05).
 Each candidate memory is scored across multiple signals:
 
 **With emotions enabled (5 signals):**
+
 ```
 score = vector_similarity x 0.35
       + strength          x 0.25
@@ -209,6 +251,7 @@ score = vector_similarity x 0.35
 ```
 
 **With emotions disabled (4 signals):**
+
 ```
 score = vector_similarity x 0.40
       + strength          x 0.30
@@ -223,11 +266,11 @@ effect with no data migration.
 
 Category relevance adjusts based on the conversation channel:
 
-| Channel | Boosted | Reduced |
-|---------|---------|---------|
-| Technical (Discord, Slack) | entity, pattern, case | profile |
-| Casual (Telegram, WhatsApp) | profile, preference | case, pattern |
-| Default (Web) | All equal | -- |
+| Channel                     | Boosted               | Reduced       |
+| --------------------------- | --------------------- | ------------- |
+| Technical (Discord, Slack)  | entity, pattern, case | profile       |
+| Casual (Telegram, WhatsApp) | profile, preference   | case, pattern |
+| Default (Web)               | All equal             | --            |
 
 ### Stage 4: Spreading activation
 
@@ -278,6 +321,7 @@ narratives.
 ### Pass 4: Graph pruning
 
 Cleans up the memory graph:
+
 - Removes edges with weight < 0.1
 - Deletes access log entries older than 90 days
 
@@ -304,13 +348,13 @@ conversational context.
 
 All cognitive memory features can be toggled via the config store:
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `memory.decayEnabled` | `true` | Enable/disable periodic decay passes |
-| `memory.consolidationEnabled` | `true` | Enable/disable consolidation cycles |
-| `memory.preloadingEnabled` | `true` | Enable/disable predictive preloading |
-| `memory.strengthThreshold` | `0.05` | Below this, memories are invisible |
-| `memory.maxRetrievalCount` | `20` | Max memories returned per retrieval |
+| Setting                       | Default | Description                          |
+| ----------------------------- | ------- | ------------------------------------ |
+| `memory.decayEnabled`         | `true`  | Enable/disable periodic decay passes |
+| `memory.consolidationEnabled` | `true`  | Enable/disable consolidation cycles  |
+| `memory.preloadingEnabled`    | `true`  | Enable/disable predictive preloading |
+| `memory.strengthThreshold`    | `0.05`  | Below this, memories are invisible   |
+| `memory.maxRetrievalCount`    | `20`    | Max memories returned per retrieval  |
 
 Emotions are controlled separately via the persona settings
 (`persona.emotionsEnabled`). Memory works fully without emotions -- they
@@ -320,7 +364,7 @@ enhance it but are never required.
 
 ## Database schema
 
-The system uses four tables (migration v11):
+Graph memory uses four tables introduced by migration v11:
 
 - **`memory_nodes`** -- the memories themselves (20 columns)
 - **`memory_edges`** -- graph connections between memories
@@ -330,19 +374,28 @@ The system uses four tables (migration v11):
 Legacy memories from the old flat `memories` table are automatically migrated
 on first run. The old table is preserved as `memories_v1_backup`.
 
+Migration v35 adds `memory_blocks` and `memory_block_revisions` as separate
+structured-block tables. It creates empty storage and does not rewrite, duplicate,
+or reclassify graph-memory rows. Immutable snapshots, current-revision pointers,
+and database constraints reinforce the B11 application-level validation.
+
 ---
 
 ## File map
 
-| File | Role |
-|------|------|
-| `apps/server/src/db/memory-store.ts` | CRUD, vector search, dedup, clustering, decay |
-| `apps/server/src/lib/memory-extractor.ts` | LLM-based fact extraction from conversations |
-| `apps/server/src/lib/memory-decay.ts` | Periodic decay engine, initial strength calc |
-| `apps/server/src/lib/memory-graph.ts` | Spreading activation, edge boosting, entity linking |
-| `apps/server/src/lib/memory-projections.ts` | Composite scoring, channel-aware category weights |
-| `apps/server/src/lib/memory-consolidation.ts` | Fragment merging, insight synthesis, narrative weaving |
-| `apps/server/src/lib/memory-preloader.ts` | Topic transitions, predictive memory loading |
-| `apps/server/src/db/config-store.ts` | Config getters/setters for memory settings |
-| `apps/server/src/db/database.ts` | Schema definitions and migration v11 |
-| `packages/shared/src/types/memory.ts` | TypeScript types for Memory, MemoryEdge, etc. |
+| File                                                 | Role                                                                                |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `apps/server/src/db/memory-store.ts`                 | CRUD, vector search, dedup, clustering, decay                                       |
+| `apps/server/src/lib/memory-extractor.ts`            | LLM-based fact extraction from conversations                                        |
+| `apps/server/src/lib/memory-decay.ts`                | Periodic decay engine, initial strength calc                                        |
+| `apps/server/src/lib/memory-graph.ts`                | Spreading activation, edge boosting, entity linking                                 |
+| `apps/server/src/lib/memory-projections.ts`          | Composite scoring, channel-aware category weights                                   |
+| `apps/server/src/lib/memory-consolidation.ts`        | Fragment merging, insight synthesis, narrative weaving                              |
+| `apps/server/src/lib/memory-preloader.ts`            | Topic transitions, predictive memory loading                                        |
+| `apps/server/src/db/config-store.ts`                 | Config getters/setters for memory settings                                          |
+| `apps/server/src/db/migrations.ts`                   | Ordered SQLite migrations, including graph v11 and structured-block v35             |
+| `apps/server/src/db/memory-block-store.ts`           | Structured-block snapshots, revisions, restore, budgets, and optimistic concurrency |
+| `apps/server/src/db/migrations/memory-blocks-v35.ts` | Structured-block tables, constraints, indexes, and immutability triggers            |
+| `apps/server/src/routes/memory-blocks.ts`            | Authenticated, bounded structured-block HTTP API                                    |
+| `apps/server/src/middleware/auth.ts`                 | Dedicated structured-block API-key scope boundary                                   |
+| `packages/shared/src/types/memory.ts`                | TypeScript types for Memory, MemoryEdge, etc.                                       |

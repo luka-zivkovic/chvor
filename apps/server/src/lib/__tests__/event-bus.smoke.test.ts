@@ -24,9 +24,8 @@ beforeAll(async () => {
   ({ beginAction, finishAction, failAction } = await import("../event-bus.ts"));
   ({ listTraces } = await import("../../db/event-store.ts"));
   ({ appendAudit, listAudit } = await import("../../db/audit-log-store.ts"));
-  ({ parseScopes, scopeMatches, requiredScopeFor, requiredScopesFor } = await import(
-    "../../middleware/auth.ts"
-  ));
+  ({ parseScopes, scopeMatches, requiredScopeFor, requiredScopesFor } =
+    await import("../../middleware/auth.ts"));
   ({ runSecurityAudit } = await import("../security-auditor.ts"));
 });
 
@@ -120,6 +119,11 @@ describe("Phase A + B smoke — typed events, audit log, scope matcher", () => {
     ]);
     expect(requiredScopesFor("GET", "/api/evaluation-runs")).toEqual(["evaluation:read"]);
     expect(scopeMatches(parseScopes("evaluation:write"), "evaluation:run")).toBe(false);
+    expect(requiredScopeFor("GET", "/api/memory-blocks")).toBe("memory-block:read");
+    expect(requiredScopeFor("HEAD", "/api/memory-blocks/block-1")).toBe("memory-block:read");
+    expect(requiredScopeFor("POST", "/api/memory-blocks")).toBe("memory-block:write");
+    expect(requiredScopeFor("PUT", "/api/%6demory-blocks/block-1")).toBe("memory-block:write");
+    expect(scopeMatches(parseScopes("memory:write,api:write"), "memory-block:write")).toBe(false);
   });
 
   it("requires write scope for destructive /api/debug POSTs", () => {

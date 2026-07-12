@@ -4,6 +4,10 @@ import { migrateTrajectoryPersistenceV31 } from "./migrations/trajectory-v31.ts"
 import { migrateTrajectoryQueryIndexV32 } from "./migrations/trajectory-query-v32.ts";
 import { migrateEvaluationCasesV33 } from "./migrations/evaluation-cases-v33.ts";
 import { migrateEvaluationRunsV34 } from "./migrations/evaluation-runs-v34.ts";
+import {
+  migrateMemoryBlocksV35,
+  registerMemoryBlockSqlFunctions,
+} from "./migrations/memory-blocks-v35.ts";
 
 interface MigrationMessage {
   id: string;
@@ -16,9 +20,9 @@ interface MigrationMessage {
 }
 
 function migrateJsonMessages(database: Database.Database): void {
-  const sessions = database.prepare(
-    "SELECT id, channel_type, messages FROM sessions WHERE messages != '[]'"
-  ).all() as { id: string; channel_type: string; messages: string }[];
+  const sessions = database
+    .prepare("SELECT id, channel_type, messages FROM sessions WHERE messages != '[]'")
+    .all() as { id: string; channel_type: string; messages: string }[];
 
   if (sessions.length === 0) return;
 
@@ -33,7 +37,9 @@ function migrateJsonMessages(database: Database.Database): void {
       let msgs: MigrationMessage[];
       try {
         msgs = JSON.parse(session.messages);
-      } catch { continue; }
+      } catch {
+        continue;
+      }
 
       for (const m of msgs) {
         const tokenCount = Math.ceil(m.content.length / 4);
@@ -75,6 +81,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
   // Version-based migrations
   const currentVersion = (db.pragma("user_version") as { user_version: number }[])[0].user_version;
 
+  // V35 CHECK constraints call this deterministic scalar on every block write.
+  if (currentVersion >= 35) registerMemoryBlockSqlFunctions(db);
+
   if (currentVersion < 1) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS messages (
@@ -94,7 +103,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
     // Add summary column to sessions (prep for future summarization feature)
     try {
       db.exec("ALTER TABLE sessions ADD COLUMN summary TEXT");
-    } catch { /* already exists */ }
+    } catch {
+      /* already exists */
+    }
 
     // Migrate existing JSON messages to rows
     migrateJsonMessages(db);
@@ -107,7 +118,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
     // Add embedding column to memories
     try {
       db.exec("ALTER TABLE memories ADD COLUMN embedding BLOB");
-    } catch { /* already exists */ }
+    } catch {
+      /* already exists */
+    }
 
     // Create vector search table (requires sqlite-vec)
     if (vecAvailable) {
@@ -140,9 +153,7 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
         created_at TEXT NOT NULL
       )
     `);
-    db.exec(
-      "CREATE INDEX IF NOT EXISTS idx_shell_audit_created ON shell_audit(created_at DESC)"
-    );
+    db.exec("CREATE INDEX IF NOT EXISTS idx_shell_audit_created ON shell_audit(created_at DESC)");
 
     db.pragma("user_version = 3");
     console.log("[db] migration v3 applied: shell_audit table for command execution logging");
@@ -151,7 +162,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
   if (currentVersion < 4) {
     try {
       db.exec("ALTER TABLE messages ADD COLUMN media TEXT");
-    } catch { /* already exists */ }
+    } catch {
+      /* already exists */
+    }
 
     db.pragma("user_version = 4");
     console.log("[db] migration v4 applied: media column on messages");
@@ -160,10 +173,14 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
   if (currentVersion < 5) {
     try {
       db.exec("ALTER TABLE sessions ADD COLUMN title TEXT");
-    } catch { /* already exists */ }
+    } catch {
+      /* already exists */
+    }
     try {
       db.exec("ALTER TABLE sessions ADD COLUMN archived_at TEXT");
-    } catch { /* already exists */ }
+    } catch {
+      /* already exists */
+    }
     db.pragma("user_version = 5");
     console.log("[db] migrated to v5: session title + archived_at");
   }
@@ -213,7 +230,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
         created_at TEXT NOT NULL
       )
     `);
-    db.exec("CREATE INDEX IF NOT EXISTS idx_emotion_session ON emotion_snapshots(session_id, created_at)");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_emotion_session ON emotion_snapshots(session_id, created_at)"
+    );
     db.exec("CREATE INDEX IF NOT EXISTS idx_emotion_created ON emotion_snapshots(created_at DESC)");
     db.pragma("user_version = 8");
     console.log("[db] migration v8 applied: emotion_snapshots table");
@@ -236,7 +255,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
         resolved_at TEXT
       )
     `);
-    db.exec("CREATE INDEX IF NOT EXISTS idx_residue_unresolved ON emotion_residues(resolved, unresolved_since)");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_residue_unresolved ON emotion_residues(resolved, unresolved_since)"
+    );
     db.exec(`
       CREATE TABLE IF NOT EXISTS relationship_state (
         id TEXT PRIMARY KEY DEFAULT 'singleton',
@@ -345,8 +366,12 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
         accessed_at TEXT NOT NULL
       )
     `);
-    db.exec("CREATE INDEX IF NOT EXISTS idx_access_session ON memory_access_log(session_id, accessed_at DESC)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_access_topic ON memory_access_log(topic_hash, accessed_at DESC)");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_access_session ON memory_access_log(session_id, accessed_at DESC)"
+    );
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_access_topic ON memory_access_log(topic_hash, accessed_at DESC)"
+    );
 
     // Vector table for new memory nodes
     if (vecAvailable) {
@@ -359,15 +384,19 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
     }
 
     // Migrate existing memories to memory_nodes (if legacy table exists)
-    const hasLegacyTable = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='memories'"
-    ).get();
+    const hasLegacyTable = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memories'")
+      .get();
 
     if (hasLegacyTable) {
       const legacyMemories = db.prepare("SELECT * FROM memories").all() as Array<{
-        id: string; content: string; source_channel: string;
-        source_session_id: string; embedding: Buffer | null;
-        created_at: string; updated_at: string;
+        id: string;
+        content: string;
+        source_channel: string;
+        source_session_id: string;
+        embedding: Buffer | null;
+        created_at: string;
+        updated_at: string;
       }>;
 
       const insertNode = db.prepare(`
@@ -386,8 +415,14 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
           const firstLine = m.content.split(/[.\n]/)[0].trim().slice(0, 120);
           const nodeAbstract = firstLine || m.content.slice(0, 120);
           insertNode.run(
-            m.id, nodeAbstract, m.content, m.source_channel, m.source_session_id,
-            m.embedding, m.created_at, m.updated_at
+            m.id,
+            nodeAbstract,
+            m.content,
+            m.source_channel,
+            m.source_session_id,
+            m.embedding,
+            m.created_at,
+            m.updated_at
           );
           if (insertVec && m.embedding) {
             insertVec.run(m.id, m.embedding);
@@ -395,9 +430,11 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
         }
         // Guard against crash-loop: if a previous partial migration already renamed
         // the table but user_version wasn't bumped, don't throw on re-entry.
-        const alreadyRenamed = db!.prepare(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_v1_backup'"
-        ).get();
+        const alreadyRenamed = db!
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_v1_backup'"
+          )
+          .get();
         if (!alreadyRenamed) {
           db!.exec("ALTER TABLE memories RENAME TO memories_v1_backup");
         }
@@ -408,7 +445,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
       // even when sqlite-vec is unavailable at this startup
       try {
         db.exec("DROP TABLE IF EXISTS memory_vec");
-      } catch { /* may not exist */ }
+      } catch {
+        /* may not exist */
+      }
 
       console.log(`[db] migrated ${legacyMemories.length} legacy memories to memory_nodes`);
     }
@@ -417,7 +456,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
     // Must be set outside any transaction to take effect reliably.
     db.pragma("user_version = 11");
 
-    console.log("[db] migration v11 applied: cognitive memory system (memory_nodes, memory_edges, memory_access_log)");
+    console.log(
+      "[db] migration v11 applied: cognitive memory system (memory_nodes, memory_edges, memory_access_log)"
+    );
   }
 
   if (currentVersion < 12) {
@@ -509,7 +550,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
     }
 
     db.pragma("user_version = 13");
-    console.log("[db] migration v13 applied: knowledge_resources table + memory_nodes.source_resource_id");
+    console.log(
+      "[db] migration v13 applied: knowledge_resources table + memory_nodes.source_resource_id"
+    );
   }
 
   if (currentVersion < 14) {
@@ -697,7 +740,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
       )
     `);
     db.exec("CREATE INDEX IF NOT EXISTS idx_oe_action ON observation_events(action_id)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_oe_session_ts ON observation_events(session_id, ts DESC)");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_oe_session_ts ON observation_events(session_id, ts DESC)"
+    );
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS audit_log (
@@ -720,7 +765,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
     db.exec("CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event_type, created_at DESC)");
 
     db.pragma("user_version = 23");
-    console.log("[db] migration v23 applied: action_events, observation_events, audit_log (typed audit trail)");
+    console.log(
+      "[db] migration v23 applied: action_events, observation_events, audit_log (typed audit trail)"
+    );
   }
 
   if (currentVersion < 24) {
@@ -804,7 +851,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
         last_synced_at TEXT NOT NULL
       )
     `);
-    db.exec("CREATE INDEX IF NOT EXISTS idx_tem_synced ON tool_embedding_meta(last_synced_at DESC)");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_tem_synced ON tool_embedding_meta(last_synced_at DESC)"
+    );
 
     // Vec0 virtual table for KNN search. Dimension matches the active
     // embedder. If embedder swap changes the dimension, callers should
@@ -826,7 +875,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
     ).run("tool-embedding-sync", ONE_HOUR, seedNow26);
 
     db.pragma("user_version = 26");
-    console.log("[db] migration v26 applied: tool_embedding_meta + tool_vec (Phase F semantic router)");
+    console.log(
+      "[db] migration v26 applied: tool_embedding_meta + tool_vec (Phase F semantic router)"
+    );
   }
 
   if (currentVersion < 27) {
@@ -845,8 +896,12 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
         created_at INTEGER NOT NULL
       )
     `);
-    db.exec("CREATE INDEX IF NOT EXISTS idx_orch_ck_session_round ON orchestrator_checkpoints(session_id, round DESC)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_orch_ck_created ON orchestrator_checkpoints(created_at DESC)");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_orch_ck_session_round ON orchestrator_checkpoints(session_id, round DESC)"
+    );
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_orch_ck_created ON orchestrator_checkpoints(created_at DESC)"
+    );
 
     // Daily prune job — drops checkpoints older than the configured retention
     // window (default 7 days). Re-uses the existing system_jobs / job-runner
@@ -888,8 +943,12 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
         expires_at INTEGER NOT NULL
       )
     `);
-    db.exec("CREATE INDEX IF NOT EXISTS idx_approvals_session_status ON approvals(session_id, status, created_at DESC)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_approvals_status_expires ON approvals(status, expires_at)");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_approvals_session_status ON approvals(session_id, status, created_at DESC)"
+    );
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_approvals_status_expires ON approvals(status, expires_at)"
+    );
 
     // Periodic job: every 5 minutes, transition expired pending rows so the
     // UI never shows a stale "waiting" prompt after the gate timed out.
@@ -962,7 +1021,9 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
         if (!(e instanceof Error) || !e.message.includes("duplicate column")) throw e;
       }
     }
-    db.exec("CREATE INDEX IF NOT EXISTS idx_cognitive_loop_runs_parent ON cognitive_loop_runs(parent_loop_id, created_at DESC)");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_cognitive_loop_runs_parent ON cognitive_loop_runs(parent_loop_id, created_at DESC)"
+    );
     db.pragma("user_version = 30");
     console.log("[db] migration v30 applied: cognitive loop run lineage");
   }
@@ -985,5 +1046,10 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
   if (currentVersion < 34) {
     migrateEvaluationRunsV34(db);
     console.log("[db] migration v34 applied: immutable evaluation run reports");
+  }
+
+  if (currentVersion < 35) {
+    migrateMemoryBlocksV35(db);
+    console.log("[db] migration v35 applied: versioned stable memory blocks");
   }
 }
