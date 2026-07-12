@@ -7,7 +7,7 @@ import { FirstRunTour } from "../onboarding/FirstRunTour";
 import { ChatPanel } from "../chat/ChatPanel";
 import { SchedulesPanel } from "../panels/SchedulesPanel";
 import { WebhooksPanel } from "../panels/WebhooksPanel";
-import { MemoryInsightsDashboard } from "../memory/MemoryInsightsDashboard";
+import { MemoryPanel } from "../panels/MemoryPanel";
 import { PersonaPanel } from "../panels/PersonaPanel";
 import { BrainPanel } from "../panels/BrainPanel";
 import { SkillDetailPanel } from "../panels/SkillDetailPanel";
@@ -88,7 +88,12 @@ const PANEL_META: Record<string, { title: string; subtitle: string; width?: numb
   brain: { title: "Brain", subtitle: "LLM, persona & memory", info: "Central AI configuration — model, behavior, persona, and memory." },
   schedules: { title: "Schedules", subtitle: "Automated tasks & pulse", info: "Automated tasks that run on a cron schedule." },
   webhooks: { title: "Webhooks", subtitle: "External event subscriptions", info: "Incoming triggers from external services like GitHub or Notion." },
-  memory: { title: "Memory", subtitle: "Learned facts & context", info: "Facts your AI has learned and remembers across conversations." },
+  memory: {
+    title: "Memory",
+    subtitle: "Stable beliefs & associative context",
+    width: 860,
+    info: "Inspect and correct revisioned stable beliefs, or explore associative memories learned from conversations.",
+  },
   knowledge: { title: "Knowledge", subtitle: "Documents, URLs & resources", info: "Ingested documents, URLs, and resources for context." },
   persona: { title: "Persona", subtitle: "Identity & directives", info: "Your AI's identity, tone, style, and communication boundaries." },
   skills: { title: "Skills", subtitle: "Behavioral skills & workflows", info: "Behavioral skills that shape how your AI responds." },
@@ -120,7 +125,7 @@ function PanelContent({ panel }: { panel: string }) {
     case "webhooks":
       return <WebhooksPanel />;
     case "memory":
-      return <MemoryInsightsDashboard />;
+      return <MemoryPanel />;
     case "knowledge":
       return <KnowledgePanel />;
     case "persona":

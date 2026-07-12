@@ -205,7 +205,7 @@ Every batch must preserve these properties:
 
 ### B13 — Memory inspector and correction UI
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** B12
 - **Outcome:** Let users inspect, edit, lock, verify, and restore what Chvor believes.
 - **Acceptance criteria:**

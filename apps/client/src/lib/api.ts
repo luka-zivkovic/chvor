@@ -87,7 +87,8 @@ import type {
 } from "@chvor/shared";
 import { createEvaluationCasesApi } from "./evaluation-cases-api";
 import { createEvaluationRunsApi } from "./evaluation-runs-api";
-import { responseErrorMessage } from "./http-error";
+import { HttpError, responseHttpError } from "./http-error";
+import { createMemoryBlocksApi } from "./memory-blocks-api";
 export interface ProvidersResponse {
   llm: LLMProviderDef[];
   embedding: EmbeddingProviderDef[];
@@ -255,12 +256,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // Session expired or not authenticated — notify session store
     const { useSessionStore } = await import("../stores/session-store");
     useSessionStore.getState().setAuthenticated(false);
-    throw new Error("Session expired");
+    throw new HttpError(401, "Session expired");
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(responseErrorMessage(body, `HTTP ${res.status}`));
+    const body = await res.json().catch(() => undefined);
+    throw responseHttpError(res.status, body, `HTTP ${res.status}`);
   }
 
   const json = (await res.json()) as { data: T };
@@ -272,14 +273,14 @@ async function requestText(path: string): Promise<string> {
   if (res.status === 401) {
     const { useSessionStore } = await import("../stores/session-store");
     useSessionStore.getState().setAuthenticated(false);
-    throw new Error("Session expired");
+    throw new HttpError(401, "Session expired");
   }
   if (!res.ok) {
     const body = await res.text();
     try {
-      throw new Error(responseErrorMessage(JSON.parse(body) as unknown, `HTTP ${res.status}`));
+      throw responseHttpError(res.status, JSON.parse(body) as unknown, `HTTP ${res.status}`);
     } catch (error) {
-      if (error instanceof SyntaxError) throw new Error(body || `HTTP ${res.status}`);
+      if (error instanceof SyntaxError) throw new HttpError(res.status, body || `HTTP ${res.status}`);
       throw error;
     }
   }
@@ -587,10 +588,9 @@ export const api = {
         ({ trajectory }) => trajectory
       ),
   },
-
   evaluationCases: createEvaluationCasesApi(request, requestText),
   evaluationRuns: createEvaluationRunsApi(request),
-
+  memoryBlocks: createMemoryBlocksApi(request),
   retention: {
     get: () => request<RetentionConfig>("/config/retention"),
     update: (body: UpdateRetentionRequest) =>
@@ -922,7 +922,7 @@ export const api = {
       if (res.status === 401) {
         const { useSessionStore } = await import("../stores/session-store");
         useSessionStore.getState().setAuthenticated(false);
-        throw new Error("Session expired");
+        throw new HttpError(401, "Session expired");
       }
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Restore failed" }));
