@@ -205,7 +205,8 @@ Every batch must preserve these properties:
 
 ### B13 — Memory inspector and correction UI
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#116](https://github.com/luka-zivkovic/chvor/pull/116)
 - **Dependencies:** B12
 - **Outcome:** Let users inspect, edit, lock, verify, and restore what Chvor believes.
 - **Acceptance criteria:**
