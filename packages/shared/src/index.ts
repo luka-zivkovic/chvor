@@ -40,6 +40,7 @@ export * from "./types/evaluation-run.js";
 export * from "./types/context.js";
 export * from "./types/context-assembly.js";
 export * from "./types/memory-block.js";
+export * from "./types/integration-manifest.js";
 
 // Lib
 export * from "./lib/validate-skill.js";

@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { resolveIntegration } from "../lib/integration-resolver.ts";
+import { resolveIntegrationManifests } from "../lib/integration-manifest-resolver.ts";
 import { researchIntegration } from "../lib/integration-research.ts";
+import { getLoadedToolsSnapshot } from "../lib/capability-loader.ts";
+import { getNativeToolGroupMap, getNativeToolTarget } from "../lib/native-tools/index.ts";
+import { DIRECT_OAUTH_PROVIDERS } from "../lib/oauth-providers.ts";
 import type {
   IntegrationCatalogEntry,
   IntegrationCatalogResponse,
@@ -18,6 +22,34 @@ import { fetchRegistryIndex, readCachedIndex } from "../lib/registry-client.ts";
 import { readLock } from "../lib/registry-manager.ts";
 
 const integrations = new Hono();
+
+// This cached/read-only catalog API never scans files, creates user directories,
+// or runs the legacy cleanup performed by a cold loadTools().
+integrations.get("/manifests", (c) => {
+  c.header("Cache-Control", "no-store");
+  const tools = getLoadedToolsSnapshot();
+  if (!tools) {
+    return c.json(
+      {
+        error: {
+          code: "CAPABILITY_CATALOG_NOT_READY",
+          message: "The active integration catalog is still initializing. Retry shortly.",
+        },
+      },
+      503
+    );
+  }
+  const nativeToolBindings = Object.keys(getNativeToolGroupMap()).flatMap((operation) => {
+    const target = getNativeToolTarget(operation);
+    return target?.kind === "tool" ? [{ capabilityId: target.id, operation }] : [];
+  });
+  const result = resolveIntegrationManifests({
+    tools,
+    nativeToolBindings,
+    directOAuthProviders: DIRECT_OAUTH_PROVIDERS,
+  });
+  return c.json({ data: result });
+});
 
 // ── Simple rate limiter (5 req/min per IP) ──────────────────────
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
