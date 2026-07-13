@@ -155,6 +155,15 @@ export function loadTools(force = false): Tool[] {
   return loadAll(force).tools;
 }
 
+/**
+ * Return the active, deduplicated tool catalog only when startup has already
+ * initialized it. This accessor performs no filesystem reads, directory
+ * creation, legacy cleanup, registry reads, or error logging.
+ */
+export function getLoadedToolsSnapshot(): readonly Tool[] | null {
+  return cachedTools ? Object.freeze([...cachedTools]) : null;
+}
+
 export function getSkill(id: string): Skill | undefined {
   return loadSkills().find((s) => s.id === id);
 }
@@ -174,4 +183,3 @@ export function reloadAll(): { skills: Skill[]; tools: Tool[] } {
 export function reloadSkills(): Skill[] {
   return loadSkills(true);
 }
-

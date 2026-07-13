@@ -8,6 +8,28 @@ vi.mock("../../lib/integration-research.ts", () => ({
   researchIntegration: vi.fn(),
 }));
 
+const manifestMocks = vi.hoisted(() => ({
+  resolve: vi.fn(),
+  getLoadedToolsSnapshot: vi.fn(),
+  getNativeToolGroupMap: vi.fn(),
+  getNativeToolTarget: vi.fn(),
+  loadTools: vi.fn(),
+}));
+
+vi.mock("../../lib/integration-manifest-resolver.ts", () => ({
+  resolveIntegrationManifests: manifestMocks.resolve,
+}));
+
+vi.mock("../../lib/capability-loader.ts", () => ({
+  getLoadedToolsSnapshot: manifestMocks.getLoadedToolsSnapshot,
+  loadTools: manifestMocks.loadTools,
+}));
+
+vi.mock("../../lib/native-tools/index.ts", () => ({
+  getNativeToolGroupMap: manifestMocks.getNativeToolGroupMap,
+  getNativeToolTarget: manifestMocks.getNativeToolTarget,
+}));
+
 import { resolveIntegration } from "../../lib/integration-resolver.ts";
 import { researchIntegration } from "../../lib/integration-research.ts";
 
@@ -32,6 +54,53 @@ beforeEach(() => {
     credentialType: "test",
     fields: [{ key: "apiKey", label: "API Key", type: "password" }],
     confidence: "inferred",
+  });
+  manifestMocks.getLoadedToolsSnapshot.mockReturnValue([]);
+  manifestMocks.getNativeToolGroupMap.mockReturnValue({});
+  manifestMocks.getNativeToolTarget.mockReturnValue(null);
+  manifestMocks.resolve.mockReturnValue({ manifests: [], diagnostics: [] });
+});
+
+describe("GET /manifests", () => {
+  it("uses the complete read-only catalog snapshot and native bindings", async () => {
+    const tool = { id: "active-tool", kind: "tool" };
+    const snapshot = { manifests: [{ id: "tool.active-tool" }], diagnostics: [] };
+    manifestMocks.getLoadedToolsSnapshot.mockReturnValue([tool]);
+    manifestMocks.getNativeToolGroupMap.mockReturnValue({ native__active: {} });
+    manifestMocks.getNativeToolTarget.mockReturnValue({ kind: "tool", id: "active-tool" });
+    manifestMocks.resolve.mockReturnValue(snapshot);
+
+    const res = await request("/manifests");
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(manifestMocks.getLoadedToolsSnapshot).toHaveBeenCalledOnce();
+    expect(manifestMocks.loadTools).not.toHaveBeenCalled();
+    expect(manifestMocks.resolve).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: [tool],
+        nativeToolBindings: [
+          { capabilityId: "active-tool", operation: "native__active" },
+        ],
+      })
+    );
+    expect(await res.json()).toEqual({ data: snapshot });
+  });
+
+  it("returns an actionable retry response before the snapshot is initialized", async () => {
+    manifestMocks.getLoadedToolsSnapshot.mockReturnValue(null);
+
+    const res = await request("/manifests");
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(manifestMocks.resolve).not.toHaveBeenCalled();
+    expect(await res.json()).toEqual({
+      error: {
+        code: "CAPABILITY_CATALOG_NOT_READY",
+        message: "The active integration catalog is still initializing. Retry shortly.",
+      },
+    });
   });
 });
 

@@ -30,5 +30,13 @@
   {
     "path": "apps/server/src/db/migrations.ts",
     "reason": "Historical sequential migration registry for schema versions 1-35; older inline migrations must remain byte-stable while new migrations are already split into dedicated modules."
+  },
+  {
+    "path": "packages/shared/src/types/integration-manifest.ts",
+    "reason": "Security-sensitive versioned wire contract whose exported subschemas, cross-field validation, hostile-input cloning, and redacted diagnostics must evolve atomically so adapters cannot validate against a partially updated manifest definition."
+  },
+  {
+    "path": "apps/server/src/lib/integration-manifest-resolver.ts",
+    "reason": "Pure compatibility boundary that coordinates deterministic identity, secret-free adaptation, fail-isolated diagnostics, and cross-source joins for six legacy integration catalogs; splitting the shared traversal would risk inconsistent IDs or partial error isolation."
   }
 ]

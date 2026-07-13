@@ -219,7 +219,7 @@ Every batch must preserve these properties:
 
 ### C01 — Versioned integration manifest
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** A01
 - **Outcome:** Define one declarative contract for built-in, registry, MCP, and synthesized integrations.
 - **Acceptance criteria:**

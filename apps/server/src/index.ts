@@ -137,7 +137,7 @@ import {
 } from "./lib/tool-embedding-job.ts";
 import { startConsolidation, stopConsolidation } from "./lib/memory-consolidation.ts";
 import { initJobRunner, stopAllPeriodicJobs } from "./lib/job-runner.ts";
-import { reloadAll } from "./lib/capability-loader.ts";
+import { loadAll, reloadAll } from "./lib/capability-loader.ts";
 import { homedir } from "node:os";
 import { serializeError, httpStatusFor, isChvorError } from "./lib/errors.ts";
 import { logError } from "./lib/error-logger.ts";
@@ -689,6 +689,11 @@ if (process.env.NODE_ENV === "production") {
 
 // --- Start ---
 const port = parseInt(process.env.PORT ?? "9147", 10);
+
+// Initialize the active capability catalog before the server accepts requests.
+// Read-only endpoints can then consume the cached snapshot without performing
+// request-time filesystem or migration work.
+loadAll();
 
 // Warn if no LLM provider is configured
 const hasLLM =
