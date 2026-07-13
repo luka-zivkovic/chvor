@@ -219,7 +219,8 @@ Every batch must preserve these properties:
 
 ### C01 — Versioned integration manifest
 
-- **Status:** Active
+- **Status:** Merged
+- **PR:** [#117](https://github.com/luka-zivkovic/chvor/pull/117)
 - **Dependencies:** A01
 - **Outcome:** Define one declarative contract for built-in, registry, MCP, and synthesized integrations.
 - **Acceptance criteria:**
