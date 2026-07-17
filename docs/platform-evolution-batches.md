@@ -232,6 +232,7 @@ Every batch must preserve these properties:
 ### C02 — Manifest-driven setup and reauthentication
 
 - **Status:** Active
+- **PR:** [#118](https://github.com/luka-zivkovic/chvor/pull/118)
 - **Dependencies:** C01
 - **Outcome:** Use one resumable setup state machine for credentials, OAuth, discovery, reconfiguration, and reauthentication.
 - **Acceptance criteria:**
