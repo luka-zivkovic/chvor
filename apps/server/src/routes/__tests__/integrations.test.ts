@@ -10,6 +10,7 @@ vi.mock("../../lib/integration-research.ts", () => ({
 
 vi.mock("../../lib/registry-client.ts", () => ({
   fetchRegistryIndex: vi.fn().mockResolvedValue({ entries: [] }),
+  getDefaultRegistryUrl: vi.fn().mockReturnValue("https://registry.chvor.ai/v1"),
   readCachedIndex: vi.fn().mockReturnValue({ entries: [] }),
 }));
 
