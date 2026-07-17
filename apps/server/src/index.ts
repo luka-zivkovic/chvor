@@ -82,9 +82,14 @@ import evaluationRunsRoute from "./routes/evaluation-runs.ts";
 import memoryBlocksRoute from "./routes/memory-blocks.ts";
 import resumeRoute from "./routes/orchestrator-resume.ts";
 import sessionPinsRoute from "./routes/session-pins.ts";
+import integrationSetupRoute from "./routes/integration-setup.ts";
 import adminRoute, { registerShutdownHandler } from "./routes/admin.ts";
 import { initDocker } from "./lib/sandbox.ts";
 import { startOAuthTokenRefresh, stopOAuthTokenRefresh } from "./lib/oauth-token-refresh.ts";
+import {
+  startIntegrationSetupCleanup,
+  stopIntegrationSetupCleanup,
+} from "./lib/integration-setup-cleanup.ts";
 import {
   handlePcAgentConnection,
   handlePcAgentMessage,
@@ -459,6 +464,7 @@ app.route("/api/config/sandbox", sandboxRoute);
 app.route("/api/daemon", daemonRoute);
 app.route("/api/cognitive-loops", cognitiveLoopRoute);
 app.route("/api/integrations", integrationsRoute);
+app.route("/api/integration-setup", integrationSetupRoute);
 app.route("/api/debug", debugRoute);
 app.route("/api/audit", auditRoute);
 app.route("/api/approvals", approvalsRoute);
@@ -832,6 +838,7 @@ startSkillWatcher([skillsDir, toolsDir], () => {
 startAutoUpdate((event) => wsManager.broadcast(event));
 startBackupScheduler();
 startOAuthTokenRefresh();
+startIntegrationSetupCleanup();
 
 // Graceful shutdown — drain WS, stop background jobs, flush logs, then exit.
 //
@@ -869,6 +876,7 @@ async function gracefulShutdown(reason: string = "signal"): Promise<void> {
     stopDailyResetCheck();
     stopBrowserSweep();
     stopOAuthTokenRefresh();
+    stopIntegrationSetupCleanup();
     stopAudioCleanup();
     stopSkillWatcher();
     stopAutoUpdate();

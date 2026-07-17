@@ -1,10 +1,12 @@
 import { z } from "zod";
 
-/** The only integration-manifest schema version understood by this reader. */
-export const INTEGRATION_MANIFEST_SCHEMA_VERSION = 1 as const;
+/** Versioned integration-manifest compatibility boundary. */
+export const INTEGRATION_MANIFEST_V1_SCHEMA_VERSION = 1 as const;
+export const INTEGRATION_MANIFEST_V2_SCHEMA_VERSION = 2 as const;
+export const INTEGRATION_MANIFEST_SCHEMA_VERSION = INTEGRATION_MANIFEST_V2_SCHEMA_VERSION;
 export const INTEGRATION_MANIFEST_MIN_SCHEMA_VERSION = 1 as const;
-export const INTEGRATION_MANIFEST_MAX_SCHEMA_VERSION = 1 as const;
-export const SUPPORTED_INTEGRATION_MANIFEST_SCHEMA_VERSIONS = [1] as const;
+export const INTEGRATION_MANIFEST_MAX_SCHEMA_VERSION = 2 as const;
+export const SUPPORTED_INTEGRATION_MANIFEST_SCHEMA_VERSIONS = [1, 2] as const;
 export const INTEGRATION_MANIFEST_SUPPORTED_SCHEMA_VERSIONS =
   SUPPORTED_INTEGRATION_MANIFEST_SCHEMA_VERSIONS;
 export const INTEGRATION_MANIFEST_SUPPORTED_VERSIONS =
@@ -34,6 +36,7 @@ const ID_PATTERN = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 const SEMVER_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?:[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const ENVIRONMENT_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+const CREDENTIAL_STORAGE_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*$/;
 const HOST_PATTERN =
   /^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const PARAMETER_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_.~-]{0,127}$/;
@@ -49,6 +52,17 @@ const SAFE_STATIC_OAUTH_PARAMETER_NAMES = new Set([
   "grant_type",
   "prompt",
   "resource",
+]);
+const UNSAFE_CREDENTIAL_STORAGE_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "hasOwnProperty",
+  "isPrototypeOf",
+  "propertyIsEnumerable",
+  "prototype",
+  "toLocaleString",
+  "toString",
+  "valueOf",
 ]);
 const HTTP_PATH_VALIDATION_BASE = new URL("https://integration-manifest.invalid/");
 
@@ -143,57 +157,112 @@ export const integrationSourceSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const integrationCredentialSensitivitySchema = z.enum(["secret", "text", "url", "path"]);
-const credentialFieldBase = {
+export const integrationCredentialStorageKeySchema = z
+  .string()
+  .min(1)
+  .max(INTEGRATION_MANIFEST_LIMITS.id)
+  .regex(
+    CREDENTIAL_STORAGE_KEY_PATTERN,
+    "storage key must use bounded alphanumeric dot, dash, or underscore segments"
+  )
+  .refine(
+    (value) => !UNSAFE_CREDENTIAL_STORAGE_KEYS.has(value),
+    "storage key must not shadow an unsafe object property"
+  );
+const credentialFieldV1Base = {
   id: integrationManifestIdSchema,
   label: nameSchema,
   description: descriptionSchema,
   required: z.boolean(),
 };
-const secretCredentialFieldSchema = z
-  .object({
-    ...credentialFieldBase,
-    sensitivity: z.literal("secret"),
-    default: z.never().optional(),
-  })
-  .strict();
-const textCredentialFieldSchema = z
-  .object({
-    ...credentialFieldBase,
-    sensitivity: z.literal("text"),
-    default: z.string().max(INTEGRATION_MANIFEST_LIMITS.reference).optional(),
-  })
-  .strict();
-const urlCredentialFieldSchema = z
-  .object({
-    ...credentialFieldBase,
-    sensitivity: z.literal("url"),
-    default: httpsUrlSchema.optional(),
-  })
-  .strict();
-const pathCredentialFieldSchema = z
-  .object({
-    ...credentialFieldBase,
-    sensitivity: z.literal("path"),
-    default: pathSchema.optional(),
-  })
-  .strict();
-export const integrationCredentialFieldSchema = z.discriminatedUnion("sensitivity", [
-  secretCredentialFieldSchema,
-  textCredentialFieldSchema,
-  urlCredentialFieldSchema,
-  pathCredentialFieldSchema,
-]);
-export const integrationCredentialSchema = z
-  .object({
-    id: integrationManifestIdSchema,
-    name: nameSchema,
-    description: descriptionSchema,
-    fields: z
-      .array(integrationCredentialFieldSchema)
-      .min(1)
-      .max(INTEGRATION_MANIFEST_LIMITS.fields),
-  })
-  .strict();
+const credentialFieldV2Base = {
+  ...credentialFieldV1Base,
+  storageKey: integrationCredentialStorageKeySchema.optional(),
+};
+function credentialFieldSchemas<T extends z.ZodRawShape>(base: T) {
+  const secret = z
+    .object({
+      ...base,
+      sensitivity: z.literal("secret"),
+      default: z.never().optional(),
+    })
+    .strict();
+  const text = z
+    .object({
+      ...base,
+      sensitivity: z.literal("text"),
+      default: z.string().max(INTEGRATION_MANIFEST_LIMITS.reference).optional(),
+    })
+    .strict();
+  const url = z
+    .object({
+      ...base,
+      sensitivity: z.literal("url"),
+      default: httpsUrlSchema.optional(),
+    })
+    .strict();
+  const path = z
+    .object({
+      ...base,
+      sensitivity: z.literal("path"),
+      default: pathSchema.optional(),
+    })
+    .strict();
+  return z.discriminatedUnion("sensitivity", [secret, text, url, path]);
+}
+
+export const integrationCredentialFieldV1Schema = credentialFieldSchemas(credentialFieldV1Base);
+export const integrationCredentialFieldV2Schema = credentialFieldSchemas(credentialFieldV2Base);
+/** Backward-compatible unversioned alias for the original V1 field contract. */
+export const integrationCredentialFieldSchema = integrationCredentialFieldV1Schema;
+export const currentIntegrationCredentialFieldSchema = integrationCredentialFieldV2Schema;
+
+function credentialSchema<T extends z.ZodTypeAny>(fieldSchema: T) {
+  return z
+    .object({
+      id: integrationManifestIdSchema,
+      name: nameSchema,
+      description: descriptionSchema,
+      fields: z.array(fieldSchema).min(1).max(INTEGRATION_MANIFEST_LIMITS.fields),
+    })
+    .strict();
+}
+
+export const integrationCredentialV1Schema = credentialSchema(integrationCredentialFieldV1Schema);
+export const integrationCredentialV2Schema = credentialSchema(
+  integrationCredentialFieldV2Schema
+).superRefine((credential, context) => {
+  const seen = new Set<string>();
+  credential.fields.forEach((field, index) => {
+    const effectiveStorageKey = field.storageKey ?? field.id;
+    if (!integrationCredentialStorageKeySchema.safeParse(effectiveStorageKey).success) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fields", index, field.storageKey === undefined ? "id" : "storageKey"],
+        message: "Effective credential storage key is unsafe.",
+        params: {
+          code: "security_violation",
+          hint: "Use a non-reserved alphanumeric storage key with bounded dot, dash, or underscore segments.",
+        },
+      });
+    }
+    if (seen.has(effectiveStorageKey)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fields", index, field.storageKey === undefined ? "id" : "storageKey"],
+        message: "Effective credential storage key must be unique within a credential.",
+        params: {
+          code: "duplicate_id",
+          hint: "Choose a unique storageKey, or omit it when the normalized field ID is the runtime key.",
+        },
+      });
+    }
+    seen.add(effectiveStorageKey);
+  });
+});
+/** Backward-compatible unversioned alias for the original V1 component contract. */
+export const integrationCredentialSchema = integrationCredentialV1Schema;
+export const currentIntegrationCredentialSchema = integrationCredentialV2Schema;
 export const integrationCredentialFieldRefSchema = z
   .object({ credentialId: integrationManifestIdSchema, fieldId: integrationManifestIdSchema })
   .strict();
@@ -323,10 +392,26 @@ const oauthCommonShape = {
   id: integrationManifestIdSchema,
   scopes: z.array(referenceSchema).min(1).max(INTEGRATION_MANIFEST_LIMITS.scopes),
 };
-const directOauthSchema = z
+const directOauthV1Schema = z
   .object({
     ...oauthCommonShape,
     mode: z.literal("direct"),
+    authorizationUrl: endpointUrlSchema,
+    tokenUrl: endpointUrlSchema,
+    authorizationParams: z
+      .array(oauthParameterSchema)
+      .max(INTEGRATION_MANIFEST_LIMITS.fields)
+      .optional(),
+    tokenParams: z.array(oauthParameterSchema).max(INTEGRATION_MANIFEST_LIMITS.fields).optional(),
+    clientId: integrationCredentialFieldRefSchema,
+    clientSecret: integrationCredentialFieldRefSchema.optional(),
+  })
+  .strict();
+const directOauthV2Schema = z
+  .object({
+    ...oauthCommonShape,
+    mode: z.literal("direct"),
+    provider: integrationManifestIdSchema,
     authorizationUrl: endpointUrlSchema,
     tokenUrl: endpointUrlSchema,
     authorizationParams: z
@@ -346,10 +431,17 @@ const brokerOauthSchema = z
     provider: integrationManifestIdSchema,
   })
   .strict();
-export const integrationOauthSchema = z.discriminatedUnion("mode", [
-  directOauthSchema,
+export const integrationOauthV1Schema = z.discriminatedUnion("mode", [
+  directOauthV1Schema,
   brokerOauthSchema,
 ]);
+export const integrationOauthV2Schema = z.discriminatedUnion("mode", [
+  directOauthV2Schema,
+  brokerOauthSchema,
+]);
+/** Backward-compatible unversioned alias for the original V1 component contract. */
+export const integrationOauthSchema = integrationOauthV1Schema;
+export const currentIntegrationOauthSchema = integrationOauthV2Schema;
 
 export const integrationCapabilitySchema = z
   .object({
@@ -652,28 +744,42 @@ function refKey(ref: z.infer<typeof integrationCredentialFieldRefSchema>): strin
   return `${ref.credentialId}:${ref.fieldId}`;
 }
 
+const integrationManifestCommonShape = {
+  id: integrationManifestIdSchema,
+  version: integrationManifestSemverSchema,
+  name: nameSchema,
+  description: descriptionSchema,
+  ownership: integrationOwnerSchema,
+  source: integrationSourceSchema,
+  mcpServers: z.array(integrationMcpServerSchema).max(INTEGRATION_MANIFEST_LIMITS.items),
+  tools: z.array(integrationToolSchema).max(INTEGRATION_MANIFEST_LIMITS.items),
+  capabilities: z.array(integrationCapabilitySchema).max(INTEGRATION_MANIFEST_LIMITS.items),
+  requestedAccess: integrationRequestedAccessSchema,
+  setup: z.array(integrationSetupStepSchema).max(INTEGRATION_MANIFEST_LIMITS.items),
+  diagnostics: z.array(integrationDiagnosticCheckSchema).max(INTEGRATION_MANIFEST_LIMITS.items),
+  quality: integrationQualitySchema,
+};
+
 const integrationManifestV1BaseSchema = z
   .object({
-    schemaVersion: z.literal(INTEGRATION_MANIFEST_SCHEMA_VERSION),
-    id: integrationManifestIdSchema,
-    version: integrationManifestSemverSchema,
-    name: nameSchema,
-    description: descriptionSchema,
-    ownership: integrationOwnerSchema,
-    source: integrationSourceSchema,
-    mcpServers: z.array(integrationMcpServerSchema).max(INTEGRATION_MANIFEST_LIMITS.items),
-    tools: z.array(integrationToolSchema).max(INTEGRATION_MANIFEST_LIMITS.items),
-    credentials: z.array(integrationCredentialSchema).max(INTEGRATION_MANIFEST_LIMITS.items),
-    oauth: z.array(integrationOauthSchema).max(INTEGRATION_MANIFEST_LIMITS.items),
-    capabilities: z.array(integrationCapabilitySchema).max(INTEGRATION_MANIFEST_LIMITS.items),
-    requestedAccess: integrationRequestedAccessSchema,
-    setup: z.array(integrationSetupStepSchema).max(INTEGRATION_MANIFEST_LIMITS.items),
-    diagnostics: z.array(integrationDiagnosticCheckSchema).max(INTEGRATION_MANIFEST_LIMITS.items),
-    quality: integrationQualitySchema,
+    schemaVersion: z.literal(INTEGRATION_MANIFEST_V1_SCHEMA_VERSION),
+    ...integrationManifestCommonShape,
+    credentials: z.array(integrationCredentialV1Schema).max(INTEGRATION_MANIFEST_LIMITS.items),
+    oauth: z.array(integrationOauthV1Schema).max(INTEGRATION_MANIFEST_LIMITS.items),
+  })
+  .strict();
+const integrationManifestV2BaseSchema = z
+  .object({
+    schemaVersion: z.literal(INTEGRATION_MANIFEST_V2_SCHEMA_VERSION),
+    ...integrationManifestCommonShape,
+    credentials: z.array(integrationCredentialV2Schema).max(INTEGRATION_MANIFEST_LIMITS.items),
+    oauth: z.array(integrationOauthV2Schema).max(INTEGRATION_MANIFEST_LIMITS.items),
   })
   .strict();
 
-type ManifestData = z.infer<typeof integrationManifestV1BaseSchema>;
+type ManifestData =
+  | z.infer<typeof integrationManifestV1BaseSchema>
+  | z.infer<typeof integrationManifestV2BaseSchema>;
 type CredentialField = z.infer<typeof integrationCredentialFieldSchema>;
 type CredentialRef = z.infer<typeof integrationCredentialFieldRefSchema>;
 
@@ -1079,6 +1185,14 @@ function validateManifestSemantics(manifest: ManifestData, context: z.Refinement
 
 const integrationManifestV1DataSchema =
   integrationManifestV1BaseSchema.superRefine(validateManifestSemantics);
+const integrationManifestV2DataSchema =
+  integrationManifestV2BaseSchema.superRefine(validateManifestSemantics);
+const integrationManifestDataSchema = z
+  .discriminatedUnion("schemaVersion", [
+    integrationManifestV1BaseSchema,
+    integrationManifestV2BaseSchema,
+  ])
+  .superRefine(validateManifestSemantics);
 
 interface CloneState {
   seen: Set<object>;
@@ -1200,15 +1314,27 @@ const integrationManifestPlainInputSchema = z.unknown().transform((value, contex
 export const integrationManifestV1Schema = integrationManifestPlainInputSchema.pipe(
   integrationManifestV1DataSchema
 );
-export const integrationManifestSchema = integrationManifestV1Schema;
+export const integrationManifestV2Schema = integrationManifestPlainInputSchema.pipe(
+  integrationManifestV2DataSchema
+);
+export const integrationManifestSchema = integrationManifestPlainInputSchema.pipe(
+  integrationManifestDataSchema
+);
+export const currentIntegrationManifestSchema = integrationManifestV2Schema;
 
 export type IntegrationOwner = z.infer<typeof integrationOwnerSchema>;
 export type IntegrationSource = z.infer<typeof integrationSourceSchema>;
-export type IntegrationCredential = z.infer<typeof integrationCredentialSchema>;
+export type IntegrationCredentialV1 = z.infer<typeof integrationCredentialV1Schema>;
+export type IntegrationCredentialV2 = z.infer<typeof integrationCredentialV2Schema>;
+export type IntegrationCredential = IntegrationCredentialV1;
+export type CurrentIntegrationCredential = IntegrationCredentialV2;
 export type IntegrationCredentialFieldRef = z.infer<typeof integrationCredentialFieldRefSchema>;
 export type IntegrationTool = z.infer<typeof integrationToolSchema>;
 export type IntegrationMcpServer = z.infer<typeof integrationMcpServerSchema>;
-export type IntegrationOauth = z.infer<typeof integrationOauthSchema>;
+export type IntegrationOauthV1 = z.infer<typeof integrationOauthV1Schema>;
+export type IntegrationOauthV2 = z.infer<typeof integrationOauthV2Schema>;
+export type IntegrationOauth = IntegrationOauthV1;
+export type CurrentIntegrationOauth = IntegrationOauthV2;
 export type IntegrationCapability = z.infer<typeof integrationCapabilitySchema>;
 export type IntegrationRequestedAccess = z.infer<typeof integrationRequestedAccessSchema>;
 export type IntegrationSetupStep = z.infer<typeof integrationSetupStepSchema>;
@@ -1216,10 +1342,12 @@ export type IntegrationDiagnosticCheck = z.infer<typeof integrationDiagnosticChe
 export type IntegrationQuality = z.infer<typeof integrationQualitySchema>;
 export type IntegrationManifestDiagnostic = z.infer<typeof integrationManifestDiagnosticSchema>;
 export type IntegrationManifestV1 = z.infer<typeof integrationManifestV1Schema>;
-export type IntegrationManifest = IntegrationManifestV1;
+export type IntegrationManifestV2 = z.infer<typeof integrationManifestV2Schema>;
+export type IntegrationManifest = IntegrationManifestV1 | IntegrationManifestV2;
+export type CurrentIntegrationManifest = IntegrationManifestV2;
 
-export function parseIntegrationManifest(value: unknown): IntegrationManifestV1 {
-  return integrationManifestV1Schema.parse(value);
+export function parseIntegrationManifest(value: unknown): IntegrationManifest {
+  return integrationManifestSchema.parse(value);
 }
 
 function unexpectedValidationError(): z.ZodError {
@@ -1238,9 +1366,9 @@ function unexpectedValidationError(): z.ZodError {
 
 export function safeParseIntegrationManifest(
   value: unknown
-): ReturnType<typeof integrationManifestV1Schema.safeParse> {
+): ReturnType<typeof integrationManifestSchema.safeParse> {
   try {
-    return integrationManifestV1Schema.safeParse(value);
+    return integrationManifestSchema.safeParse(value);
   } catch {
     return { success: false, error: unexpectedValidationError() };
   }
@@ -1330,7 +1458,7 @@ function diagnosticFromIssue(issue: z.ZodIssue): IntegrationManifestDiagnostic[]
           : issue.code === z.ZodIssueCode.invalid_type
             ? "Value has the wrong type."
             : "Value does not satisfy the manifest contract.",
-      hint: "Use the v1 integration-manifest schema for the value at this path.",
+      hint: "Use a supported integration-manifest schema for the value at this path.",
     },
   ];
 }
@@ -1345,7 +1473,7 @@ export function integrationManifestErrorToDiagnostics(
           code: "validation_failed",
           path: "/",
           message: "Manifest validation failed.",
-          hint: "Validate the document with the v1 integration-manifest schema.",
+          hint: "Validate the document with a supported integration-manifest schema.",
         },
       ];
     }
@@ -1356,7 +1484,7 @@ export function integrationManifestErrorToDiagnostics(
         code: "validation_failed",
         path: "/",
         message: "Manifest validation failed.",
-        hint: "Validate the document with the v1 integration-manifest schema.",
+        hint: "Validate the document with a supported integration-manifest schema.",
       },
     ];
   }
@@ -1367,7 +1495,8 @@ function isUnsupportedVersionError(error: z.ZodError): boolean {
     (issue) =>
       issue.path.length === 1 &&
       issue.path[0] === "schemaVersion" &&
-      issue.code === z.ZodIssueCode.invalid_literal
+      (issue.code === z.ZodIssueCode.invalid_literal ||
+        issue.code === z.ZodIssueCode.invalid_union_discriminator)
   );
 }
 
@@ -1376,7 +1505,7 @@ function unsupportedVersionDiagnostic(): IntegrationManifestDiagnostic {
     code: "unsupported_schema_version",
     path: "/schemaVersion",
     message: "Integration manifest schema version is unsupported.",
-    hint: `Use schemaVersion ${INTEGRATION_MANIFEST_SCHEMA_VERSION}; supported range is ${INTEGRATION_MANIFEST_MIN_SCHEMA_VERSION}-${INTEGRATION_MANIFEST_MAX_SCHEMA_VERSION}.`,
+    hint: `Use schemaVersion ${INTEGRATION_MANIFEST_SCHEMA_VERSION} for new manifests; supported versions are ${SUPPORTED_INTEGRATION_MANIFEST_SCHEMA_VERSIONS.join(", ")}.`,
   };
 }
 
@@ -1393,7 +1522,7 @@ export const toIntegrationManifestDiagnostics = integrationManifestErrorToDiagno
 export function safeParseIntegrationManifestWithDiagnostics(
   value: unknown
 ):
-  | { success: true; data: IntegrationManifestV1; diagnostics: [] }
+  | { success: true; data: IntegrationManifest; diagnostics: [] }
   | { success: false; diagnostics: IntegrationManifestDiagnostic[] } {
   const result = safeParseIntegrationManifest(value);
   if (result.success) return { success: true, data: result.data, diagnostics: [] };

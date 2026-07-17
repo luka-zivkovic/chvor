@@ -2,11 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
 import { AddCredentialDialog } from "../credentials/AddCredentialDialog";
+import { IntegrationSetupFlow } from "../integrations/IntegrationSetupFlow";
+import { findActiveIntegrationSetupFlow } from "../integrations/integration-setup-resume";
+import {
+  resolveManifestSetupTarget,
+  type ManifestSetupTarget,
+} from "../integrations/manifest-setup";
 import { useFeatureStore } from "../../stores/feature-store";
 import type {
   IntegrationCatalogEntry,
   IntegrationCategory,
+  IntegrationManifest,
   IntegrationResolution,
+  IntegrationSetupFlowSnapshot,
+  IntegrationSetupMode,
 } from "@chvor/shared";
 
 const CATEGORY_LABEL: Record<IntegrationCategory, string> = {
@@ -46,11 +55,25 @@ const FILTERS: Array<{ value: IntegrationCategory | "all"; label: string }> = [
  */
 export function IntegrationCatalogPanel() {
   const [entries, setEntries] = useState<IntegrationCatalogEntry[] | null>(null);
+  const [manifests, setManifests] = useState<IntegrationManifest[]>([]);
+  const [setupFlows, setSetupFlows] = useState<IntegrationSetupFlowSnapshot[]>([]);
+  const [manifestsReady, setManifestsReady] = useState(false);
+  const [manifestError, setManifestError] = useState<string | null>(null);
+  const [setupResolutionError, setSetupResolutionError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<IntegrationCategory | "all">("all");
 
   const [addCredType, setAddCredType] = useState<string | null>(null);
+  const [setupTarget, setSetupTarget] = useState<
+    | (ManifestSetupTarget & {
+        mode: IntegrationSetupMode;
+        targetCredentialId?: string;
+        oauthCredentialId?: string;
+        initialFlowId?: string;
+      })
+    | null
+  >(null);
   const [requestText, setRequestText] = useState("");
   const [requestSpecUrl, setRequestSpecUrl] = useState("");
   const [showSpecUrlOverride, setShowSpecUrlOverride] = useState(false);
@@ -58,19 +81,40 @@ export function IntegrationCatalogPanel() {
   const [requestResult, setRequestResult] = useState<IntegrationResolution | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
 
-  const { fetchCredentials: refetchCredentials } = useFeatureStore();
+  const { credentials, fetchCredentials: refetchCredentials } = useFeatureStore();
 
   const load = async () => {
     setError(null);
+    setManifestError(null);
+    setManifestsReady(false);
     try {
-      const res = await api.integrations.catalog();
-      setEntries(res.entries);
+      const catalog = await api.integrations.catalog();
+      setEntries(catalog.entries);
+      try {
+        const [manifestCatalog, activeSetupFlows] = await Promise.all([
+          api.integrations.manifests(),
+          api.integrationSetup.list(),
+        ]);
+        setManifests(manifestCatalog.manifests);
+        setSetupFlows(activeSetupFlows);
+        setManifestsReady(true);
+      } catch (manifestLoadError) {
+        setManifests([]);
+        setSetupFlows([]);
+        setManifestError(
+          manifestLoadError instanceof Error
+            ? manifestLoadError.message
+            : "Manifest catalog could not be loaded."
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const filtered = useMemo(() => {
     if (!entries) return [];
@@ -80,10 +124,10 @@ export function IntegrationCatalogPanel() {
       .filter((e) => {
         if (!q) return true;
         return (
-          e.name.toLowerCase().includes(q)
-          || e.description.toLowerCase().includes(q)
-          || (e.credentialType?.toLowerCase().includes(q) ?? false)
-          || (e.tags?.some((t) => t.toLowerCase().includes(q)) ?? false)
+          e.name.toLowerCase().includes(q) ||
+          e.description.toLowerCase().includes(q) ||
+          (e.credentialType?.toLowerCase().includes(q) ?? false) ||
+          (e.tags?.some((t) => t.toLowerCase().includes(q)) ?? false)
         );
       })
       .sort((a, b) => {
@@ -98,7 +142,48 @@ export function IntegrationCatalogPanel() {
   const installedCount = entries?.filter((e) => e.installed).length ?? 0;
 
   const handleConnect = (e: IntegrationCatalogEntry) => {
-    if (!e.credentialType) return;
+    if (!e.credentialType || !manifestsReady) return;
+    setSetupResolutionError(null);
+    const target = resolveManifestSetupTarget(e, manifests);
+    if (target) {
+      const activeFlow = findActiveIntegrationSetupFlow(setupFlows, {
+        manifestId: target.manifest.id,
+        manifestVersion: target.manifest.version,
+        manifestCredentialId: target.credential.id,
+        credentialType: target.credentialType,
+      });
+      if (activeFlow) {
+        setSetupTarget({
+          ...target,
+          mode: activeFlow.mode,
+          ...(activeFlow.targetCredentialId
+            ? { targetCredentialId: activeFlow.targetCredentialId }
+            : {}),
+          ...(activeFlow.oauthCredentialId
+            ? { oauthCredentialId: activeFlow.oauthCredentialId }
+            : {}),
+          initialFlowId: activeFlow.id,
+        });
+        return;
+      }
+      const matchingCredentials = credentials.filter(
+        (credential) => credential.type === target.credentialType
+      );
+      const existing = matchingCredentials.length === 1 ? matchingCredentials[0] : undefined;
+      const reconfigureTarget = e.installed ? existing : undefined;
+      setSetupTarget({
+        ...target,
+        mode: reconfigureTarget ? "reconfigure" : "setup",
+        ...(reconfigureTarget ? { targetCredentialId: reconfigureTarget.id } : {}),
+      });
+      return;
+    }
+    if (e.manifestId || e.manifestVersion || e.manifestCredentialId) {
+      setSetupResolutionError(
+        `${e.name} no longer matches its active setup manifest. Refresh the catalog before connecting.`
+      );
+      return;
+    }
     setAddCredType(e.credentialType);
   };
 
@@ -158,6 +243,27 @@ export function IntegrationCatalogPanel() {
         className="w-full rounded-md border border-border/50 bg-background/40 px-2.5 py-1.5 text-xs focus:border-primary/50 focus:outline-none"
       />
 
+      {manifestError && (
+        <div role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-[10px]">
+          Manifest-driven setup is unavailable: {manifestError}
+          <button type="button" onClick={() => void load()} className="ml-2 underline">
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!manifestError && !manifestsReady && (
+        <p role="status" className="text-[10px] text-muted-foreground">
+          Loading integration setup manifests…
+        </p>
+      )}
+
+      {setupResolutionError && (
+        <div role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-[10px]">
+          {setupResolutionError}
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-1">
         {FILTERS.map((f) => (
           <button
@@ -175,13 +281,16 @@ export function IntegrationCatalogPanel() {
       </div>
 
       {filtered.length === 0 ? (
-        <p className="text-xs text-muted-foreground/60 italic">
-          Nothing matches your search.
-        </p>
+        <p className="text-xs text-muted-foreground/60 italic">Nothing matches your search.</p>
       ) : (
         <div className="flex flex-col gap-1.5">
           {filtered.map((e) => (
-            <CatalogRow key={e.id} entry={e} onConnect={() => handleConnect(e)} />
+            <CatalogRow
+              key={e.id}
+              entry={e}
+              manifestSetupUnavailable={!manifestsReady}
+              onConnect={() => handleConnect(e)}
+            />
           ))}
         </div>
       )}
@@ -191,15 +300,17 @@ export function IntegrationCatalogPanel() {
           Don't see your service?
         </p>
         <p className="text-[10px] text-muted-foreground">
-          Chvor will research it and propose a credential schema. If the service
-          publishes an OpenAPI spec, tools are synthesized automatically.
+          Chvor will research it and propose a credential schema. If the service publishes an
+          OpenAPI spec, tools are synthesized automatically.
         </p>
         <div className="flex gap-2">
           <input
             type="text"
             value={requestText}
             onChange={(e) => setRequestText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !requesting) handleRequestIntegration(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !requesting) handleRequestIntegration();
+            }}
             placeholder="e.g. quickbooks, monday.com, freshbooks"
             className="flex-1 rounded-md border border-border/50 bg-background/40 px-2 py-1 text-xs focus:border-primary/50 focus:outline-none"
           />
@@ -229,9 +340,7 @@ export function IntegrationCatalogPanel() {
           />
         )}
 
-        {requestError && (
-          <p className="text-[10px] text-destructive">{requestError}</p>
-        )}
+        {requestError && <p className="text-[10px] text-destructive">{requestError}</p>}
 
         {requestResult && (
           <div className="rounded-md border border-border/50 bg-muted/20 p-2 space-y-1.5">
@@ -273,6 +382,31 @@ export function IntegrationCatalogPanel() {
           }}
         />
       )}
+
+      {setupTarget && (
+        <IntegrationSetupFlow
+          manifest={setupTarget.manifest}
+          credentialType={setupTarget.credentialType}
+          manifestCredentialId={setupTarget.credential.id}
+          mode={setupTarget.mode}
+          {...(setupTarget.targetCredentialId
+            ? { targetCredentialId: setupTarget.targetCredentialId }
+            : {})}
+          {...(setupTarget.oauthCredentialId
+            ? { oauthCredentialId: setupTarget.oauthCredentialId }
+            : {})}
+          {...(setupTarget.initialFlowId ? { initialFlowId: setupTarget.initialFlowId } : {})}
+          onCompleted={() => {
+            refetchCredentials();
+            void load();
+          }}
+          onClose={() => {
+            setSetupTarget(null);
+            refetchCredentials();
+            void load();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -280,9 +414,11 @@ export function IntegrationCatalogPanel() {
 function CatalogRow({
   entry,
   onConnect,
+  manifestSetupUnavailable,
 }: {
   entry: IntegrationCatalogEntry;
   onConnect: () => void;
+  manifestSetupUnavailable: boolean;
 }) {
   return (
     <div className="flex items-center gap-3 rounded-md border border-border/40 bg-muted/5 px-2.5 py-2 transition-colors hover:bg-muted/15">
@@ -297,15 +433,18 @@ function CatalogRow({
           <span className="rounded-full bg-muted/30 px-1.5 py-0 text-[8px] uppercase tracking-wider text-muted-foreground">
             {CATEGORY_LABEL[entry.category]}
           </span>
-          {entry.installed && (
-            <span className="text-[9px] text-emerald-500">● connected</span>
-          )}
+          {entry.installed && <span className="text-[9px] text-emerald-500">● connected</span>}
         </div>
         <p className="text-[10px] text-muted-foreground line-clamp-1">{entry.description}</p>
       </div>
       <button
         onClick={onConnect}
-        disabled={!entry.credentialType}
+        disabled={!entry.credentialType || manifestSetupUnavailable}
+        title={
+          manifestSetupUnavailable
+            ? "Integration setup manifests must load before connecting"
+            : undefined
+        }
         className={`shrink-0 rounded-md px-2.5 py-0.5 text-[10px] font-medium transition-colors ${
           entry.installed
             ? "border border-border/50 text-muted-foreground hover:bg-muted/30"

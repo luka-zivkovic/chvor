@@ -7,7 +7,14 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Tool } from "@chvor/shared";
 import { logError } from "./error-logger.ts";
-import { resolveEnvPlaceholders, resolveUrlPlaceholders } from "./credential-resolver.ts";
+import { getCredentialCiphertextVersion } from "../db/credential-store.ts";
+import {
+  resolveEnvPlaceholders,
+  resolveUrlPlaceholders,
+  type PickerContext,
+} from "./credential-resolver.ts";
+import { pickCredential } from "./credential-picker.ts";
+import { assertCredentialAuthUsable } from "./integration-auth-gate.ts";
 import { loadTools } from "./capability-loader.ts";
 import { registerTrajectorySecrets } from "./orchestrator/trajectory-adapter.ts";
 
@@ -17,7 +24,9 @@ let APP_VERSION = "0.0.1";
 try {
   const pkg = JSON.parse(readFileSync(resolve(__dirname, "../../package.json"), "utf-8"));
   APP_VERSION = pkg.version ?? APP_VERSION;
-} catch { /* fallback to default */ }
+} catch {
+  /* fallback to default */
+}
 
 // Timeouts (ms) — prevents hung MCP servers from blocking the platform
 const SPAWN_TIMEOUT_MS = 30_000;
@@ -30,8 +39,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
     promise.then(
-      (val) => { clearTimeout(timer); resolve(val); },
-      (err) => { clearTimeout(timer); reject(err); },
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
     );
   });
 }
@@ -42,6 +57,11 @@ interface McpToolInfo {
   inputSchema: Record<string, unknown>;
 }
 
+interface McpCredentialSnapshot {
+  credentialId: string;
+  ciphertextVersion: string;
+}
+
 interface McpConnection {
   client: Client;
   transport: StdioClientTransport | SSEClientTransport;
@@ -49,6 +69,72 @@ interface McpConnection {
   toolId: string;
   tool: Tool; // stored for auto-reconnect on failure
   secretValues: string[];
+  credentialSnapshots: McpCredentialSnapshot[];
+}
+
+/**
+ * Snapshot credential selection before placeholder resolution, then confirm
+ * that the resolver used exactly those rows. This avoids attaching a newer
+ * ciphertext version to secrets decrypted from an older row during spawn.
+ */
+function prepareCredentialCapture(
+  toolId: string,
+  requiredCredentials: string[] | undefined,
+  secretValues: Set<string>
+): { pickerContext: PickerContext; finalize: () => McpCredentialSnapshot[] } {
+  const expectedByType = new Map<string, McpCredentialSnapshot>();
+  for (const credentialType of new Set(requiredCredentials ?? [])) {
+    const pick = pickCredential(credentialType);
+    if (!pick) continue;
+    // Preserve the resolver's fail-closed ambiguity behavior without
+    // decrypting a fallback candidate that will never be selected.
+    if (pick.reason === "first-match-fallback" && pick.candidateCount > 1) continue;
+    assertCredentialAuthUsable(pick.credentialId);
+    const ciphertextVersion = getCredentialCiphertextVersion(pick.credentialId);
+    if (!ciphertextVersion) {
+      throw new Error(`[mcp] credential ${pick.credentialId} is unavailable for ${toolId}`);
+    }
+    expectedByType.set(credentialType, {
+      credentialId: pick.credentialId,
+      ciphertextVersion,
+    });
+  }
+
+  const pickedTypes = new Set<string>();
+  const capturedById = new Map<string, McpCredentialSnapshot>();
+  let selectionChanged = false;
+  const pickerContext: PickerContext = {
+    onSecrets: (values) => values.forEach((value) => secretValues.add(value)),
+    onPick: ({ credentialType, credentialId }) => {
+      const expected = expectedByType.get(credentialType);
+      if (!expected || expected.credentialId !== credentialId) {
+        selectionChanged = true;
+        return;
+      }
+      pickedTypes.add(credentialType);
+      capturedById.set(credentialId, expected);
+    },
+  };
+
+  return {
+    pickerContext,
+    finalize: () => {
+      if (
+        selectionChanged ||
+        Array.from(expectedByType.keys()).some((credentialType) => !pickedTypes.has(credentialType))
+      ) {
+        throw new Error(`[mcp] credential selection changed while spawning ${toolId}`);
+      }
+      for (const snapshot of capturedById.values()) {
+        assertCredentialAuthUsable(snapshot.credentialId);
+        const currentVersion = getCredentialCiphertextVersion(snapshot.credentialId);
+        if (currentVersion !== snapshot.ciphertextVersion) {
+          throw new Error(`[mcp] credential changed while spawning ${toolId}`);
+        }
+      }
+      return Array.from(capturedById.values());
+    },
+  };
 }
 
 class McpManager {
@@ -115,7 +201,7 @@ class McpManager {
 
     const transportType = tool.mcpServer.transport ?? "stdio";
     const secretValues = new Set<string>();
-    const pickerContext = { onSecrets: (values: string[]) => values.forEach((value) => secretValues.add(value)) };
+    let credentialSnapshots: McpCredentialSnapshot[] = [];
     let transport: StdioClientTransport | SSEClientTransport;
 
     if (transportType === "sse" || transportType === "http") {
@@ -123,11 +209,19 @@ class McpManager {
       if (!tool.mcpServer.url) {
         throw new Error(`Tool ${tool.id} has transport "${transportType}" but no url`);
       }
+      const capture = prepareCredentialCapture(
+        tool.id,
+        tool.mcpServer.url.includes("{{credentials.")
+          ? tool.metadata.requires?.credentials
+          : undefined,
+        secretValues
+      );
       const resolvedUrl = resolveUrlPlaceholders(
         tool.mcpServer.url,
         tool.metadata.requires?.credentials,
-        pickerContext
+        capture.pickerContext
       );
+      credentialSnapshots = capture.finalize();
       // Log redacted URL for diagnostics
       const redacted = resolvedUrl.replace(/\/[^/]{8,}$/, "/***");
       console.log(`[mcp] connecting SSE for ${tool.id}: ${redacted}`);
@@ -138,11 +232,17 @@ class McpManager {
         throw new Error(`Tool ${tool.id} has stdio transport but no command`);
       }
 
+      const capture = prepareCredentialCapture(
+        tool.id,
+        tool.mcpServer.env ? tool.metadata.requires?.credentials : undefined,
+        secretValues
+      );
       const resolvedEnv = resolveEnvPlaceholders(
         tool.mcpServer.env,
         tool.metadata.requires?.credentials,
-        pickerContext
+        capture.pickerContext
       );
+      credentialSnapshots = capture.finalize();
 
       // On Windows, npx needs to be npx.cmd
       const command =
@@ -156,7 +256,12 @@ class McpManager {
           arg
             .replace(/\{\{homedir\}\}/g, homedir())
             .replace(/\{\{cwd\}\}/g, process.cwd())
-            .replace(/\{\{tmp\}\}/g, process.platform === "win32" ? (process.env.TEMP ?? process.env.TMP ?? homedir()) : "/tmp")
+            .replace(
+              /\{\{tmp\}\}/g,
+              process.platform === "win32"
+                ? (process.env.TEMP ?? process.env.TMP ?? homedir())
+                : "/tmp"
+            )
         )
         .filter((arg) => arg.length > 0);
 
@@ -176,19 +281,47 @@ class McpManager {
       await withTimeout(client.connect(transport), SPAWN_TIMEOUT_MS, `MCP spawn for ${tool.id}`);
     } catch (err) {
       // If spawn times out, the child process is already running — close the transport to kill it
-      try { await transport.close(); } catch { /* ignore cleanup errors */ }
+      try {
+        await transport.close();
+      } catch {
+        /* ignore cleanup errors */
+      }
       throw err;
     }
 
-    // Discover tools from the MCP server
-    const toolsResult = await withTimeout(client.listTools(), DISCOVERY_TIMEOUT_MS, `MCP listTools for ${tool.id}`);
-    const tools: McpToolInfo[] = (toolsResult.tools ?? [])
-      .filter((t) => t.name) // Drop tools with empty/missing names
-      .map((t) => ({
-        name: t.name,
-        description: t.description ?? "",
-        inputSchema: (t.inputSchema ?? {}) as Record<string, unknown>,
-      }));
+    let tools: McpToolInfo[];
+    try {
+      const toolsResult = await withTimeout(
+        client.listTools(),
+        DISCOVERY_TIMEOUT_MS,
+        `MCP listTools for ${tool.id}`
+      );
+      for (const snapshot of credentialSnapshots) {
+        assertCredentialAuthUsable(snapshot.credentialId);
+        if (getCredentialCiphertextVersion(snapshot.credentialId) !== snapshot.ciphertextVersion) {
+          throw new Error(`[mcp] credential changed while establishing ${tool.id}`);
+        }
+      }
+      tools = (toolsResult.tools ?? [])
+        .filter((item) => item.name)
+        .map((item) => ({
+          name: item.name,
+          description: item.description ?? "",
+          inputSchema: (item.inputSchema ?? {}) as Record<string, unknown>,
+        }));
+    } catch (error) {
+      try {
+        await client.close();
+      } catch {
+        /* ignore cleanup errors */
+      }
+      try {
+        await transport.close();
+      } catch {
+        /* ignore cleanup errors */
+      }
+      throw error;
+    }
 
     const connection: McpConnection = {
       client,
@@ -197,12 +330,11 @@ class McpManager {
       toolId: tool.id,
       tool,
       secretValues: Array.from(secretValues),
+      credentialSnapshots,
     };
 
     this.connections.set(tool.id, connection);
-    console.log(
-      `[mcp] spawned server for tool: ${tool.id} (${tools.length} tools)`
-    );
+    console.log(`[mcp] spawned server for tool: ${tool.id} (${tools.length} tools)`);
     return connection;
   }
 
@@ -217,15 +349,16 @@ class McpManager {
     args: Record<string, unknown>,
     signal?: AbortSignal
   ): Promise<unknown> {
-    const conn = this.connections.get(toolId);
-    if (!conn) throw new Error(`No MCP connection for tool: ${toolId}`);
+    const cached = this.connections.get(toolId);
+    if (!cached) throw new Error(`No MCP connection for tool: ${toolId}`);
+    const conn = await this.ensureCredentialsCurrent(cached);
     registerTrajectorySecrets(conn.secretValues);
 
     try {
       return await withTimeout(
         conn.client.callTool({ name: toolName, arguments: args }, undefined, { signal }),
         CALL_TIMEOUT_MS,
-        `MCP callTool ${toolId}/${toolName}`,
+        `MCP callTool ${toolId}/${toolName}`
       );
     } catch (firstErr) {
       if (signal?.aborted || (firstErr instanceof Error && firstErr.name === "AbortError")) {
@@ -233,17 +366,54 @@ class McpManager {
       }
       console.warn(`[mcp] callTool failed for ${toolId}/${toolName}, attempting reconnect…`);
       const toolRef = conn.tool;
-      await this.closeConnection(toolId);
-      await this.getConnection(toolRef);
-      const newConn = this.connections.get(toolId);
-      if (!newConn) throw firstErr;
+      await this.closeConnectionRecord(conn);
+      const reconnected = await this.getConnection(toolRef);
+      const newConn = await this.ensureCredentialsCurrent(reconnected);
       registerTrajectorySecrets(newConn.secretValues);
       return await withTimeout(
         newConn.client.callTool({ name: toolName, arguments: args }, undefined, { signal }),
         CALL_TIMEOUT_MS,
-        `MCP callTool retry ${toolId}/${toolName}`,
+        `MCP callTool retry ${toolId}/${toolName}`
       );
     }
+  }
+
+  /** Validate cached auth and recycle once when a credential row has rotated. */
+  private async ensureCredentialsCurrent(initial: McpConnection): Promise<McpConnection> {
+    let conn = initial;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let ciphertextChanged = false;
+      try {
+        for (const snapshot of conn.credentialSnapshots) {
+          assertCredentialAuthUsable(snapshot.credentialId);
+          const currentVersion = getCredentialCiphertextVersion(snapshot.credentialId);
+          if (!currentVersion) {
+            throw new Error(
+              `[mcp] credential ${snapshot.credentialId} is unavailable; refusing dispatch`
+            );
+          }
+          if (currentVersion !== snapshot.ciphertextVersion) {
+            ciphertextChanged = true;
+          }
+        }
+      } catch (err) {
+        await this.closeConnectionRecord(conn);
+        throw err;
+      }
+
+      if (!ciphertextChanged) return conn;
+
+      const toolRef = conn.tool;
+      console.warn(`[mcp] credentials changed for ${conn.toolId}; recycling cached connection`);
+      await this.closeConnectionRecord(conn);
+      if (attempt === 1) {
+        throw new Error(
+          `[mcp] credentials changed repeatedly for ${conn.toolId}; refusing dispatch`
+        );
+      }
+      conn = await this.getConnection(toolRef);
+    }
+    throw new Error(`[mcp] could not obtain a credential-current connection for ${initial.toolId}`);
   }
 
   /**
@@ -259,9 +429,7 @@ class McpManager {
    * Falls back to searching all connections if no prefix — logs a warning
    * if multiple connections expose the same tool name (ambiguous match).
    */
-  findToolForQualifiedName(
-    qualifiedToolName: string
-  ): { toolId: string; toolName: string } | null {
+  findToolForQualifiedName(qualifiedToolName: string): { toolId: string; toolName: string } | null {
     const sepIndex = qualifiedToolName.indexOf("__");
     if (sepIndex !== -1) {
       return {
@@ -277,7 +445,9 @@ class McpManager {
       }
     }
     if (matches.length > 1) {
-      console.warn(`[mcp] ambiguous tool name "${qualifiedToolName}" found in ${matches.length} connections: ${matches.map((m) => m.toolId).join(", ")}. Using first match. Prefer qualified names (toolId__toolName).`);
+      console.warn(
+        `[mcp] ambiguous tool name "${qualifiedToolName}" found in ${matches.length} connections: ${matches.map((m) => m.toolId).join(", ")}. Using first match. Prefer qualified names (toolId__toolName).`
+      );
     }
     return matches[0] ?? null;
   }
@@ -286,19 +456,27 @@ class McpManager {
    * Get status of all active MCP connections (for diagnosis tool).
    * Probes each connection with a lightweight listTools call to detect stale transports.
    */
-  async getConnectionStatus(): Promise<Array<{ toolId: string; connected: boolean; toolCount: number }>> {
+  async getConnectionStatus(): Promise<
+    Array<{ toolId: string; connected: boolean; toolCount: number }>
+  > {
     const result: Array<{ toolId: string; connected: boolean; toolCount: number }> = [];
     // Snapshot entries to avoid issues if connections mutate during async probes
     const entries = [...this.connections.entries()];
     for (const [id, conn] of entries) {
       let connected = false;
+      let checkedConnection = conn;
       try {
-        await withTimeout(conn.client.listTools(), HEALTH_CHECK_TIMEOUT_MS, `health check ${id}`);
+        checkedConnection = await this.ensureCredentialsCurrent(conn);
+        await withTimeout(
+          checkedConnection.client.listTools(),
+          HEALTH_CHECK_TIMEOUT_MS,
+          `health check ${id}`
+        );
         connected = true;
       } catch {
         console.warn(`[mcp] health check failed for ${id} — marking as disconnected`);
       }
-      result.push({ toolId: id, connected, toolCount: conn.tools.length });
+      result.push({ toolId: id, connected, toolCount: checkedConnection.tools.length });
     }
     return result;
   }
@@ -309,17 +487,26 @@ class McpManager {
   async closeConnection(toolId: string): Promise<boolean> {
     const conn = this.connections.get(toolId);
     if (!conn) return false;
+    await this.closeConnectionRecord(conn);
+    console.log(`[mcp] closed connection for repair: ${toolId}`);
+    return true;
+  }
+
+  /** Remove this exact cached instance before async cleanup so replacements survive races. */
+  private async closeConnectionRecord(conn: McpConnection): Promise<void> {
+    if (this.connections.get(conn.toolId) === conn) {
+      this.connections.delete(conn.toolId);
+    }
     try {
       await conn.client.close();
     } catch (err) {
-      console.error(`[mcp] error closing client ${toolId}:`, err);
+      console.error(`[mcp] error closing client ${conn.toolId}:`, err);
     }
     try {
       await conn.transport.close();
-    } catch { /* ignore transport cleanup errors */ }
-    console.log(`[mcp] closed connection for repair: ${toolId}`);
-    this.connections.delete(toolId);
-    return true;
+    } catch {
+      /* ignore transport cleanup errors */
+    }
   }
 
   /**

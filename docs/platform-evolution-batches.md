@@ -231,7 +231,7 @@ Every batch must preserve these properties:
 
 ### C02 — Manifest-driven setup and reauthentication
 
-- **Status:** Planned
+- **Status:** Active
 - **Dependencies:** C01
 - **Outcome:** Use one resumable setup state machine for credentials, OAuth, discovery, reconfiguration, and reauthentication.
 - **Acceptance criteria:**

@@ -82,7 +82,7 @@ afterAll(() => {
 describe("trajectory migrations v31-v32", () => {
   it("creates normalized storage and chronological query indexes on a fresh database", () => {
     const db = getDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(35);
+    expect(db.pragma("user_version", { simple: true })).toBe(36);
 
     const tables = db
       .prepare(
@@ -132,7 +132,7 @@ describe("trajectory migrations v31-v32", () => {
       db.pragma("user_version = 30");
       runMigrations(db, false);
 
-      expect(db.pragma("user_version", { simple: true })).toBe(35);
+      expect(db.pragma("user_version", { simple: true })).toBe(36);
       expect(
         db
           .prepare(
@@ -141,7 +141,7 @@ describe("trajectory migrations v31-v32", () => {
           .get("trajectories", "trajectory_steps", "trajectory_artifacts")
       ).toEqual({ count: 3 });
       expect(() => runMigrations(db, false)).not.toThrow();
-      expect(db.pragma("user_version", { simple: true })).toBe(35);
+      expect(db.pragma("user_version", { simple: true })).toBe(36);
     } finally {
       db.close();
       rmSync(migrationDir, { recursive: true, force: true });

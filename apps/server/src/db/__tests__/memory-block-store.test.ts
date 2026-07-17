@@ -77,7 +77,7 @@ afterAll(() => {
 describe("memory-block migration v35", () => {
   it("creates bounded identity and immutable revision tables on fresh databases", () => {
     const db = getDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(35);
+    expect(db.pragma("user_version", { simple: true })).toBe(36);
     const tables = db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'memory_block%' ORDER BY name"
@@ -122,7 +122,7 @@ describe("memory-block migration v35", () => {
       db.pragma("foreign_keys = ON");
       db.pragma("user_version = 34");
       runMigrations(db, false);
-      expect(db.pragma("user_version", { simple: true })).toBe(35);
+      expect(db.pragma("user_version", { simple: true })).toBe(36);
       expect(
         db
           .prepare(

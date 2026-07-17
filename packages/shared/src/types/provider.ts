@@ -1,4 +1,5 @@
 import type { CredentialType } from "./credential.js";
+import type { IntegrationAuthStatus, IntegrationSetupFailureCode } from "./integration-setup.js";
 
 export interface ProviderField {
   key: string;
@@ -12,7 +13,7 @@ export interface ProviderField {
 }
 
 export interface ModelCost {
-  input: number;  // USD per million tokens
+  input: number; // USD per million tokens
   output: number; // USD per million tokens
 }
 
@@ -134,6 +135,17 @@ export interface OAuthProviderDef {
   setupCredentialType?: string;
 }
 
+/** Safe identifiers needed to reauthorize one exact manifest-bound direct OAuth account. */
+export interface OAuthReauthenticationTarget {
+  integrationId: string;
+  manifestVersion: string;
+  manifestCredentialId: string;
+  oauthManifestCredentialId: string;
+  credentialType: string;
+  targetCredentialId: string;
+  oauthCredentialId: string;
+}
+
 export interface OAuthConnection {
   id: string;
   platform: string;
@@ -142,6 +154,13 @@ export interface OAuthConnection {
   connectedAt: string;
   /** Credential ID for direct OAuth connections */
   credentialId?: string;
+  /** Durable manifest-binding authorization state when this is a local direct connection. */
+  authStatus?: IntegrationAuthStatus;
+  needsReauthentication?: boolean;
+  failureCode?: IntegrationSetupFailureCode;
+  oauthKind?: "direct" | "synthesized";
+  /** Present only when the server can prove an exact active manifest/app/account binding. */
+  reauthenticationTarget?: OAuthReauthenticationTarget;
 }
 
 export interface MediaTypeConfig {

@@ -13,17 +13,31 @@
 
 import { randomUUID } from "node:crypto";
 import type { Tool, SynthesizedEndpoint } from "@chvor/shared";
-import { getCredentialData, listCredentials, updateCredential } from "../db/credential-store.ts";
+import { getCredentialData, listCredentials } from "../db/credential-store.ts";
 import { logError } from "./error-logger.ts";
 import { insertActivity } from "../db/activity-store.ts";
 import { requestApproval, recordSuccess, recordFailure, getSessionStats } from "./approval-gate.ts";
-import { refreshAccessToken, type OAuthProviderConfig } from "./oauth-engine.ts";
-import { getDirectOAuthProvider } from "./oauth-providers.ts";
 import { pickCredential, type PickResult } from "./credential-picker.ts";
-import { resolveSafeSynthesizedTarget, pinnedHttpsRequest, type PinnedResponse, type ResolvedTarget } from "./synthesized/network.ts";
-export { assertSafeSynthesizedUrl, pinnedHttpsRequest, resolveSafeSynthesizedTarget } from "./synthesized/network.ts";
+import {
+  resolveSafeSynthesizedTarget,
+  pinnedHttpsRequest,
+  type PinnedResponse,
+  type ResolvedTarget,
+} from "./synthesized/network.ts";
+export {
+  assertSafeSynthesizedUrl,
+  pinnedHttpsRequest,
+  resolveSafeSynthesizedTarget,
+} from "./synthesized/network.ts";
 export type { PinnedResponse, ResolvedTarget } from "./synthesized/network.ts";
 import { applyAuth, buildUrl, stripCrlf } from "./synthesized/auth.ts";
+import {
+  assertCredentialAuthUsable,
+  getCredentialAuthBlock,
+  CredentialReauthenticationRequiredError,
+  type CredentialAuthBlock,
+} from "./integration-auth-gate.ts";
+import { isOAuthCredentialData, refreshOAuthCredential } from "./oauth-token-refresh.ts";
 import {
   addSecretsToSeal,
   extractSecretValues,
@@ -67,7 +81,15 @@ export type CallResult =
       size: number;
       durationMs: number;
     }
-  | { ok: false; error: string; status?: number; durationMs: number; diagnosis?: AuthDiagnosis };
+  | {
+      ok: false;
+      error: string;
+      status?: number;
+      durationMs: number;
+      diagnosis?: AuthDiagnosis;
+      code?: "integration_reauthentication_required";
+      reauthentication?: CredentialAuthBlock;
+    };
 
 export interface AuthDiagnosis {
   error: "auth_failed";
@@ -201,72 +223,20 @@ function diagnoseAuthError(args: {
   };
 }
 
-// ── OAuth refresh-token rotation (Track 0.7) ───────────────────
-//
-// When a synthesized OAuth call returns 401 and the credential has both a
-// refreshToken and a tokenUrl (set by /oauth/synthesized/initiate or by the
-// built-in OAuth flow), rotate transparently and let the caller retry once.
-// Returns the refreshed credential data on success, null on any failure
-// (token expired beyond refresh, network error, missing fields).
-
-interface RefreshResult {
-  data: Record<string, string>;
-}
-
-async function tryRefreshOAuthToken(
-  credId: string,
-  credName: string,
-  data: Record<string, string>
-): Promise<RefreshResult | null> {
-  const refreshToken = data.refreshToken;
-  const clientId = data.clientId;
-  if (!refreshToken || !clientId) return null;
-
-  // Two paths: synthesized OAuth (tokenUrl persisted on the cred itself) or
-  // built-in OAuth (look up the static provider config + setup credential
-  // for the client_secret).
-  let providerConfig: OAuthProviderConfig | null = null;
-  let clientSecret: string | undefined = data.clientSecret;
-  if (data.tokenUrl) {
-    providerConfig = {
-      id: data.provider ?? "synthesized",
-      name: credName,
-      authUrl: data.authUrl ?? "",
-      tokenUrl: data.tokenUrl,
-      scopes: data.scopes ? data.scopes.split(/\s+/).filter(Boolean) : [],
-    };
-  } else if (data.provider) {
-    const builtin = getDirectOAuthProvider(data.provider);
-    if (builtin) {
-      providerConfig = builtin;
-      try {
-        const { getClientSecretForProvider } = await import("../routes/oauth.ts");
-        clientSecret = clientSecret ?? getClientSecretForProvider(data.provider);
-      } catch {
-        /* best-effort */
-      }
-    }
-  }
-  if (!providerConfig || !providerConfig.tokenUrl) return null;
-
-  try {
-    const tokens = await refreshAccessToken(providerConfig, refreshToken, clientId, clientSecret);
-    const updated: Record<string, string> = {
-      ...data,
-      accessToken: tokens.accessToken,
-    };
-    if (tokens.refreshToken) updated.refreshToken = tokens.refreshToken;
-    if (tokens.expiresAt) updated.expiresAt = tokens.expiresAt;
-    if (tokens.scope) updated.scope = tokens.scope;
-    updateCredential(credId, credName, updated);
-    return { data: updated };
-  } catch (err) {
-    console.warn(
-      "[synthesized-caller] OAuth refresh failed:",
-      err instanceof Error ? err.message : String(err)
-    );
-    return null;
-  }
+function reauthenticationFailure(
+  block: CredentialAuthBlock,
+  started: number,
+  status?: number
+): Extract<CallResult, { ok: false }> {
+  const error = new CredentialReauthenticationRequiredError(block);
+  return {
+    ok: false,
+    error: error.message,
+    ...(status === undefined ? {} : { status }),
+    durationMs: Date.now() - started,
+    code: error.code,
+    reauthentication: block,
+  };
 }
 
 // ── Audit logging for mutating calls (Track 0.11) ──────────────
@@ -463,7 +433,7 @@ export async function callSynthesizedEndpoint(
   }
 
   const credId = pick.credentialId;
-  const cred = getCredentialData(credId);
+  let cred = getCredentialData(credId);
   if (!cred) {
     const stillExists = listCredentials().some((c) => c.id === credId);
     return {
@@ -473,6 +443,28 @@ export async function callSynthesizedEndpoint(
         : `credential ${credId} no longer exists (it may have been deleted)`,
       durationMs: Date.now() - started,
     };
+  }
+
+  const expiresAt = cred.data.expiresAt ? Date.parse(cred.data.expiresAt) : Number.NaN;
+  if (
+    isOAuthCredentialData(cred.cred.type, cred.data) &&
+    Number.isFinite(expiresAt) &&
+    expiresAt <= Date.now()
+  ) {
+    const refreshResult = await refreshOAuthCredential(credId, { force: true });
+    if (refreshResult.outcome === "refreshed") {
+      const reloaded = getCredentialData(credId);
+      if (reloaded) cred = reloaded;
+    }
+  }
+
+  try {
+    assertCredentialAuthUsable(credId);
+  } catch (error) {
+    if (error instanceof CredentialReauthenticationRequiredError) {
+      return reauthenticationFailure(error.block, started);
+    }
+    throw error;
   }
   // Surface rationale so the orchestrator can emit a canvas event.
   // We pass the credential NAME (safe — UI shows it already) but never
@@ -623,12 +615,36 @@ export async function callSynthesizedEndpoint(
               ? "user denied execution"
               : approval.reason === "aborted"
                 ? "execution aborted"
-              : approval.reason === "no-ws"
-                ? "cannot prompt for approval — no active UI connection"
-                : "approval timed out",
+                : approval.reason === "no-ws"
+                  ? "cannot prompt for approval — no active UI connection"
+                  : "approval timed out",
           durationMs: Date.now() - started,
         };
       }
+    }
+
+    // DNS resolution and approval can await user/external work. Never dispatch
+    // headers built from a credential that changed or became blocked while we
+    // were waiting.
+    const dispatchCredential = getCredentialData(credId);
+    if (
+      !dispatchCredential ||
+      dispatchCredential.cred.type !== cred.cred.type ||
+      dispatchCredential.cred.encryptedData !== cred.cred.encryptedData
+    ) {
+      return {
+        ok: false,
+        error: `credential ${credId} changed while the request was awaiting dispatch — retry the call`,
+        durationMs: Date.now() - started,
+      };
+    }
+    try {
+      assertCredentialAuthUsable(credId);
+    } catch (error) {
+      if (error instanceof CredentialReauthenticationRequiredError) {
+        return reauthenticationFailure(error.block, started);
+      }
+      throw error;
     }
 
     // Execute via pinned-IP HTTPS request
@@ -694,13 +710,24 @@ export async function callSynthesizedEndpoint(
         }
       : parsed;
 
-    // Track 0.7: transparent OAuth refresh on 401 — applies to both bearer
-    // and api-key-header (some providers carry the access token in a custom
-    // header rather than Authorization). One retry max, only if a refresh
-    // token is present and the refresh exchange succeeds.
+    // Transparent OAuth refresh on 401 is centralized so direct and
+    // synthesized credentials share provider routing, durable auth-state
+    // transitions, single-flight serialization, and stale-write defenses.
     if (response.status === 401 && cred.data.refreshToken) {
-      const refreshed = await tryRefreshOAuthToken(credId, cred.cred.name, cred.data);
-      if (refreshed) {
+      const refreshResult = await refreshOAuthCredential(credId, { force: true });
+      if (refreshResult.terminal) {
+        const block = getCredentialAuthBlock(credId);
+        if (block) return reauthenticationFailure(block, started, response.status);
+      }
+      if (refreshResult.outcome === "refreshed") {
+        const refreshed = getCredentialData(credId);
+        if (!refreshed) {
+          return {
+            ok: false,
+            error: `credential ${credId} disappeared after OAuth token refresh`,
+            durationMs: Date.now() - started,
+          };
+        }
         // Phase E2 — the outer seal opened with `extractSecretValues(cred.data)`
         // captured only the *original* credential's values. The refresh just
         // minted a new access token (and possibly a new refresh token); register

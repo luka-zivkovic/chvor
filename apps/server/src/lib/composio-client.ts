@@ -4,7 +4,8 @@
  */
 
 import { Composio } from "@composio/core";
-import { listCredentials, getCredentialData } from "../db/credential-store.ts";
+import { getCredentialData, listCredentialMetadata } from "../db/credential-store.ts";
+import { assertCredentialAuthUsable } from "./credential-auth-usability.ts";
 
 const COMPOSIO_ENTITY_ID = "default"; // Chvor is single-user
 
@@ -16,10 +17,11 @@ export interface SocialAccount {
 }
 
 function getComposioApiKey(): string | null {
-  const creds = listCredentials();
+  const creds = listCredentialMetadata();
   const composioCred = creds.find((c) => c.type === "composio");
   if (!composioCred) return null;
 
+  assertCredentialAuthUsable(composioCred.id);
   const full = getCredentialData(composioCred.id);
   if (!full) return null;
 
@@ -31,7 +33,7 @@ function getClient(): Composio {
   if (!apiKey) {
     throw new Error(
       "No Composio API key found. Please add your Composio API key first.\n" +
-        "You can get a free key at https://app.composio.dev/settings",
+        "You can get a free key at https://app.composio.dev/settings"
     );
   }
   return new Composio({ apiKey });
@@ -41,17 +43,14 @@ function getClient(): Composio {
  * Resolve the auth config ID for a given toolkit (e.g. "reddit").
  * Looks for a Composio-managed config first, falls back to any available config.
  */
-async function resolveAuthConfigId(
-  client: Composio,
-  toolkit: string,
-): Promise<string> {
+async function resolveAuthConfigId(client: Composio, toolkit: string): Promise<string> {
   const configs = await client.authConfigs.list({ toolkit });
   const items = configs.items ?? [];
 
   if (items.length === 0) {
     throw new Error(
       `No auth config found for "${toolkit}" in Composio. ` +
-        `Please create one at https://app.composio.dev or via the Composio dashboard.`,
+        `Please create one at https://app.composio.dev or via the Composio dashboard.`
     );
   }
 
@@ -59,14 +58,14 @@ async function resolveAuthConfigId(
   const managed = items.find(
     (c: Record<string, unknown>) =>
       (c as { type?: string }).type === "COMPOSIO_MANAGED" ||
-      (c as { isComposioManaged?: boolean }).isComposioManaged === true,
+      (c as { isComposioManaged?: boolean }).isComposioManaged === true
   );
 
   const config = managed ?? items[0];
   const id = (config as { id?: string }).id;
   if (!id) {
     throw new Error(
-      `Auth config for "${toolkit}" is missing an ID. This may indicate an SDK version mismatch.`,
+      `Auth config for "${toolkit}" is missing an ID. This may indicate an SDK version mismatch.`
     );
   }
   return id;
@@ -78,7 +77,7 @@ async function resolveAuthConfigId(
  */
 export async function initiateConnection(
   toolkit: string,
-  redirectUrl?: string,
+  redirectUrl?: string
 ): Promise<{ redirectUrl: string; connectedAccountId: string }> {
   const client = getClient();
   const authConfigId = await resolveAuthConfigId(client, toolkit);
@@ -86,13 +85,13 @@ export async function initiateConnection(
   const connectionRequest = await client.connectedAccounts.link(
     COMPOSIO_ENTITY_ID,
     authConfigId,
-    redirectUrl ? { callbackUrl: redirectUrl } : undefined,
+    redirectUrl ? { callbackUrl: redirectUrl } : undefined
   );
 
   if (!connectionRequest.redirectUrl) {
     throw new Error(
       `Composio did not return an OAuth URL for "${toolkit}". ` +
-        `Make sure "${toolkit}" is a valid Composio app name.`,
+        `Make sure "${toolkit}" is a valid Composio app name.`
     );
   }
 
@@ -105,9 +104,7 @@ export async function initiateConnection(
 /**
  * List connected social accounts, optionally filtered by toolkit.
  */
-export async function listConnectedAccounts(
-  toolkit?: string,
-): Promise<SocialAccount[]> {
+export async function listConnectedAccounts(toolkit?: string): Promise<SocialAccount[]> {
   const client = getClient();
   const result = await client.connectedAccounts.list({
     userIds: [COMPOSIO_ENTITY_ID],
@@ -125,6 +122,48 @@ export async function listConnectedAccounts(
 }
 
 /**
+ * Verify one exact connected account against Composio's remote state.
+ *
+ * The entity ID is intentionally fixed here rather than supplied by an OAuth
+ * callback. Composio's retrieve response does not include the entity ID, so an
+ * entity-filtered list is the authoritative way to bind the account to Chvor.
+ */
+export async function verifyConnectedAccount(accountId: string, toolkit: string): Promise<boolean> {
+  if (!/^[a-zA-Z0-9_-]+$/.test(accountId) || !/^[a-zA-Z0-9_-]+$/.test(toolkit)) {
+    return false;
+  }
+
+  const client = getClient();
+  let cursor: string | undefined;
+  const seenCursors = new Set<string>();
+  do {
+    const result = await client.connectedAccounts.list({
+      userIds: [COMPOSIO_ENTITY_ID],
+      toolkitSlugs: [toolkit],
+      statuses: ["ACTIVE"],
+      limit: 100,
+      ...(cursor ? { cursor } : {}),
+    });
+    const exact = (result.items ?? []).find((item) => item.id === accountId);
+    if (exact) {
+      return (
+        exact.id === accountId &&
+        exact.status === "ACTIVE" &&
+        exact.toolkit?.slug === toolkit &&
+        exact.isDisabled === false
+      );
+    }
+
+    const nextCursor = result.nextCursor ?? undefined;
+    if (!nextCursor || seenCursors.has(nextCursor)) return false;
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  } while (cursor);
+
+  return false;
+}
+
+/**
  * Disconnect (delete) a connected account by ID.
  */
 export async function disconnectAccount(accountId: string): Promise<void> {
@@ -134,4 +173,3 @@ export async function disconnectAccount(accountId: string): Promise<void> {
   const client = getClient();
   await client.connectedAccounts.delete(accountId);
 }
-

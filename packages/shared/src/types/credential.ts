@@ -105,6 +105,10 @@ export interface IntegrationCatalogEntry {
   icon?: string;
   category: IntegrationCategory;
   credentialType?: string;
+  /** Exact active manifest identity for manifest-driven setup, when available. */
+  manifestId?: string;
+  manifestVersion?: string;
+  manifestCredentialId?: string;
   /** True iff a credential of this type already exists locally. */
   installed: boolean;
   /** OAuth-supported (direct or via Composio bridge). */

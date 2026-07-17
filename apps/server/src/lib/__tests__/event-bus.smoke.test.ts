@@ -100,6 +100,10 @@ describe("Phase A + B smoke — typed events, audit log, scope matcher", () => {
   it("maps paths to required scopes", () => {
     expect(requiredScopeFor("GET", "/api/credentials")).toBe("credential:read");
     expect(requiredScopeFor("POST", "/api/credentials/abc")).toBe("credential:write");
+    expect(requiredScopeFor("GET", "/api/integration-setup/flow-1")).toBe("credential:read");
+    expect(requiredScopeFor("POST", "/api/integration-setup")).toBe("credential:write");
+    expect(requiredScopeFor("GET", "/api/oauth/connections")).toBe("credential:read");
+    expect(requiredScopeFor("POST", "/api/oauth/initiate")).toBe("credential:write");
     expect(requiredScopeFor("POST", "/api/sessions")).toBe("tool:execute:*");
     expect(requiredScopeFor("GET", "/api/health")).toBe("api:read");
     expect(requiredScopeFor("GET", "/api/trajectories")).toBe("trajectory:read");

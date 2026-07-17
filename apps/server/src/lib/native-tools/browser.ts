@@ -13,6 +13,7 @@ import {
 } from "../credential-injector.ts";
 import { pickCredential, type PickResult } from "../credential-picker.ts";
 import { getCredentialData } from "../../db/credential-store.ts";
+import { assertCredentialAuthUsable } from "../integration-auth-gate.ts";
 import type {
   NativeToolContext,
   NativeToolHandler,
@@ -120,6 +121,7 @@ const handleBrowserNavigate: NativeToolHandler = async (
   let blockedMessage: string | null = null;
   await withSecretSeal(secretsToSeal, async () => {
     try {
+      assertCredentialPicksUsable(picks);
       await validateFetchUrl(expanded);
     } catch (err) {
       blockedMessage = redactKnownSecrets(err instanceof Error ? err.message : String(err));
@@ -140,6 +142,7 @@ const handleBrowserNavigate: NativeToolHandler = async (
     try {
       const { getBrowser } = await import("../browser-manager.ts");
       const stagehand = await getBrowser(sessionId);
+      assertCredentialPicksUsable(picks);
       await withTimeout(
         stagehand.page.goto(expanded, { waitUntil: "domcontentloaded" }),
         BROWSER_OP_TIMEOUT,
@@ -265,6 +268,7 @@ function directIdSelection(
   allowedTypes: Set<string> | null
 ): BrowserCredentialSelection | null {
   if (!CREDENTIAL_ID_RE.test(ref)) return null;
+  assertCredentialAuthUsable(ref);
   const byId = getCredentialData(ref);
   if (!byId) return null;
   assertAllowedType(byId.cred.type, allowedTypes);
@@ -359,6 +363,7 @@ function syncTypeSelection(
   if (pick.reason === "first-match-fallback" && pick.candidateCount > 1) {
     throw new Error(ambiguousCredentialMessage(credType));
   }
+  assertCredentialAuthUsable(pick.credentialId);
   const full = getCredentialData(pick.credentialId);
   if (!full) {
     throw new Error(`[browser_tools] credential ${pick.credentialId} could not be decrypted`);
@@ -451,6 +456,7 @@ async function interactiveTypeSelection(
     };
   }
 
+  assertCredentialAuthUsable(resolvedPick.credentialId);
   const full = getCredentialData(resolvedPick.credentialId);
   if (!full) {
     throw new Error(
@@ -500,6 +506,10 @@ function emitCredentialPicks(
   }
 }
 
+function assertCredentialPicksUsable(picks: readonly BrowserCredentialPick[]): void {
+  picks.forEach((pick) => assertCredentialAuthUsable(pick.credentialId));
+}
+
 const handleBrowserAct: NativeToolHandler = async (
   args: Record<string, unknown>,
   context?: NativeToolContext
@@ -531,6 +541,7 @@ const handleBrowserAct: NativeToolHandler = async (
     try {
       const { getBrowser } = await import("../browser-manager.ts");
       const stagehand = await getBrowser(sessionId);
+      assertCredentialPicksUsable(picks);
       const result = await withTimeout(stagehand.page.act(expanded), BROWSER_OP_TIMEOUT, "Action");
       const note =
         expandedTypes.length > 0 ? ` [credentials substituted: ${expandedTypes.join(", ")}]` : "";

@@ -5,11 +5,15 @@ import {
   INTEGRATION_MANIFEST_SCHEMA_VERSION,
   INTEGRATION_MANIFEST_SUPPORTED_SCHEMA_VERSIONS,
   INTEGRATION_MANIFEST_SUPPORTED_VERSIONS,
+  INTEGRATION_MANIFEST_V1_SCHEMA_VERSION,
+  INTEGRATION_MANIFEST_V2_SCHEMA_VERSION,
   SUPPORTED_INTEGRATION_MANIFEST_SCHEMA_VERSIONS,
   diagnoseIntegrationManifest,
+  integrationCredentialStorageKeySchema,
   integrationManifestErrorToDiagnostics,
   integrationMcpOperationNameSchema,
   integrationManifestV1Schema,
+  integrationManifestV2Schema,
   parseIntegrationManifest,
   safeParseIntegrationManifest,
   safeParseIntegrationManifestWithDiagnostics,
@@ -238,6 +242,16 @@ function manifestFixture() {
   };
 }
 
+function manifestV2Fixture() {
+  const manifest = manifestFixture();
+  return {
+    ...manifest,
+    schemaVersion: 2 as const,
+    oauth: manifest.oauth.map((declaration) =>
+      declaration.mode === "direct" ? { ...declaration, provider: "github" } : declaration
+    ),
+  };
+}
 function expectDiagnostic(value: unknown, code: string, path?: string) {
   const diagnostics = diagnoseIntegrationManifest(value);
   expect(diagnostics).toEqual(
@@ -247,11 +261,11 @@ function expectDiagnostic(value: unknown, code: string, path?: string) {
   );
 }
 
-describe("integration manifest v1", () => {
+describe("integration manifest schemas", () => {
   it("parses the complete declarative contract and exposes compatibility constants", () => {
     const parsed = parseIntegrationManifest(manifestFixture());
 
-    expect(parsed.schemaVersion).toBe(INTEGRATION_MANIFEST_SCHEMA_VERSION);
+    expect(parsed.schemaVersion).toBe(INTEGRATION_MANIFEST_V1_SCHEMA_VERSION);
     expect(parsed.tools.map((tool) => tool.kind)).toEqual(["native", "mcp", "http"]);
     expect(parsed.oauth.map((oauth) => oauth.mode)).toEqual(["direct", "broker"]);
     expect(parsed.credentials[0]?.fields.map((field) => field.sensitivity)).toEqual([
@@ -262,7 +276,8 @@ describe("integration manifest v1", () => {
       "path",
     ]);
     expect(parsed.requestedAccess.environment[0]?.enforcement).toBe("declared-only");
-    expect(SUPPORTED_INTEGRATION_MANIFEST_SCHEMA_VERSIONS).toEqual([1]);
+    expect(INTEGRATION_MANIFEST_SCHEMA_VERSION).toBe(INTEGRATION_MANIFEST_V2_SCHEMA_VERSION);
+    expect(SUPPORTED_INTEGRATION_MANIFEST_SCHEMA_VERSIONS).toEqual([1, 2]);
     expect(INTEGRATION_MANIFEST_SUPPORTED_SCHEMA_VERSIONS).toBe(
       SUPPORTED_INTEGRATION_MANIFEST_SCHEMA_VERSIONS
     );
@@ -270,9 +285,9 @@ describe("integration manifest v1", () => {
       SUPPORTED_INTEGRATION_MANIFEST_SCHEMA_VERSIONS
     );
     expect(INTEGRATION_MANIFEST_COMPATIBILITY).toMatchObject({
-      current: 1,
+      current: 2,
       minimum: 1,
-      maximum: 1,
+      maximum: 2,
     });
   });
 
@@ -300,7 +315,7 @@ describe("integration manifest v1", () => {
       success: true,
       diagnostics: [],
     });
-    expect(safeParseIntegrationManifestWithDiagnostics({ schemaVersion: 2 })).toEqual({
+    expect(safeParseIntegrationManifestWithDiagnostics({ schemaVersion: 3 })).toEqual({
       success: false,
       diagnostics: [
         expect.objectContaining({
@@ -367,6 +382,61 @@ describe("integration manifest v1", () => {
       fieldId: "api.token",
     });
     expectDiagnostic(duplicateCredentialRef, "duplicate_reference", "/tools/0/credentialFields/1");
+  });
+
+  it("keeps the legacy v1 credential contract unchanged and rejects storageKey", () => {
+    const legacy = manifestFixture();
+    expect(integrationManifestV1Schema.safeParse(legacy).success).toBe(true);
+
+    legacy.credentials[0]!.fields[0]!.storageKey = "clientId";
+    expect(integrationManifestV1Schema.safeParse(legacy).success).toBe(false);
+    expectDiagnostic(legacy, "unknown_field", "/credentials/0/fields/0/storageKey");
+  });
+
+  it("keeps v1 direct OAuth unchanged and requires explicit providers only in v2", () => {
+    const legacy = manifestFixture();
+    expect(integrationManifestV1Schema.safeParse(legacy).success).toBe(true);
+    Object.assign(legacy.oauth[0]!, { provider: "github" });
+    expect(integrationManifestV1Schema.safeParse(legacy).success).toBe(false);
+    expectDiagnostic(legacy, "unknown_field", "/oauth/0/provider");
+    const current = manifestV2Fixture();
+    expect(integrationManifestV2Schema.safeParse(current).success).toBe(true);
+    delete (current.oauth[0] as { provider?: string }).provider;
+    expect(integrationManifestV2Schema.safeParse(current).success).toBe(false);
+    expectDiagnostic(current, "missing_required_field", "/oauth/0/provider");
+  });
+
+  it("accepts v2 runtime storage keys while preserving normalized field IDs", () => {
+    const adapted = manifestV2Fixture();
+    adapted.credentials[0]!.fields[0]!.storageKey = "clientId";
+    adapted.credentials[0]!.fields[1]!.storageKey = "clientSecret";
+    const parsed = integrationManifestV2Schema.safeParse(adapted);
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.credentials[0]!.fields.slice(0, 2)).toMatchObject([
+      { id: "client.id", storageKey: "clientId" },
+      { id: "client.secret", storageKey: "clientSecret" },
+    ]);
+  });
+
+  it("rejects unsafe and colliding effective credential storage keys", () => {
+    for (const storageKey of ["client/id", "toString", "x".repeat(129)]) {
+      expect(integrationCredentialStorageKeySchema.safeParse(storageKey).success).toBe(false);
+    }
+
+    const unsafeImplicitKey = manifestV2Fixture();
+    unsafeImplicitKey.credentials[0]!.fields[0]!.id = "constructor";
+    expectDiagnostic(unsafeImplicitKey, "security_violation", "/credentials/0/fields/0/id");
+
+    const collisionWithImplicitId = manifestV2Fixture();
+    collisionWithImplicitId.credentials[0]!.fields[1]!.storageKey = "client.id";
+    expectDiagnostic(collisionWithImplicitId, "duplicate_id", "/credentials/0/fields/1/storageKey");
+
+    const explicitCollision = manifestV2Fixture();
+    explicitCollision.credentials[0]!.fields[0]!.storageKey = "clientId";
+    explicitCollision.credentials[0]!.fields[1]!.storageKey = "clientId";
+    expectDiagnostic(explicitCollision, "duplicate_id", "/credentials/0/fields/1/storageKey");
   });
 
   it("cross-validates capability, OAuth, credential, setup, and diagnostic references", () => {
@@ -771,7 +841,7 @@ describe("integration manifest v1", () => {
         code: "unsupported_schema_version",
         path: "/schemaVersion",
         message: "Integration manifest schema version is unsupported.",
-        hint: "Use schemaVersion 1; supported range is 1-1.",
+        hint: "Use schemaVersion 2 for new manifests; supported versions are 1, 2.",
       },
     ]);
   });
@@ -923,7 +993,7 @@ describe("integration manifest v1", () => {
         code: "validation_failed",
         path: "/",
         message: "Manifest validation failed.",
-        hint: "Validate the document with the v1 integration-manifest schema.",
+        hint: "Validate the document with a supported integration-manifest schema.",
       },
     ]);
   });

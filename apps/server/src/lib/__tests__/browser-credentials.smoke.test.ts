@@ -27,6 +27,7 @@ let listPendingCredentialChoices: typeof import("../credential-choice.ts").listP
 let resolveCredentialChoice: typeof import("../credential-choice.ts").resolveCredentialChoice;
 let setWSInstance: typeof import("../../gateway/ws-instance.ts").setWSInstance;
 let setSessionPin: typeof import("../../db/session-pin-store.ts").setSessionPin;
+let upsertIntegrationCredentialBinding: typeof import("../../db/integration-credential-binding-store.ts").upsertIntegrationCredentialBinding;
 
 beforeAll(async () => {
   ({ browserModule, expandBrowserCredentials, expandBrowserCredentialsInteractive } =
@@ -37,6 +38,8 @@ beforeAll(async () => {
     await import("../credential-choice.ts"));
   ({ setWSInstance } = await import("../../gateway/ws-instance.ts"));
   ({ setSessionPin } = await import("../../db/session-pin-store.ts"));
+  ({ upsertIntegrationCredentialBinding } =
+    await import("../../db/integration-credential-binding-store.ts"));
   setWSInstance({
     sendTo: () => true,
     getClientsBySessionId: () => ["ws-1"],
@@ -97,6 +100,27 @@ describe("expandBrowserCredentials — skill scope", () => {
     expect(out.picks[0]).toMatchObject({ reason: "single-match", pickedBy: "single-match" });
     expect(JSON.stringify(out.picks)).not.toContain("ghp_secret_value");
   });
+
+  it("rejects a credential whose integration binding requires reauthentication", () => {
+    const github = createCredential("Blocked GitHub", "github", { apiKey: "ghp_blocked" });
+    upsertIntegrationCredentialBinding({
+      credentialId: github.id,
+      integrationId: "provider.integration.github",
+      manifestVersion: "1.0.0",
+      manifestCredentialId: "credential.github",
+      authMethod: "api-key",
+      authStatus: "reauthentication-required",
+      failureCode: "credential_revoked",
+    });
+
+    expect(() =>
+      expandBrowserCredentials(`Bearer {{credentials.${github.id}}}`, "sess-1", {
+        allowedCredentialTypes: ["github"],
+      })
+    ).toThrow(/reauthentication/i);
+    expect(browserMocks.goto).not.toHaveBeenCalled();
+    expect(browserMocks.act).not.toHaveBeenCalled();
+  });
 });
 
 describe("expandBrowserCredentials — ambiguous credentials", () => {
@@ -114,7 +138,12 @@ describe("expandBrowserCredentials — ambiguous credentials", () => {
   });
 
   it("still resolves without prompting when a session pin picks a clear winner", () => {
-    const work = createCredential("Work GitHub", "github", { apiKey: "ghp_work" }, "work enterprise");
+    const work = createCredential(
+      "Work GitHub",
+      "github",
+      { apiKey: "ghp_work" },
+      "work enterprise"
+    );
     createCredential("Personal GitHub", "github", { apiKey: "ghp_personal" }, "personal");
     // Unique session id — reset() does not clear pins, so avoid colliding with
     // other tests that reuse "sess-1" and expect ambiguity.
