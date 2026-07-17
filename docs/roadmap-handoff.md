@@ -25,10 +25,9 @@ Never implement the next batch before the current pull request is merged.
 - Tracks A (inspectable execution/evaluation) and B (understandable memory) are complete.
 - C01, the versioned integration manifest, merged in
   [PR #117](https://github.com/luka-zivkovic/chvor/pull/117).
-- C02, manifest-driven setup and reauthentication, is tracked in
-  [PR #118](https://github.com/luka-zivkovic/chvor/pull/118). Check GitHub and the roadmap for its
-  final merge state before doing anything else.
-- The next eligible batch after C02 merges is **C03 — Integration diagnostics and repairs**.
+- C02, manifest-driven setup and reauthentication, merged in
+  [PR #118](https://github.com/luka-zivkovic/chvor/pull/118).
+- The next eligible batch is **C03 — Integration diagnostics and repairs**.
 
 At the C02 review boundary, the full repository verification passed: 1,261 tests passed, one test
 was skipped, typecheck and build passed, lint had zero errors and 124 baseline warnings, the
@@ -81,7 +80,7 @@ Suggested prompt:
 
 > Continue Chvor's platform-evolution roadmap. Treat `docs/roadmap-handoff.md`,
 > `docs/platform-evolution-batches.md`, merged pull requests, and current Git state as the source of
-> truth. Verify C02 PR #118 is merged and sync a clean `main`; otherwise finish its review/merge
-> lifecycle first. Then create a goal for the remaining roadmap and execute one strict
+> truth. Verify C02 PR #118 is merged and sync a clean `main`. Then create a goal for the remaining
+> roadmap and execute one strict
 > branch/PR/review/merge batch at a time, starting with C03. Preserve the documented architectural
 > invariants and do not begin a later batch before the current batch is merged.
