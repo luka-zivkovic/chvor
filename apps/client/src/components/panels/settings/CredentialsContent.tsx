@@ -95,8 +95,8 @@ export function CredentialsContent() {
         const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
       }
-      const data = (await res.json()) as IntegrationResolution;
-      setResearchResult(data);
+      const body = (await res.json()) as { data: IntegrationResolution };
+      setResearchResult(body.data);
     } catch (err) {
       setResearchError(err instanceof Error ? err.message : "Research failed");
     } finally {

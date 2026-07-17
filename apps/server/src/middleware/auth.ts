@@ -134,6 +134,12 @@ export function requiredScopeFor(method: string, path: string): string | null {
     return "credential:write";
   }
 
+  // Integration setup and OAuth routes read, create, update, and delete
+  // credential records, so generic api:* scopes must not grant access.
+  if (p.startsWith("/api/integration-setup") || p.startsWith("/api/oauth")) {
+    return method === "GET" || method === "HEAD" ? "credential:read" : "credential:write";
+  }
+
   // Skills / tools listing (safe reads)
   if (p.startsWith("/api/skills") && method === "GET") return "skill:read";
   if (p.startsWith("/api/skills")) return "skill:write";

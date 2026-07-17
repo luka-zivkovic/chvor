@@ -6,7 +6,7 @@ import { join } from "node:path";
 const tmp = mkdtempSync(join(tmpdir(), "chvor-credential-resolver-"));
 process.env.CHVOR_DATA_DIR = tmp;
 
-let resolveEnvPlaceholders: typeof import("../credential-resolver.ts").resolveEnvPlaceholders;
+let resolver: typeof import("../credential-resolver.ts");
 let createCredential: typeof import("../../db/credential-store.ts").createCredential;
 let deleteCredential: typeof import("../../db/credential-store.ts").deleteCredential;
 let listCredentials: typeof import("../../db/credential-store.ts").listCredentials;
@@ -14,15 +14,17 @@ let setSessionPin: typeof import("../../db/session-pin-store.ts").setSessionPin;
 let runWithTrajectoryCapture: typeof import("../orchestrator/trajectory-adapter.ts").runWithTrajectoryCapture;
 let getTrajectory: typeof import("../../db/trajectory-store.ts").getTrajectory;
 let getDb: typeof import("../../db/database.ts").getDb;
+let setupStore: typeof import("../../db/integration-setup-store.ts");
 
 beforeAll(async () => {
-  ({ resolveEnvPlaceholders } = await import("../credential-resolver.ts"));
+  resolver = await import("../credential-resolver.ts");
   ({ createCredential, deleteCredential, listCredentials } =
     await import("../../db/credential-store.ts"));
   ({ setSessionPin } = await import("../../db/session-pin-store.ts"));
   ({ runWithTrajectoryCapture } = await import("../orchestrator/trajectory-adapter.ts"));
   ({ getTrajectory } = await import("../../db/trajectory-store.ts"));
   ({ getDb } = await import("../../db/database.ts"));
+  setupStore = await import("../../db/integration-setup-store.ts");
 });
 
 function reset() {
@@ -37,16 +39,21 @@ describe("credential-resolver MCP placeholder ambiguity", () => {
     createCredential("Personal GitHub", "github", { apiKey: "ghp_personal" }, "personal");
 
     expect(() =>
-      resolveEnvPlaceholders({ GITHUB_TOKEN: "{{credentials.github}}" }, ["github"])
+      resolver.resolveEnvPlaceholders({ GITHUB_TOKEN: "{{credentials.github}}" }, ["github"])
     ).toThrow(/multiple credentials of type "github"/);
   });
 
   it("resolves the pinned credential when a session pin selects a clear winner", () => {
-    const work = createCredential("Work GitHub", "github", { apiKey: "ghp_work" }, "work enterprise");
+    const work = createCredential(
+      "Work GitHub",
+      "github",
+      { apiKey: "ghp_work" },
+      "work enterprise"
+    );
     createCredential("Personal GitHub", "github", { apiKey: "ghp_personal" }, "personal");
     setSessionPin("sess-env", "github", work.id);
 
-    const resolved = resolveEnvPlaceholders(
+    const resolved = resolver.resolveEnvPlaceholders(
       { GITHUB_TOKEN: "{{credentials.github}}" },
       ["github"],
       { sessionId: "sess-env" }
@@ -76,7 +83,7 @@ describe("credential-resolver MCP placeholder ambiguity", () => {
         actor: { type: "test", id: "test" },
       },
       execute: async () => {
-        const resolved = resolveEnvPlaceholders(
+        const resolved = resolver.resolveEnvPlaceholders(
           { MCP_TOKEN: "{{credentials.mcp-test}}" },
           ["mcp-test"]
         );
@@ -90,5 +97,45 @@ describe("credential-resolver MCP placeholder ambiguity", () => {
       steps: getDb().prepare("SELECT * FROM trajectory_steps").all(),
     });
     expect(raw).not.toContain(secret);
+  });
+
+  it("rejects a credential whose binding requires reauthentication", () => {
+    const credential = createCredential("Revoked GitHub", "github", { apiKey: "ghp_revoked" });
+    setupStore.upsertIntegrationCredentialBinding({
+      credentialId: credential.id,
+      integrationId: "github",
+      manifestCredentialId: "credential.github",
+      manifestVersion: "1.0.0",
+      authMethod: "api-key",
+      authStatus: "reauthentication-required",
+      failureCode: "credential_revoked",
+    });
+
+    expect(resolver.hasRequiredCredentials(["github"])).toBe(false);
+    expect(() =>
+      resolver.resolveEnvPlaceholders({ GITHUB_TOKEN: "{{credentials.github}}" }, ["github"])
+    ).toThrow(/reconnect it in Settings > Integrations/);
+  });
+
+  it("transitions and blocks an active binding once tokenExpiresAt has elapsed", () => {
+    const credential = createCredential("Elapsed GitHub", "github", { apiKey: "ghp_expired" });
+    const key = {
+      credentialId: credential.id,
+      integrationId: "github",
+      manifestCredentialId: "credential.github",
+    };
+    setupStore.upsertIntegrationCredentialBinding({
+      ...key,
+      manifestVersion: "1.0.0",
+      authMethod: "oauth2",
+      authStatus: "active",
+      tokenExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+    });
+
+    expect(resolver.hasRequiredCredentials(["github"])).toBe(false);
+    expect(setupStore.getIntegrationCredentialBinding(key)).toMatchObject({
+      authStatus: "reauthentication-required",
+      failureCode: "oauth_refresh_unavailable",
+    });
   });
 });

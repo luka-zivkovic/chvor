@@ -74,7 +74,6 @@ import type {
   MemoryGraphExport,
   MemoryStats,
   OAuthProviderDef,
-  OAuthConnection,
   OrchestratorCheckpoint,
   TrajectoryActor,
   TrajectoryArtifactRef,
@@ -88,7 +87,10 @@ import type {
 import { createEvaluationCasesApi } from "./evaluation-cases-api";
 import { createEvaluationRunsApi } from "./evaluation-runs-api";
 import { HttpError, responseHttpError } from "./http-error";
+import { createIntegrationSetupApi } from "./integration-setup-api";
+import { createIntegrationsApi } from "./integrations-api";
 import { createMemoryBlocksApi } from "./memory-blocks-api";
+import { createOAuthApi } from "./oauth-api";
 export interface ProvidersResponse {
   llm: LLMProviderDef[];
   embedding: EmbeddingProviderDef[];
@@ -252,15 +254,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: "same-origin",
   });
 
-  if (res.status === 401) {
-    // Session expired or not authenticated — notify session store
-    const { useSessionStore } = await import("../stores/session-store");
-    useSessionStore.getState().setAuthenticated(false);
-    throw new HttpError(401, "Session expired");
-  }
-
   if (!res.ok) {
     const body = await res.json().catch(() => undefined);
+    const terminalProviderAuthFailure =
+      (res.status === 401 || res.status === 422) &&
+      path.startsWith("/oauth/refresh/") &&
+      typeof body === "object" &&
+      body !== null &&
+      !Array.isArray(body) &&
+      Object.getOwnPropertyDescriptor(body, "needsReauthentication")?.value === true;
+    if (res.status === 401 && !terminalProviderAuthFailure) {
+      // A real Chvor session failure logs out; provider authorization failures do not.
+      const { useSessionStore } = await import("../stores/session-store");
+      useSessionStore.getState().setAuthenticated(false);
+      throw new HttpError(401, "Session expired");
+    }
     throw responseHttpError(res.status, body, `HTTP ${res.status}`);
   }
 
@@ -944,57 +952,8 @@ export const api = {
       request<null>(`/pc/connections/${id}`, { method: "DELETE" }),
   },
 
-  oauth: {
-    providers: () =>
-      request<{
-        providers: (OAuthProviderDef & { connected: boolean; hasSetupCredentials: boolean })[];
-        connections: OAuthConnection[];
-        hasComposioKey: boolean;
-      }>("/oauth/providers"),
-    initiate: (provider: string) =>
-      request<{ redirectUrl: string; connectionId: string; method: string }>("/oauth/initiate", {
-        method: "POST",
-        body: JSON.stringify({ provider }),
-      }),
-    connections: () => request<OAuthConnection[]>("/oauth/connections"),
-    disconnect: (id: string) =>
-      request<{ disconnected: boolean; method: string }>(`/oauth/connections/${id}`, {
-        method: "DELETE",
-      }),
-    refresh: (credentialId: string) =>
-      request<{ refreshed: boolean; expiresAt?: string }>(`/oauth/refresh/${credentialId}`, {
-        method: "POST",
-      }),
-    synthesizedRedirectUrl: () =>
-      request<{ redirectUrl: string }>("/oauth/synthesized/redirect-url"),
-    synthesizedInitiate: (body: {
-      credentialType: string;
-      providerName: string;
-      clientId: string;
-      clientSecret?: string;
-      authUrl: string;
-      tokenUrl: string;
-      scopes: string[];
-      extraAuthParams?: Record<string, string>;
-      extraTokenParams?: Record<string, string>;
-    }) =>
-      request<{ redirectUrl: string; connectionId: string; method: string; redirectUriUsed: string }>(
-        "/oauth/synthesized/initiate",
-        { method: "POST", body: JSON.stringify(body) },
-      ),
-  },
+  oauth: createOAuthApi(request),
 
-  integrations: {
-    catalog: () =>
-      request<import("@chvor/shared").IntegrationCatalogResponse>(
-        "/integrations/catalog",
-      ),
-    research: (q: string, opts?: { specUrl?: string }) => {
-      const params = new URLSearchParams({ q });
-      if (opts?.specUrl) params.set("specUrl", opts.specUrl);
-      return request<import("@chvor/shared").IntegrationResolution>(
-        `/integrations/research?${params.toString()}`,
-      );
-    },
-  },
+  integrations: createIntegrationsApi(request),
+  integrationSetup: createIntegrationSetupApi(request),
 };

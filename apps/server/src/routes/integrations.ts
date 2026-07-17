@@ -1,13 +1,11 @@
 import { Hono } from "hono";
 import { resolveIntegration } from "../lib/integration-resolver.ts";
-import { resolveIntegrationManifests } from "../lib/integration-manifest-resolver.ts";
 import { researchIntegration } from "../lib/integration-research.ts";
-import { getLoadedToolsSnapshot } from "../lib/capability-loader.ts";
-import { getNativeToolGroupMap, getNativeToolTarget } from "../lib/native-tools/index.ts";
-import { DIRECT_OAUTH_PROVIDERS } from "../lib/oauth-providers.ts";
+import { getActiveIntegrationManifestCatalog } from "../lib/integration-manifest-catalog.ts";
 import type {
   IntegrationCatalogEntry,
   IntegrationCatalogResponse,
+  IntegrationManifest,
   IntegrationResolution,
 } from "@chvor/shared";
 import {
@@ -27,8 +25,8 @@ const integrations = new Hono();
 // or runs the legacy cleanup performed by a cold loadTools().
 integrations.get("/manifests", (c) => {
   c.header("Cache-Control", "no-store");
-  const tools = getLoadedToolsSnapshot();
-  if (!tools) {
+  const result = getActiveIntegrationManifestCatalog();
+  if (!result) {
     return c.json(
       {
         error: {
@@ -39,15 +37,6 @@ integrations.get("/manifests", (c) => {
       503
     );
   }
-  const nativeToolBindings = Object.keys(getNativeToolGroupMap()).flatMap((operation) => {
-    const target = getNativeToolTarget(operation);
-    return target?.kind === "tool" ? [{ capabilityId: target.id, operation }] : [];
-  });
-  const result = resolveIntegrationManifests({
-    tools,
-    nativeToolBindings,
-    directOAuthProviders: DIRECT_OAUTH_PROVIDERS,
-  });
   return c.json({ data: result });
 });
 
@@ -83,8 +72,7 @@ integrations.get("/research", async (c) => {
     // the spec-discovery step. Must be HTTPS; further safety checks happen
     // inside discoverOpenApi via assertSafeSynthesizedUrl.
     const rawHint = c.req.query("specUrl")?.trim();
-    const hintedSpecUrl =
-      rawHint && rawHint.startsWith("https://") ? rawHint : undefined;
+    const hintedSpecUrl = rawHint && rawHint.startsWith("https://") ? rawHint : undefined;
 
     // Rate limit check
     const ip = c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || "unknown";
@@ -98,7 +86,7 @@ integrations.get("/research", async (c) => {
     if (!hintedSpecUrl) {
       const resolution = await resolveIntegration(query);
       if (resolution) {
-        return c.json(resolution);
+        return c.json({ ...resolution, data: resolution });
       }
     }
 
@@ -107,7 +95,7 @@ integrations.get("/research", async (c) => {
     const cacheKey = `${query.toLowerCase()}::${hintedSpecUrl ?? ""}`;
     const cached = researchCache.get(cacheKey);
     if (cached && Date.now() < cached.expiresAt) {
-      return c.json(cached.result);
+      return c.json({ ...cached.result, data: cached.result });
     }
 
     // Tier 3: AI research
@@ -123,13 +111,10 @@ integrations.get("/research", async (c) => {
     // Cache the result
     researchCache.set(cacheKey, { result, expiresAt: Date.now() + CACHE_TTL_MS });
 
-    return c.json(result);
+    return c.json({ ...result, data: result });
   } catch (err) {
     console.error("[integrations] research failed:", err);
-    return c.json(
-      { error: err instanceof Error ? err.message : "Research failed" },
-      500
-    );
+    return c.json({ error: err instanceof Error ? err.message : "Research failed" }, 500);
   }
 });
 
@@ -152,6 +137,37 @@ interface CatalogRegistryEntry {
   requires?: { credentials?: string[] };
 }
 
+function declarationId(value: string): string {
+  return value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[^a-z]+/, "")
+    .replace(/[._-]{2,}/g, "-")
+    .replace(/[._-]+$/, "")
+    .slice(0, 110);
+}
+
+function catalogManifestReference(
+  manifests: readonly IntegrationManifest[],
+  manifestId: string,
+  credentialType: string
+): Pick<IntegrationCatalogEntry, "manifestId" | "manifestVersion" | "manifestCredentialId"> {
+  const manifest = manifests.find((candidate) => candidate.id === manifestId);
+  if (!manifest) return {};
+  const manifestCredentialId = `credential.${declarationId(credentialType)}`;
+  if (
+    !manifest.credentials.some((credential) => credential.id === manifestCredentialId) ||
+    !manifest.setup.some(
+      (step) => step.kind === "credential" && step.credentialId === manifestCredentialId
+    )
+  ) {
+    return {};
+  }
+  return { manifestId: manifest.id, manifestVersion: manifest.version, manifestCredentialId };
+}
+
 async function loadRegistryEntries(): Promise<CatalogRegistryEntry[]> {
   try {
     const idx = await fetchRegistryIndex();
@@ -164,9 +180,8 @@ async function loadRegistryEntries(): Promise<CatalogRegistryEntry[]> {
 
 integrations.get("/catalog", async (c) => {
   try {
-    const installedTypes = new Set(
-      listCredentials().map((cr) => cr.type),
-    );
+    const installedTypes = new Set(listCredentials().map((cr) => cr.type));
+    const manifests = getActiveIntegrationManifestCatalog()?.manifests ?? [];
 
     const entries: IntegrationCatalogEntry[] = [];
 
@@ -179,6 +194,7 @@ integrations.get("/catalog", async (c) => {
         icon: p.icon,
         category: "llm",
         credentialType: p.credentialType,
+        ...catalogManifestReference(manifests, `provider.llm.${p.id}`, p.credentialType),
         installed: installedTypes.has(p.credentialType),
       });
     }
@@ -192,6 +208,7 @@ integrations.get("/catalog", async (c) => {
         icon: p.icon,
         category: "embedding",
         credentialType: p.credentialType,
+        ...catalogManifestReference(manifests, `provider.embedding.${p.id}`, p.credentialType),
         installed: installedTypes.has(p.credentialType),
       });
     }
@@ -204,6 +221,7 @@ integrations.get("/catalog", async (c) => {
         icon: p.icon,
         category: "integration",
         credentialType: p.credentialType,
+        ...catalogManifestReference(manifests, `provider.integration.${p.id}`, p.credentialType),
         installed: installedTypes.has(p.credentialType),
       });
     }
@@ -215,6 +233,7 @@ integrations.get("/catalog", async (c) => {
         description: `${p.name} image generation`,
         category: "image-gen",
         credentialType: p.credentialType,
+        ...catalogManifestReference(manifests, `provider.image.${p.id}`, p.credentialType),
         installed: installedTypes.has(p.credentialType),
       });
     }
@@ -227,6 +246,11 @@ integrations.get("/catalog", async (c) => {
         icon: p.icon,
         category: "oauth",
         credentialType: `oauth-token-${p.id}`,
+        ...catalogManifestReference(
+          manifests,
+          `oauth.${p.id}`,
+          p.setupCredentialType ?? "composio"
+        ),
         installed: installedTypes.has(`oauth-token-${p.id}`),
         oauth: true,
       });
@@ -238,8 +262,7 @@ integrations.get("/catalog", async (c) => {
 
     const registry = await loadRegistryEntries();
     for (const r of registry) {
-      const credType =
-        r.credentials?.type ?? r.requires?.credentials?.[0];
+      const credType = r.credentials?.type ?? r.requires?.credentials?.[0];
       if (!credType) continue;
       const id = `registry:${r.id}`;
       if (seenIds.has(id)) continue;
@@ -250,6 +273,7 @@ integrations.get("/catalog", async (c) => {
         description: r.description,
         category: "registry",
         credentialType: credType,
+        ...catalogManifestReference(manifests, `tool.${declarationId(r.id)}`, credType),
         installed: installedRegistry.has(r.id) || installedTypes.has(credType),
         tags: r.tags,
       });
@@ -259,13 +283,10 @@ integrations.get("/catalog", async (c) => {
       entries,
       total: entries.length,
     };
-    return c.json(response);
+    return c.json({ ...response, data: response });
   } catch (err) {
     console.error("[integrations] catalog failed:", err);
-    return c.json(
-      { error: err instanceof Error ? err.message : "Catalog failed" },
-      500,
-    );
+    return c.json({ error: err instanceof Error ? err.message : "Catalog failed" }, 500);
   }
 });
 

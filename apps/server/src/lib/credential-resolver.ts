@@ -2,6 +2,7 @@ import { listCredentials, getCredentialData } from "../db/credential-store.ts";
 import { pickCredential, type PickResult } from "./credential-picker.ts";
 import { extractSecretValues } from "./credential-injector.ts";
 import { registerTrajectorySecrets } from "./orchestrator/trajectory-adapter.ts";
+import { assertCredentialAuthUsable, isCredentialAuthUsable } from "./integration-auth-gate.ts";
 
 const PLACEHOLDER_RE = /\{\{credentials\.([^}]+)\}\}/g;
 
@@ -29,12 +30,12 @@ function extractCredValue(data: Record<string, string>, field?: string): string 
  * Check whether all required credential types have been saved.
  * Returns true when no credentials are required OR all exist.
  */
-export function hasRequiredCredentials(
-  requiredTypes: string[] | undefined
-): boolean {
+export function hasRequiredCredentials(requiredTypes: string[] | undefined): boolean {
   if (!requiredTypes || requiredTypes.length === 0) return true;
   const allCreds = listCredentials();
-  return requiredTypes.every((t) => allCreds.some((c) => c.type === t));
+  return requiredTypes.every((t) =>
+    allCreds.some((credential) => credential.type === t && isCredentialAuthUsable(credential.id))
+  );
 }
 
 /**
@@ -70,9 +71,16 @@ function loadPickedCredentialData(
     preferredUsageContext: pickerCtx?.preferredUsageContext,
   });
   if (!pick) return null;
-  if (pick.reason === "first-match-fallback" && pick.candidateCount > 1 && !pickerCtx?.allowAmbiguousFallback) {
-    throw new Error(`[credential-resolver] multiple credentials of type "${reqType}" are available and none was pinned or explicitly selected — pin a credential for this session or use a more specific credential reference`);
+  if (
+    pick.reason === "first-match-fallback" &&
+    pick.candidateCount > 1 &&
+    !pickerCtx?.allowAmbiguousFallback
+  ) {
+    throw new Error(
+      `[credential-resolver] multiple credentials of type "${reqType}" are available and none was pinned or explicitly selected — pin a credential for this session or use a more specific credential reference`
+    );
   }
+  assertCredentialAuthUsable(pick.credentialId);
   const full = getCredentialData(pick.credentialId);
   if (!full) return null;
   const secrets = extractSecretValues(full.data);
@@ -130,11 +138,15 @@ export function resolveEnvPlaceholders(
       const { type, field } = parseCredRef(credRef);
       const data = credentialsByType.get(type);
       if (!data) {
-        throw new Error(`[credential-resolver] missing credential for type "${type}" in env var "${key}" — add it in Settings > Credentials`);
+        throw new Error(
+          `[credential-resolver] missing credential for type "${type}" in env var "${key}" — add it in Settings > Credentials`
+        );
       }
       const val = extractCredValue(data, field);
       if (!val) {
-        throw new Error(`[credential-resolver] credential "${type}"${field ? ` field "${field}"` : ""} has no usable value for env var "${key}"`);
+        throw new Error(
+          `[credential-resolver] credential "${type}"${field ? ` field "${field}"` : ""} has no usable value for env var "${key}"`
+        );
       }
       return val;
     });
@@ -166,11 +178,15 @@ export function resolveUrlPlaceholders(
     const { type, field } = parseCredRef(credRef);
     const data = credentialsByType.get(type);
     if (!data) {
-      throw new Error(`[credential-resolver] missing credential for type "${type}" — add it in Settings > Credentials`);
+      throw new Error(
+        `[credential-resolver] missing credential for type "${type}" — add it in Settings > Credentials`
+      );
     }
     const value = extractCredValue(data, field);
     if (!value) {
-      throw new Error(`[credential-resolver] credential "${type}"${field ? ` field "${field}"` : ""} has no usable value`);
+      throw new Error(
+        `[credential-resolver] credential "${type}"${field ? ` field "${field}"` : ""} has no usable value`
+      );
     }
     return encodeURIComponent(value);
   });

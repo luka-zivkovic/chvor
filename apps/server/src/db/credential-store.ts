@@ -198,6 +198,14 @@ export function getCredentialData(
   }
 }
 
+/** Return the opaque encrypted row version without decrypting credential data. */
+export function getCredentialCiphertextVersion(id: string): string | null {
+  const row = getDb()
+    .prepare("SELECT encrypted_data FROM credentials WHERE id = ?")
+    .get(id) as { encrypted_data: string } | undefined;
+  return row?.encrypted_data ?? null;
+}
+
 /**
  * Per-field update payload. A `null` value explicitly deletes that field; an
  * empty string keeps the existing value (forms submit blank to mean
@@ -206,6 +214,68 @@ export function getCredentialData(
  */
 export type CredentialDataPatch = Record<string, string | null>;
 
+export type CredentialDataCompareAndSwapResult =
+  | { outcome: "updated"; data: CredentialData }
+  | { outcome: "conflict" | "not-found" | "decrypt-failed" };
+
+function mergeCredentialDataPatch(
+  existingData: CredentialData,
+  data: CredentialDataPatch
+): CredentialData {
+  const merged: CredentialData = { ...existingData };
+  for (const [key, value] of Object.entries(data)) {
+    if (value === null) delete merged[key];
+    else if (value === "") continue;
+    else merged[key] = value;
+  }
+  return merged;
+}
+
+/**
+ * Atomically update credential data only while the encrypted row still
+ * matches the caller's snapshot. The ciphertext is an opaque row version:
+ * every credential-data write produces fresh ciphertext, so a rotating OAuth
+ * refresh cannot overwrite tokens committed by a concurrent refresh.
+ */
+export function updateCredentialDataIfUnchanged(
+  id: string,
+  expectedEncryptedData: string,
+  data: CredentialDataPatch,
+  onUpdated?: (data: CredentialData) => void
+): CredentialDataCompareAndSwapResult {
+  const db = getDb();
+  return db
+    .transaction((): CredentialDataCompareAndSwapResult => {
+      const row = db.prepare("SELECT * FROM credentials WHERE id = ?").get(id) as
+        | CredentialRow
+        | undefined;
+      if (!row) return { outcome: "not-found" };
+      if (row.encrypted_data !== expectedEncryptedData) return { outcome: "conflict" };
+
+      let existingData: CredentialData;
+      try {
+        existingData = JSON.parse(decrypt(row.encrypted_data)) as CredentialData;
+      } catch (err) {
+        console.error(`[credential-store] decrypt failed for credential ${id}:`, err);
+        return { outcome: "decrypt-failed" };
+      }
+
+      const newData = mergeCredentialDataPatch(existingData, data);
+      const newEncrypted = encrypt(JSON.stringify(newData));
+      const now = new Date().toISOString();
+      const updated = db
+        .prepare(
+          `UPDATE credentials SET encrypted_data = ?, test_status = 'untested', updated_at = ?
+         WHERE id = ? AND encrypted_data = ?`
+        )
+        .run(newEncrypted, now, id, expectedEncryptedData);
+      if (updated.changes !== 1) return { outcome: "conflict" };
+      onUpdated?.(newData);
+      return { outcome: "updated", data: newData };
+    })
+    .immediate();
+}
+
 export function updateCredential(
   id: string,
   name: string | undefined,
@@ -213,55 +283,65 @@ export function updateCredential(
   usageContext?: string
 ): CredentialSummary | null {
   const db = getDb();
-  const row = db.prepare("SELECT * FROM credentials WHERE id = ?").get(id) as CredentialRow | undefined;
-  if (!row) return null;
+  return db
+    .transaction((): CredentialSummary | null => {
+      const row = db.prepare("SELECT * FROM credentials WHERE id = ?").get(id) as
+        | CredentialRow
+        | undefined;
+      if (!row) return null;
 
-  const cred = rowToCredential(row);
-  let existingData: CredentialData;
-  try {
-    existingData = JSON.parse(decrypt(cred.encryptedData)) as CredentialData;
-  } catch (err) {
-    console.error(`[credential-store] decrypt failed for credential ${id}:`, err);
-    return null;
-  }
-  const now = new Date().toISOString();
+      const cred = rowToCredential(row);
+      let existingData: CredentialData;
+      try {
+        existingData = JSON.parse(decrypt(cred.encryptedData)) as CredentialData;
+      } catch (err) {
+        console.error(`[credential-store] decrypt failed for credential ${id}:`, err);
+        return null;
+      }
+      const now = new Date().toISOString();
 
-  const newName = name ?? cred.name;
-  // Merge the patch into existing data:
-  //   null → explicitly delete the field
-  //   ""   → keep the existing value (forms submit blank to mean "unchanged")
-  //   else → set the new value
-  // Previously an empty string DELETED the field, which silently dropped
-  // unchanged secrets (and corrupted OAuth token blobs) on partial updates.
-  let newData: CredentialData;
-  if (data) {
-    const merged: CredentialData = { ...existingData };
-    for (const [k, v] of Object.entries(data)) {
-      if (v === null) delete merged[k];
-      else if (v === "") continue;
-      else merged[k] = v;
-    }
-    newData = merged;
-  } else {
-    newData = existingData;
-  }
-  const newEncrypted = data ? encrypt(JSON.stringify(newData)) : cred.encryptedData;
-  const newTestStatus = data ? "untested" : (cred.testStatus ?? "untested");
-  const newUsageContext = usageContext !== undefined ? usageContext : cred.usageContext;
+      const newName = name ?? cred.name;
+      // Merge the patch into existing data:
+      //   null → explicitly delete the field
+      //   ""   → keep the existing value (forms submit blank to mean "unchanged")
+      //   else → set the new value
+      // Previously an empty string DELETED the field, which silently dropped
+      // unchanged secrets (and corrupted OAuth token blobs) on partial updates.
+      const newData = data
+        ? mergeCredentialDataPatch(existingData, data)
+        : existingData;
+      const newEncrypted = data
+        ? encrypt(JSON.stringify(newData))
+        : cred.encryptedData;
+      const newTestStatus = data ? "untested" : (cred.testStatus ?? "untested");
+      const newUsageContext = usageContext !== undefined ? usageContext : cred.usageContext;
 
-  db.prepare(
-    `UPDATE credentials SET name = ?, encrypted_data = ?, usage_context = ?, test_status = ?, updated_at = ? WHERE id = ?`
-  ).run(newName, newEncrypted, newUsageContext ?? null, newTestStatus, now, id);
+      const updatedRow = db.prepare(
+        `UPDATE credentials
+         SET name = ?, encrypted_data = ?, usage_context = ?, test_status = ?, updated_at = ?
+         WHERE id = ? AND encrypted_data = ?`
+      ).run(
+        newName,
+        newEncrypted,
+        newUsageContext ?? null,
+        newTestStatus,
+        now,
+        id,
+        cred.encryptedData
+      );
+      if (updatedRow.changes !== 1) return null;
 
-  const updated: Credential = {
-    ...cred,
-    name: newName,
-    encryptedData: newEncrypted,
-    usageContext: newUsageContext,
-    updatedAt: now,
-    testStatus: newTestStatus as Credential["testStatus"],
-  };
-  return toSummary(updated, newData);
+      const updated: Credential = {
+        ...cred,
+        name: newName,
+        encryptedData: newEncrypted,
+        usageContext: newUsageContext,
+        updatedAt: now,
+        testStatus: newTestStatus as Credential["testStatus"],
+      };
+      return toSummary(updated, newData);
+    })
+    .immediate();
 }
 
 export function updateTestStatus(

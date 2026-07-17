@@ -8,6 +8,7 @@ import {
   migrateMemoryBlocksV35,
   registerMemoryBlockSqlFunctions,
 } from "./migrations/memory-blocks-v35.ts";
+import { migrateIntegrationSetupV36 } from "./migrations/integration-setup-v36.ts";
 
 interface MigrationMessage {
   id: string;
@@ -1051,5 +1052,10 @@ export function runMigrations(db: Database.Database, vecAvailable: boolean): voi
   if (currentVersion < 35) {
     migrateMemoryBlocksV35(db);
     console.log("[db] migration v35 applied: versioned stable memory blocks");
+  }
+
+  if (currentVersion < 36) {
+    migrateIntegrationSetupV36(db);
+    console.log("[db] migration v36 applied: resumable integration setup persistence");
   }
 }

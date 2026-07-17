@@ -8,26 +8,18 @@ vi.mock("../../lib/integration-research.ts", () => ({
   researchIntegration: vi.fn(),
 }));
 
+vi.mock("../../lib/registry-client.ts", () => ({
+  fetchRegistryIndex: vi.fn().mockResolvedValue({ entries: [] }),
+  getDefaultRegistryUrl: vi.fn().mockReturnValue("https://registry.chvor.ai/v1"),
+  readCachedIndex: vi.fn().mockReturnValue({ entries: [] }),
+}));
+
 const manifestMocks = vi.hoisted(() => ({
-  resolve: vi.fn(),
-  getLoadedToolsSnapshot: vi.fn(),
-  getNativeToolGroupMap: vi.fn(),
-  getNativeToolTarget: vi.fn(),
-  loadTools: vi.fn(),
+  getCatalog: vi.fn(),
 }));
 
-vi.mock("../../lib/integration-manifest-resolver.ts", () => ({
-  resolveIntegrationManifests: manifestMocks.resolve,
-}));
-
-vi.mock("../../lib/capability-loader.ts", () => ({
-  getLoadedToolsSnapshot: manifestMocks.getLoadedToolsSnapshot,
-  loadTools: manifestMocks.loadTools,
-}));
-
-vi.mock("../../lib/native-tools/index.ts", () => ({
-  getNativeToolGroupMap: manifestMocks.getNativeToolGroupMap,
-  getNativeToolTarget: manifestMocks.getNativeToolTarget,
+vi.mock("../../lib/integration-manifest-catalog.ts", () => ({
+  getActiveIntegrationManifestCatalog: manifestMocks.getCatalog,
 }));
 
 import { resolveIntegration } from "../../lib/integration-resolver.ts";
@@ -55,51 +47,63 @@ beforeEach(() => {
     fields: [{ key: "apiKey", label: "API Key", type: "password" }],
     confidence: "inferred",
   });
-  manifestMocks.getLoadedToolsSnapshot.mockReturnValue([]);
-  manifestMocks.getNativeToolGroupMap.mockReturnValue({});
-  manifestMocks.getNativeToolTarget.mockReturnValue(null);
-  manifestMocks.resolve.mockReturnValue({ manifests: [], diagnostics: [] });
+  manifestMocks.getCatalog.mockReturnValue({ manifests: [], diagnostics: [] });
 });
 
 describe("GET /manifests", () => {
-  it("uses the complete read-only catalog snapshot and native bindings", async () => {
-    const tool = { id: "active-tool", kind: "tool" };
+  it("uses the complete read-only manifest catalog", async () => {
     const snapshot = { manifests: [{ id: "tool.active-tool" }], diagnostics: [] };
-    manifestMocks.getLoadedToolsSnapshot.mockReturnValue([tool]);
-    manifestMocks.getNativeToolGroupMap.mockReturnValue({ native__active: {} });
-    manifestMocks.getNativeToolTarget.mockReturnValue({ kind: "tool", id: "active-tool" });
-    manifestMocks.resolve.mockReturnValue(snapshot);
+    manifestMocks.getCatalog.mockReturnValue(snapshot);
 
     const res = await request("/manifests");
 
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(manifestMocks.getLoadedToolsSnapshot).toHaveBeenCalledOnce();
-    expect(manifestMocks.loadTools).not.toHaveBeenCalled();
-    expect(manifestMocks.resolve).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tools: [tool],
-        nativeToolBindings: [
-          { capabilityId: "active-tool", operation: "native__active" },
-        ],
-      })
-    );
+    expect(manifestMocks.getCatalog).toHaveBeenCalledOnce();
     expect(await res.json()).toEqual({ data: snapshot });
   });
 
   it("returns an actionable retry response before the snapshot is initialized", async () => {
-    manifestMocks.getLoadedToolsSnapshot.mockReturnValue(null);
+    manifestMocks.getCatalog.mockReturnValue(null);
 
     const res = await request("/manifests");
 
     expect(res.status).toBe(503);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(manifestMocks.resolve).not.toHaveBeenCalled();
     expect(await res.json()).toEqual({
       error: {
         code: "CAPABILITY_CATALOG_NOT_READY",
         message: "The active integration catalog is still initializing. Retry shortly.",
       },
+    });
+  });
+});
+
+describe("GET /catalog", () => {
+  it("attaches exact active manifest and credential declaration references", async () => {
+    manifestMocks.getCatalog.mockReturnValue({
+      manifests: [
+        {
+          id: "provider.integration.github",
+          version: "7.0.0",
+          credentials: [{ id: "credential.github" }],
+          setup: [{ kind: "credential", credentialId: "credential.github" }],
+        },
+      ],
+      diagnostics: [],
+    });
+
+    const res = await request("/catalog");
+    const body = (await res.json()) as {
+      data: { entries: Array<Record<string, unknown>> };
+    };
+    const github = body.data.entries.find((entry) => entry.id === "integration:github");
+
+    expect(res.status).toBe(200);
+    expect(github).toMatchObject({
+      manifestId: "provider.integration.github",
+      manifestVersion: "7.0.0",
+      manifestCredentialId: "credential.github",
     });
   });
 });
@@ -124,16 +128,18 @@ describe("GET /research", () => {
     });
     const res = await request("/research?q=anthropic");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.source).toBe("provider-registry");
+    const body = (await res.json()) as { data: Record<string, unknown> };
+    expect(body.data.source).toBe("provider-registry");
+    expect(body).toMatchObject({ source: "provider-registry" });
     expect(mockResearch).not.toHaveBeenCalled();
   });
 
   it("falls back to AI research when not in registry", async () => {
     const res = await request("/research?q=unknown-service");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.source).toBe("ai-research");
+    const body = (await res.json()) as { data: Record<string, unknown> };
+    expect(body.data.source).toBe("ai-research");
+    expect(body).toMatchObject({ source: "ai-research" });
     expect(mockResearch).toHaveBeenCalledWith("unknown-service", { hintedSpecUrl: undefined });
   });
 

@@ -41,6 +41,7 @@ export * from "./types/context.js";
 export * from "./types/context-assembly.js";
 export * from "./types/memory-block.js";
 export * from "./types/integration-manifest.js";
+export * from "./types/integration-setup.js";
 
 // Lib
 export * from "./lib/validate-skill.js";

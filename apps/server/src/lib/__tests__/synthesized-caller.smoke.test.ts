@@ -16,6 +16,7 @@ let resolveCredentialChoice: typeof import("../credential-choice.ts").resolveCre
 let getSessionPin: typeof import("../../db/session-pin-store.ts").getSessionPin;
 let clearAllSessionPins: typeof import("../../db/session-pin-store.ts").clearAllSessionPins;
 let setWSInstance: typeof import("../../gateway/ws-instance.ts").setWSInstance;
+let setupStore: typeof import("../../db/integration-setup-store.ts");
 
 beforeAll(async () => {
   ({ callSynthesizedEndpoint } = await import("../synthesized-caller.ts"));
@@ -25,6 +26,7 @@ beforeAll(async () => {
     await import("../credential-choice.ts"));
   ({ getSessionPin, clearAllSessionPins } = await import("../../db/session-pin-store.ts"));
   ({ setWSInstance } = await import("../../gateway/ws-instance.ts"));
+  setupStore = await import("../../db/integration-setup-store.ts");
   setWSInstance({
     sendTo: () => true,
     getClientsBySessionId: () => ["ws-1"],
@@ -119,6 +121,24 @@ describe("synthesized-caller credentialId meta-arg", () => {
     const result = await callSynthesizedEndpoint(tool, "repos", { credentialId: "real-param" });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).not.toContain("invalid credentialId");
+  });
+
+  it("fails before network use when the selected credential requires reauthentication", async () => {
+    const credential = createCredential("Revoked GitHub", "github", { apiKey: "ghp_revoked" });
+    setupStore.upsertIntegrationCredentialBinding({
+      credentialId: credential.id,
+      integrationId: "github",
+      manifestCredentialId: "credential.github",
+      manifestVersion: "1.0.0",
+      authMethod: "api-key",
+      authStatus: "reauthentication-required",
+      failureCode: "credential_revoked",
+    });
+
+    const result = await callSynthesizedEndpoint(synthTool(), "repos", {});
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("reconnect it in Settings > Integrations");
   });
 
   it("asks the user when credential fallback is ambiguous", async () => {

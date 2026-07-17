@@ -1,11 +1,12 @@
+import { createHash } from "node:crypto";
 import type {
   EmbeddingProviderDef,
+  CurrentIntegrationCredential,
+  CurrentIntegrationOauth,
   ImageGenProviderDef,
-  IntegrationCredential,
   IntegrationCredentialFieldRef,
   IntegrationManifestDiagnostic,
-  IntegrationManifestV1,
-  IntegrationOauth,
+  IntegrationManifestV2,
   IntegrationOwner,
   IntegrationProviderDef,
   IntegrationRequestedAccess,
@@ -16,7 +17,11 @@ import type {
   ProviderField,
   Tool,
 } from "@chvor/shared";
-import { diagnoseIntegrationManifest, safeParseIntegrationManifest } from "@chvor/shared";
+import {
+  currentIntegrationManifestSchema,
+  diagnoseIntegrationManifest,
+  INTEGRATION_MANIFEST_SCHEMA_VERSION,
+} from "@chvor/shared";
 import {
   EMBEDDING_PROVIDERS,
   IMAGE_GEN_PROVIDERS,
@@ -51,7 +56,7 @@ export interface IntegrationManifestResolverDiagnostic extends IntegrationManife
 }
 
 export interface IntegrationManifestResolverResult {
-  manifests: IntegrationManifestV1[];
+  manifests: IntegrationManifestV2[];
   diagnostics: IntegrationManifestResolverDiagnostic[];
 }
 
@@ -80,6 +85,7 @@ export interface IntegrationManifestResolverOptions {
 interface BuildContext {
   kind: ResolverSourceKind;
   id: string;
+  usedLegacyVersion: boolean;
   warnings: IntegrationManifestResolverDiagnostic[];
 }
 
@@ -91,6 +97,7 @@ const EMPTY_ACCESS: IntegrationRequestedAccess = {
   environment: [],
 };
 const SKIP_SOURCE = Symbol("skip-integration-manifest-source");
+const unversionedManifests = new WeakSet<IntegrationManifestV2>();
 
 function diagnostic(
   context: Pick<BuildContext, "kind" | "id">,
@@ -164,6 +171,7 @@ function safeHttpsEndpoint(value: unknown): string | undefined {
 }
 function legacyVersion(value: unknown, context: BuildContext): string {
   if (typeof value === "string" && value.trim().length > 0) return value;
+  context.usedLegacyVersion = true;
   warning(
     context,
     "/version",
@@ -171,6 +179,31 @@ function legacyVersion(value: unknown, context: BuildContext): string {
     "Add a strict semantic version to the source declaration when it gains an independent release lifecycle."
   );
   return LEGACY_INTEGRATION_VERSION;
+}
+
+function canonicalizeManifestValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeManifestValue);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, entry]) => [key, canonicalizeManifestValue(entry)])
+  );
+}
+
+function contentPinnedLegacyVersion(manifest: IntegrationManifestV2): string {
+  const canonicalContent = JSON.stringify(canonicalizeManifestValue(manifest));
+  const digest = createHash("sha256").update(canonicalContent).digest("hex");
+  const base36Digest = BigInt(`0x${digest}`).toString(36).padStart(50, "0");
+  return `${LEGACY_INTEGRATION_VERSION}+sha256.${base36Digest}`;
+}
+
+function pinUnversionedManifest(manifest: IntegrationManifestV2): IntegrationManifestV2 {
+  if (!unversionedManifests.has(manifest) || manifest.version !== LEGACY_INTEGRATION_VERSION) {
+    return manifest;
+  }
+  return { ...manifest, version: contentPinnedLegacyVersion(manifest) };
 }
 function knownSensitivity(key: string, explicitText = false): "secret" | "text" | "url" | "path" {
   const normalized = key.toLowerCase();
@@ -193,15 +226,16 @@ function providerCredential(
   providerName: string,
   fields: readonly ProviderField[],
   genericWhenEmpty: boolean
-): IntegrationCredential[] {
+): CurrentIntegrationCredential[] {
   if (!credentialType || (fields.length === 0 && !genericWhenEmpty)) return [];
   const sourceFields =
     fields.length > 0 ? fields : [{ key: "apiKey", label: "API Key", type: "password" as const }];
-  const manifestFields: IntegrationCredential["fields"] = sourceFields.map((field) => {
+  const manifestFields: CurrentIntegrationCredential["fields"] = sourceFields.map((field) => {
     const sensitivity =
       field.type === "password" ? ("secret" as const) : knownSensitivity(field.key, true);
     const common = {
       id: declarationId(field.key, "field"),
+      storageKey: field.key,
       label: field.label,
       description: field.helpText ?? `Credential field used by ${providerName}.`,
       required: field.optional !== true,
@@ -226,7 +260,7 @@ function providerCredential(
   ];
 }
 function credentialRefs(
-  credentials: readonly IntegrationCredential[]
+  credentials: readonly CurrentIntegrationCredential[]
 ): IntegrationCredentialFieldRef[] {
   return credentials.flatMap((credential) =>
     credential.fields.map((field) => ({
@@ -241,12 +275,12 @@ function copyCredentialRefs(
   return refs.map((ref) => ({ credentialId: ref.credentialId, fieldId: ref.fieldId }));
 }
 function setupDeclarations(
-  credentials: readonly IntegrationCredential[],
-  oauth: readonly IntegrationOauth[],
+  credentials: readonly CurrentIntegrationCredential[],
+  oauth: readonly CurrentIntegrationOauth[],
   toolIds: readonly string[]
-): { setup: IntegrationSetupStep[]; diagnostics: IntegrationManifestV1["diagnostics"] } {
+): { setup: IntegrationSetupStep[]; diagnostics: IntegrationManifestV2["diagnostics"] } {
   const setup: IntegrationSetupStep[] = [];
-  const diagnostics: IntegrationManifestV1["diagnostics"] = [];
+  const diagnostics: IntegrationManifestV2["diagnostics"] = [];
   for (const credential of credentials) {
     setup.push({
       id: `setup.${credential.id}`,
@@ -333,8 +367,9 @@ function collectCandidate(
     result.diagnostics.push(...context.warnings);
     return;
   }
-  const parsed = safeParseIntegrationManifest(candidate);
+  const parsed = currentIntegrationManifestSchema.safeParse(candidate);
   if (parsed.success) {
+    if (context.usedLegacyVersion) unversionedManifests.add(parsed.data);
     result.manifests.push(parsed.data);
     result.diagnostics.push(...context.warnings);
     return;
@@ -369,6 +404,7 @@ function adaptEach<T>(
     const context: BuildContext = {
       kind,
       id: safeDiagnosticSourceId(value, `${kind}-${index}`),
+      usedLegacyVersion: false,
       warnings: [],
     };
     try {
@@ -397,7 +433,7 @@ function providerAccess(
   provider: ProviderValue,
   kind: ProviderKind,
   fields: readonly ProviderField[],
-  credentials: readonly IntegrationCredential[]
+  credentials: readonly CurrentIntegrationCredential[]
 ): IntegrationRequestedAccess {
   const usageUrls =
     kind === "integration" && "usageContext" in provider
@@ -444,7 +480,7 @@ function providerManifest(
   provider: ProviderValue,
   kind: ProviderKind,
   context: BuildContext
-): IntegrationManifestV1 {
+): IntegrationManifestV2 {
   const providerFields = "requiredFields" in provider ? provider.requiredFields : [];
   const credentials = providerCredential(
     provider.credentialType,
@@ -468,7 +504,7 @@ function providerManifest(
       ];
   const declarations = setupDeclarations(credentials, [], integrationSetupOnly ? [] : [runtimeId]);
   return {
-    schemaVersion: 1,
+    schemaVersion: INTEGRATION_MANIFEST_SCHEMA_VERSION,
     id: manifestId(`provider.${kind}`, provider.id),
     version: legacyVersion(provider.version, context),
     name: provider.name,
@@ -529,7 +565,7 @@ function oauthManifest(
   direct: DirectOAuthProviderConfig | undefined,
   integrationProviders: readonly LegacyVersioned<IntegrationProviderDef>[],
   context: BuildContext
-): IntegrationManifestV1 {
+): IntegrationManifestV2 {
   const setupProvider =
     integrationProviders.find((item) => item.credentialType === provider.setupCredentialType) ??
     integrationProviders.find((item) => item.credentialType === "composio");
@@ -542,7 +578,7 @@ function oauthManifest(
       )
     : [];
   const refs = credentialRefs(credentials);
-  const oauth: IntegrationOauth[] = [];
+  const oauth: CurrentIntegrationOauth[] = [];
   if (provider.method === "direct") {
     if (!direct) {
       warning(
@@ -563,6 +599,7 @@ function oauthManifest(
       oauth.push({
         id: "oauth.direct",
         mode: "direct",
+        provider: direct.id,
         authorizationUrl: direct.authUrl,
         tokenUrl: direct.tokenUrl,
         scopes: [...direct.scopes],
@@ -611,7 +648,7 @@ function oauthManifest(
     item.mode === "direct" ? [item.authorizationUrl, item.tokenUrl] : [item.brokerUrl]
   );
   return {
-    schemaVersion: 1,
+    schemaVersion: INTEGRATION_MANIFEST_SCHEMA_VERSION,
     id: manifestId("oauth", provider.id),
     version: legacyVersion(provider.version, context),
     name: provider.name,
@@ -683,11 +720,11 @@ export function adaptOAuthProviders(
   );
   return result;
 }
-function toolCredentials(tool: Tool): IntegrationCredential[] {
+function toolCredentials(tool: Tool): CurrentIntegrationCredential[] {
   const schema = tool.metadata.credentialSchema;
   const requiredTypes = new Set(tool.metadata.requires?.credentials ?? []);
   if (tool.synthesized?.credentialType) requiredTypes.add(tool.synthesized.credentialType);
-  const credentials: IntegrationCredential[] = [];
+  const credentials: CurrentIntegrationCredential[] = [];
   for (const credentialType of requiredTypes) {
     const matchesSchema = schema?.type === credentialType;
     const fields = matchesSchema
@@ -699,6 +736,7 @@ function toolCredentials(tool: Tool): IntegrationCredential[] {
       description: `Credential metadata required by ${tool.metadata.name}.`,
       fields: fields.map((field) => ({
         id: declarationId(field.key, "field"),
+        storageKey: field.key,
         label: field.label,
         description: field.helpText ?? `Credential field used by ${tool.metadata.name}.`,
         sensitivity:
@@ -722,7 +760,7 @@ function toolSource(
   tool: Tool,
   version: string,
   registryUrl: string
-): IntegrationManifestV1["source"] {
+): IntegrationManifestV2["source"] {
   if (tool.mcpServer?.transport === "synthesized") {
     return {
       kind: "synthesized",
@@ -773,7 +811,7 @@ function remoteMcpAccess(url: string): IntegrationRequestedAccess {
 function toolCapabilities(
   tool: Tool,
   tools: readonly IntegrationTool[]
-): IntegrationManifestV1["capabilities"] {
+): IntegrationManifestV2["capabilities"] {
   const provided = Object.keys(tool.metadata.provides ?? {});
   if (provided.length === tools.length && provided.length > 0) {
     return provided.map((capability, index) => ({
@@ -816,7 +854,7 @@ function mcpServerDeclaration(
 ) {
   const server = tool.mcpServer!;
   const operationNames = provided.map(([, operation]) => operation);
-  const discovery: IntegrationManifestV1["mcpServers"][number]["discovery"] =
+  const discovery: IntegrationManifestV2["mcpServers"][number]["discovery"] =
     operationNames.length === 0
       ? { mode: "runtime" }
       : { mode: "static", tools: [...operationNames] };
@@ -908,9 +946,7 @@ function nativeToolAccess(context: BuildContext): IntegrationRequestedAccess {
   );
   return {
     network: [{ kind: "unknown", enforcement: "declared-only" }],
-    filesystem: [
-      { kind: "unknown", access: "read-write", enforcement: "declared-only" },
-    ],
+    filesystem: [{ kind: "unknown", access: "read-write", enforcement: "declared-only" }],
     process: [{ kind: "unknown", access: "spawn", enforcement: "declared-only" }],
     environment: [{ kind: "unknown", access: "read", enforcement: "declared-only" }],
   };
@@ -949,7 +985,7 @@ function activeToolManifest(
   context: BuildContext,
   registryUrl: string,
   nativeToolBindings: readonly NativeToolBinding[]
-): IntegrationManifestV1 | typeof SKIP_SOURCE {
+): IntegrationManifestV2 | typeof SKIP_SOURCE {
   const metadata = tool.metadata;
   if (!metadata || typeof metadata.name !== "string" || typeof metadata.description !== "string") {
     throw new Error("Active Tool metadata is incomplete");
@@ -958,8 +994,7 @@ function activeToolManifest(
   const credentials = toolCredentials(tool);
   const refs = credentialRefs(credentials);
   const boundNativeTools = nativeTools(tool, refs, nativeToolBindings);
-  const boundNativeAccess =
-    boundNativeTools.length > 0 ? nativeToolAccess(context) : EMPTY_ACCESS;
+  const boundNativeAccess = boundNativeTools.length > 0 ? nativeToolAccess(context) : EMPTY_ACCESS;
   const synthesized = tool.mcpServer?.transport === "synthesized";
   const declaration = !tool.mcpServer
     ? (() => {
@@ -984,17 +1019,17 @@ function activeToolManifest(
           };
         })()
       : (() => {
-        const provided = Object.entries(tool.metadata.provides ?? {});
-        const server = mcpServerDeclaration(tool, refs, provided);
-        const serverAccess =
-          tool.mcpServer!.transport === "stdio"
-            ? stdioAccess(tool, context)
-            : remoteMcpAccess(server.transport === "stdio" ? "" : server.url);
-        return {
-          mcpServers: [server],
-          tools: [...mcpTools(tool, refs, provided), ...boundNativeTools],
-          access: mergeRequestedAccess(serverAccess, boundNativeAccess),
-        };
+          const provided = Object.entries(tool.metadata.provides ?? {});
+          const server = mcpServerDeclaration(tool, refs, provided);
+          const serverAccess =
+            tool.mcpServer!.transport === "stdio"
+              ? stdioAccess(tool, context)
+              : remoteMcpAccess(server.transport === "stdio" ? "" : server.url);
+          return {
+            mcpServers: [server],
+            tools: [...mcpTools(tool, refs, provided), ...boundNativeTools],
+            access: mergeRequestedAccess(serverAccess, boundNativeAccess),
+          };
         })();
   if (declaration === SKIP_SOURCE) return SKIP_SOURCE;
   const toolIds = declaration.tools.map((item) => item.id);
@@ -1022,7 +1057,7 @@ function activeToolManifest(
         ]
       : [];
   return {
-    schemaVersion: 1,
+    schemaVersion: INTEGRATION_MANIFEST_SCHEMA_VERSION,
     id: manifestId("tool", tool.id),
     version,
     name: tool.metadata.name,
@@ -1059,7 +1094,9 @@ export function resolveIntegrationManifests(
   const oauthResult = adaptOAuthProviders(options);
   const toolResult = adaptActiveTools(options);
   return {
-    manifests: [...providerResult.manifests, ...oauthResult.manifests, ...toolResult.manifests],
+    manifests: [...providerResult.manifests, ...oauthResult.manifests, ...toolResult.manifests].map(
+      pinUnversionedManifest
+    ),
     diagnostics: [
       ...providerResult.diagnostics,
       ...oauthResult.diagnostics,

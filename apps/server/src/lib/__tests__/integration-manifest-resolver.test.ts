@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Tool } from "@chvor/shared";
-import { safeParseIntegrationManifest } from "@chvor/shared";
+import {
+  currentIntegrationManifestSchema,
+  INTEGRATION_MANIFEST_SCHEMA_VERSION,
+} from "@chvor/shared";
 import { getBundledCapabilities } from "../capability-loader.ts";
 import { getNativeToolGroupMap, getNativeToolTarget } from "../native-tools/index.ts";
 import { DIRECT_OAUTH_PROVIDERS } from "../oauth-providers.ts";
@@ -120,7 +123,11 @@ function nativeToolBindings() {
 
 function expectValidManifests(manifests: readonly unknown[]): void {
   for (const manifest of manifests) {
-    expect(safeParseIntegrationManifest(manifest).success).toBe(true);
+    const result = currentIntegrationManifestSchema.safeParse(manifest);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.schemaVersion).toBe(INTEGRATION_MANIFEST_SCHEMA_VERSION);
+    }
   }
 }
 
@@ -145,7 +152,7 @@ function declarationIds(manifest: {
 }
 
 describe("complete catalog identity and provider adapters", () => {
-  it("emits a deterministic, globally unique namespaced default catalog", () => {
+  it("emits a deterministic v2, globally unique namespaced default catalog", () => {
     const first = resolveIntegrationManifests();
     const second = resolveIntegrationManifests();
     const expectedCount =
@@ -171,6 +178,47 @@ describe("complete catalog identity and provider adapters", () => {
     }
     expect(first.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expectValidManifests(first.manifests);
+  });
+
+  it("pins only unversioned manifests to stable content-derived semantic versions", () => {
+    const provider = {
+      ...LLM_PROVIDERS[0],
+      id: "content-pinned-llm",
+      name: "Content-pinned LLM",
+    };
+    const resolveProvider = (entry: typeof provider & { version?: string }) =>
+      resolveIntegrationManifests({
+        llmProviders: [entry],
+        embeddingProviders: [],
+        integrationProviders: [],
+        imageProviders: [],
+        oauthProviders: [],
+        directOAuthProviders: [],
+        tools: [],
+      }).manifests[0];
+
+    const adapted = adaptProviderDefinitions({
+      llmProviders: [provider],
+      embeddingProviders: [],
+      integrationProviders: [],
+      imageProviders: [],
+    }).manifests[0];
+    const first = resolveProvider(provider);
+    const second = resolveProvider(structuredClone(provider));
+    const changed = resolveProvider({ ...provider, name: "Content-pinned LLM v2" });
+
+    expect(adapted.version).toBe(LEGACY_INTEGRATION_VERSION);
+    expect(first.version).toBe(second.version);
+    expect(first.version).toMatch(/^0\.0\.0\+sha256\.[0-9a-z]{50}$/);
+    expect(first.version.length).toBeLessThanOrEqual(64);
+    expect(changed.version).not.toBe(first.version);
+    expect(currentIntegrationManifestSchema.safeParse(first).success).toBe(true);
+
+    for (const explicitVersion of ["0.0.0", "2.4.6+vendor.1"]) {
+      expect(resolveProvider({ ...provider, version: explicitVersion }).version).toBe(
+        explicitVersion
+      );
+    }
   });
 
   it("composes the real bundled Tool catalog without errors for native metadata", () => {
@@ -200,8 +248,7 @@ describe("complete catalog identity and provider adapters", () => {
       ]);
     }
     const mixedRuntimeTools = tools.filter(
-      (tool) =>
-        tool.mcpServer && bindings.some((binding) => binding.capabilityId === tool.id)
+      (tool) => tool.mcpServer && bindings.some((binding) => binding.capabilityId === tool.id)
     );
     expect(mixedRuntimeTools.length).toBeGreaterThan(0);
     for (const tool of mixedRuntimeTools) {
@@ -295,8 +342,13 @@ describe("complete catalog identity and provider adapters", () => {
     expect(provider).toEqual(before);
     expect(manifest.version).toBe(LEGACY_INTEGRATION_VERSION);
     expect(manifest.credentials[0].fields).toMatchObject([
-      { sensitivity: "secret", required: true },
-      { sensitivity: "url", required: true, default: "https://llm.example.com/v1" },
+      { storageKey: "apiKey", sensitivity: "secret", required: true },
+      {
+        storageKey: "baseUrl",
+        sensitivity: "url",
+        required: true,
+        default: "https://llm.example.com/v1",
+      },
     ]);
     expect(
       manifest.diagnostics
@@ -369,6 +421,37 @@ describe("complete catalog identity and provider adapters", () => {
 });
 
 describe("OAuth metadata joins", () => {
+  it("preserves real Google OAuth runtime keys alongside normalized manifest IDs", () => {
+    const google = OAUTH_PROVIDERS.find((provider) => provider.id === "google")!;
+    const googleSetup = INTEGRATION_PROVIDERS.find((provider) => provider.id === "google-oauth")!;
+    const result = adaptOAuthProviders({
+      oauthProviders: [google],
+      integrationProviders: [googleSetup],
+    });
+    const manifest = result.manifests[0];
+
+    expect(manifest.id).toBe("oauth.google");
+    expect(manifest.credentials).toMatchObject([
+      {
+        id: "credential.google-oauth",
+        fields: [
+          { id: "client-id", storageKey: "clientId" },
+          { id: "client-secret", storageKey: "clientSecret" },
+        ],
+      },
+    ]);
+    expect(manifest.oauth[0]).toMatchObject({
+      mode: "direct",
+      clientId: { credentialId: "credential.google-oauth", fieldId: "client-id" },
+      clientSecret: {
+        credentialId: "credential.google-oauth",
+        fieldId: "client-secret",
+      },
+    });
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expectValidManifests(result.manifests);
+  });
+
   it("joins the default DIRECT_OAUTH_PROVIDERS metadata without reading secrets", () => {
     const result = adaptOAuthProviders();
 
@@ -541,6 +624,17 @@ describe("synthesized OpenAPI declarations", () => {
 });
 
 describe("MCP discovery and operation declarations", () => {
+  it("preserves active Tool credential runtime keys", () => {
+    const result = adaptActiveTools({ tools: [toolFixture()] });
+
+    expect(result.manifests[0].credentials[0].fields).toMatchObject([
+      { id: "api-key", storageKey: "apiKey" },
+      { id: "base-url", storageKey: "baseUrl" },
+      { id: "workspace-path", storageKey: "workspacePath" },
+    ]);
+    expectValidManifests(result.manifests);
+  });
+
   it("represents an MCP server without metadata.provides as discovery-only", () => {
     const tool = toolFixture({
       id: "discoverable-mcp",

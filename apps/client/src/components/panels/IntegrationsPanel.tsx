@@ -2,8 +2,64 @@ import { useEffect, useState } from "react";
 import { useFeatureStore } from "../../stores/feature-store";
 import { AddCredentialDialog } from "../credentials/AddCredentialDialog";
 import { OAuthConnectButton } from "../credentials/OAuthConnectButton";
+import { IntegrationSetupFlow } from "../integrations/IntegrationSetupFlow";
 import { ProviderIcon } from "@/components/ui/ProviderIcon";
+import { api } from "@/lib/api";
 import { useUIStore } from "../../stores/ui-store";
+import type { IntegrationManifest, OAuthConnection } from "@chvor/shared";
+
+interface ReauthenticationSetupTarget {
+  manifest: IntegrationManifest;
+  credentialType: string;
+  manifestCredentialId: string;
+  targetCredentialId: string;
+  oauthCredentialId: string;
+}
+
+const REAUTHENTICATION_STATUSES = new Set(["expired", "revoked", "reauthentication-required"]);
+
+function connectionNeedsReauthentication(connection: OAuthConnection): boolean {
+  return (
+    connection.needsReauthentication === true ||
+    (connection.authStatus !== undefined && REAUTHENTICATION_STATUSES.has(connection.authStatus))
+  );
+}
+
+function exactReauthenticationSetupTarget(
+  connection: OAuthConnection,
+  manifests: readonly IntegrationManifest[]
+): ReauthenticationSetupTarget | undefined {
+  const target = connection.reauthenticationTarget;
+  if (!target || connection.credentialId !== target.oauthCredentialId) return undefined;
+  const matching = manifests.filter(
+    (manifest) =>
+      manifest.id === target.integrationId && manifest.version === target.manifestVersion
+  );
+  if (matching.length !== 1) return undefined;
+  const manifest = matching[0];
+  const credential = manifest.credentials.find(
+    (candidate) => candidate.id === target.manifestCredentialId
+  );
+  const declaration = manifest.oauth.find(
+    (candidate) => candidate.id === target.oauthManifestCredentialId
+  );
+  if (
+    !credential ||
+    !declaration ||
+    declaration.mode !== "direct" ||
+    declaration.clientId.credentialId !== credential.id ||
+    (declaration.clientSecret && declaration.clientSecret.credentialId !== credential.id)
+  ) {
+    return undefined;
+  }
+  return {
+    manifest,
+    credentialType: target.credentialType,
+    manifestCredentialId: credential.id,
+    targetCredentialId: target.targetCredentialId,
+    oauthCredentialId: target.oauthCredentialId,
+  };
+}
 
 export function IntegrationsPanel() {
   const {
@@ -21,6 +77,10 @@ export function IntegrationsPanel() {
   const [addCredType, setAddCredType] = useState<string | undefined>(undefined);
   const [editingCredential, setEditingCredential] = useState<typeof credentials[0] | null>(null);
   const [composioExpanded, setComposioExpanded] = useState(false);
+  const [reauthenticationTarget, setReauthenticationTarget] =
+    useState<ReauthenticationSetupTarget | null>(null);
+  const [reauthenticationLoadingId, setReauthenticationLoadingId] = useState<string | null>(null);
+  const [reauthenticationError, setReauthenticationError] = useState<string | null>(null);
   const openPanel = useUIStore((s) => s.openPanel);
 
   useEffect(() => {
@@ -48,6 +108,33 @@ export function IntegrationsPanel() {
   const handleAddWithProvider = (credType: string) => {
     setAddCredType(credType);
     setShowAdd(true);
+  };
+
+  const handleReauthenticate = async (connection: OAuthConnection) => {
+    if (!connection.reauthenticationTarget) {
+      openPanel("integration-catalog");
+      return;
+    }
+    setReauthenticationLoadingId(connection.id);
+    setReauthenticationError(null);
+    try {
+      const catalog = await api.integrations.manifests();
+      const target = exactReauthenticationSetupTarget(connection, catalog.manifests);
+      if (!target) {
+        throw new Error(
+          "The saved OAuth account no longer matches an active integration manifest."
+        );
+      }
+      setReauthenticationTarget(target);
+    } catch (reauthError) {
+      setReauthenticationError(
+        reauthError instanceof Error
+          ? reauthError.message
+          : "This OAuth account cannot be reauthenticated safely."
+      );
+    } finally {
+      setReauthenticationLoadingId(null);
+    }
   };
 
   if (loading) {
@@ -168,6 +255,15 @@ export function IntegrationsPanel() {
         </div>
       )}
 
+      {reauthenticationError && (
+        <div
+          role="alert"
+          className="rounded-md bg-destructive/10 px-3 py-2 text-[10px] text-destructive"
+        >
+          {reauthenticationError} Use the integration catalog to review the saved connection.
+        </div>
+      )}
+
       {/* Direct OAuth accounts (Google, Reddit — no third-party needed) */}
       {directOAuthProviders.length > 0 && (
         <div>
@@ -175,24 +271,67 @@ export function IntegrationsPanel() {
             Direct connect
           </p>
           <div className="flex flex-col gap-2">
-            {directOAuthProviders.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/5 p-3"
-              >
-                <ProviderIcon icon={p.icon} size={18} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-foreground">{p.name}</p>
-                  <p className="text-[9px] text-muted-foreground/60 line-clamp-1">{p.description}</p>
+            {directOAuthProviders.map((p) => {
+              const candidates = oauthConnections.filter(
+                (connection) => connection.method === "direct" && connection.platform === p.id
+              );
+              const reauthenticationCandidates = candidates.filter(connectionNeedsReauthentication);
+              const exactReauthentication =
+                candidates.length === 1 && reauthenticationCandidates.length === 1
+                  ? reauthenticationCandidates[0]
+                  : undefined;
+              const providerNeedsReauthentication =
+                (p as typeof p & { needsReauthentication?: boolean }).needsReauthentication ===
+                true;
+              const requiresManifestReauthentication =
+                providerNeedsReauthentication || reauthenticationCandidates.length > 0;
+              const canReauthenticate = !!exactReauthentication?.reauthenticationTarget;
+              const actionLabel =
+                candidates.length > 1
+                  ? "Review accounts"
+                  : canReauthenticate
+                    ? "Reconnect"
+                    : "Review in catalog";
+              return (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/5 p-3"
+                >
+                  <ProviderIcon icon={p.icon} size={18} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-foreground">{p.name}</p>
+                    <p className="text-[9px] text-muted-foreground/60 line-clamp-1">
+                      {p.description}
+                    </p>
+                  </div>
+                  {requiresManifestReauthentication ? (
+                    <button
+                      type="button"
+                      disabled={reauthenticationLoadingId === exactReauthentication?.id}
+                      onClick={() => {
+                        if (canReauthenticate && exactReauthentication) {
+                          void handleReauthenticate(exactReauthentication);
+                        } else {
+                          openPanel("integration-catalog");
+                        }
+                      }}
+                      className="rounded-md bg-primary/10 px-2.5 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+                    >
+                      {reauthenticationLoadingId === exactReauthentication?.id
+                        ? "Loading…"
+                        : actionLabel}
+                    </button>
+                  ) : (
+                    <OAuthConnectButton
+                      provider={p}
+                      compact
+                      onConnected={fetchOAuthState}
+                      onSetupRequired={handleAddWithProvider}
+                    />
+                  )}
                 </div>
-                <OAuthConnectButton
-                  provider={p}
-                  compact
-                  onConnected={fetchOAuthState}
-                  onSetupRequired={handleAddWithProvider}
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -285,6 +424,26 @@ export function IntegrationsPanel() {
         <AddCredentialDialog
           onClose={() => { setEditingCredential(null); fetchAll(); }}
           editCredential={editingCredential}
+        />
+      )}
+
+      {reauthenticationTarget && (
+        <IntegrationSetupFlow
+          manifest={reauthenticationTarget.manifest}
+          credentialType={reauthenticationTarget.credentialType}
+          manifestCredentialId={reauthenticationTarget.manifestCredentialId}
+          mode="reauthenticate"
+          targetCredentialId={reauthenticationTarget.targetCredentialId}
+          oauthCredentialId={reauthenticationTarget.oauthCredentialId}
+          onCompleted={() => {
+            fetchAll();
+            fetchOAuthState();
+          }}
+          onClose={() => {
+            setReauthenticationTarget(null);
+            fetchAll();
+            fetchOAuthState();
+          }}
         />
       )}
     </div>
